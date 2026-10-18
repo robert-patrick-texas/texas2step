@@ -197,19 +197,19 @@
   --notice-ink: #d2d8e4;
 }
 
-/* America: Old Glory red and blue on crisp white, a flag stripe and a faint field of
-   stars. */
+/* America: Old Glory red and blue on a cool white, a flag stripe and a faint field of
+   stars. Blue leads; red is the accent. */
 [data-theme="america"] {
   color-scheme: light;
-  --page: #f7f7f5;
+  --page: #f2f5fa;
   --surface: #ffffff;
-  --surface-2: #f3f4f7;
+  --surface-2: #eef2f8;
   --ink: #0a1630;
-  --ink-2: #3b4458;
-  --muted: #687084;
-  --grid: #e4e6eb;
-  --axis: #c3c8d3;
-  --border: rgba(10, 49, 97, 0.12);
+  --ink-2: #33405c;
+  --muted: #5f6b86;
+  --grid: #e0e5ee;
+  --axis: #bcc6d8;
+  --border: rgba(10, 49, 97, 0.15);
   --shadow: 0 1px 2px rgba(10, 22, 48, 0.05), 0 12px 30px -18px rgba(10, 22, 48, 0.3);
   --dl: #2a78d6;
   --ul: #eb6834;
@@ -219,9 +219,9 @@
   --idle-from: #8fdcbf;
   --good-ink: #006300;
   --sun-1: #b31942;
-  --sun-2: #b31942;
+  --sun-2: #1d4c95;
   --sun-3: #0a3161;
-  --brand: linear-gradient(125deg, #c8203f, #b31942 35%, #0a3161);
+  --brand: linear-gradient(125deg, #c8203f, #b31942 16%, #0a3161 58%, #163f80);
   --mark-1: #0a3161;
   --mark-2: #0a3161;
   --mark-3: #b31942;
@@ -420,6 +420,13 @@ button {
   font-weight: 600;
   max-width: 260px;
   cursor: pointer;
+}
+
+/* The open list sits on the browser's own white unless told otherwise, which leaves the
+   light text of a dark header unreadable. */
+.picker-select option {
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .icon-btn {
@@ -733,18 +740,22 @@ a.brand-org:hover,
     var(--page);
 }
 
+[data-theme="america"] .topbar {
+  background: color-mix(in srgb, #dfe7f4 85%, transparent);
+}
+
 [data-theme="america"] .topbar::before {
   top: 0;
   height: 4px;
   background:
-    linear-gradient(90deg, #0a3161 0 22%, transparent 22%),
+    linear-gradient(90deg, #0a3161 0 40%, transparent 40%),
     repeating-linear-gradient(90deg, #b31942 0 18px, #ffffff 18px 30px);
 }
 
 [data-theme="america"] .backdrop {
   background:
-    radial-gradient(55vw 34vw at 0% -12%, color-mix(in srgb, #0a3161 10%, transparent), transparent 70%),
-    radial-gradient(55vw 34vw at 100% -12%, color-mix(in srgb, #b31942 8%, transparent), transparent 70%),
+    radial-gradient(55vw 34vw at 0% -12%, color-mix(in srgb, #0a3161 18%, transparent), transparent 70%),
+    radial-gradient(55vw 34vw at 100% -12%, color-mix(in srgb, #1d4c95 12%, transparent), transparent 70%),
     var(--page);
 }
 
@@ -752,7 +763,7 @@ a.brand-org:hover,
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle, color-mix(in srgb, #0a3161 26%, transparent) 1.2px, transparent 1.8px)
+  background: radial-gradient(circle, color-mix(in srgb, #0a3161 34%, transparent) 1.2px, transparent 1.8px)
     0 0 / 24px 24px;
   -webkit-mask-image: radial-gradient(58vw 32vw at 0% 0%, #000, transparent 72%);
   mask-image: radial-gradient(58vw 32vw at 0% 0%, #000, transparent 72%);

@@ -87,7 +87,7 @@ url = "mailto:noc@acme.example"
   | Light, Dark | The original texas2step look: warm neutrals and a Texas-sunset accent |
   | Federal | Deep-navy masthead with a gold rule, cool grey-blue surfaces, serif headings and crisp corners, in the style of federal websites such as whitehouse.gov and energy.gov (colours and type only, no seals or insignia) |
   | Texas | Night-sky navy, a red-to-gold horizon and a blue, white and red rule under the header |
-  | America | Crisp white with Old Glory red and blue, a flag-stripe band and a faint field of stars |
+  | America | Cool white with Old Glory blue and red, a flag-stripe band and a faint field of stars |
 
   Charts keep the same validated data colours in every theme, so results look the same
   whichever theme took them.
