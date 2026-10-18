@@ -115,6 +115,11 @@ export class App {
     return loc.url;
   }
 
+  /** An endpoint for any listed server, in the chosen address family. */
+  endpointFor(loc: Location): Endpoint {
+    return new Endpoint(this.baseFor(loc));
+  }
+
   async select(loc: Location | null): Promise<void> {
     this.selected = loc;
     if (loc) save("t2s.server", { id: loc.id });

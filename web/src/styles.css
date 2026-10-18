@@ -1327,6 +1327,10 @@ a.brand-org:hover,
   margin-bottom: 20px;
 }
 
+.tiles[hidden] {
+  display: none;
+}
+
 .tile {
   padding: 11px 15px;
   border-radius: 14px;
@@ -2089,9 +2093,93 @@ a.brand-org:hover,
 }
 
 .strip-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 10px 0 4px 46px;
   font-size: 12px;
   color: var(--muted);
+}
+
+/* Monitor with two destinations: the server choices sit in the toolbar like any other
+   option, and the comparison table leads the chart card. */
+.dest-box {
+  display: contents;
+}
+
+.opt-label .legend-key {
+  vertical-align: 1px;
+}
+
+.dest-select {
+  max-width: 260px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.dest-select option {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.dest-select:disabled,
+.seg button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.compare-wrap {
+  margin-bottom: 12px;
+}
+
+.table.compare th,
+.table.compare td {
+  padding: 5px 10px;
+}
+
+.table.compare thead th {
+  vertical-align: bottom;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.table.compare thead th:last-child {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.table.compare tbody td {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.table.compare tbody td:last-child {
+  color: var(--ink-2);
+  font-weight: 550;
+}
+
+.table.compare td.bad {
+  color: var(--critical);
+}
+
+.compare-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.compare-sub {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .empty-card {
@@ -2327,6 +2415,21 @@ a.brand-org:hover,
 /* Phones have pinch-zoom; the size picker would only crowd the header. */
 @media (max-width: 600px) {
   #size-picker {
+    display: none;
+  }
+
+  /* Four columns on a phone: names wrap, and the place and transport give way. */
+  .table.compare th,
+  .table.compare td {
+    padding: 5px 6px;
+    font-size: 13px;
+  }
+
+  .table.compare thead th {
+    white-space: normal;
+  }
+
+  .compare-sub {
     display: none;
   }
 }

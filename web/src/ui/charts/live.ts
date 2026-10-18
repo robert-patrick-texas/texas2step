@@ -1,22 +1,34 @@
 // Scrolling RTT chart for the monitor: one dot per probe, lost probes as ticks on top,
-// and a per-second loss strip underneath.
-import { cssVar, h, onResize, pointerIn } from "../dom";
+// and a per-second loss strip underneath. It draws one series, or two (one per server)
+// on shared axes, so two paths can be compared directly.
+import { clear, cssVar, h, onResize, pointerIn } from "../dom";
 import { compact, ms, niceTicks, pct, text } from "../format";
 import { onSizeChange } from "../size";
 import { onThemeChange } from "../theme";
 import { hideTip, showTip } from "../tooltip";
+import { log125 } from "./common";
 
 export interface LiveSample {
   t: number; // ms since epoch
   rtt: number | null; // null = lost
 }
 
+export interface LiveSeries {
+  label: string; // "" for a lone series
+  short: string; // marks its row of lost-probe ticks, e.g. "A"
+  token: string; // colour, as a CSS custom property name
+}
+
+const LONE: LiveSeries = { label: "", short: "", token: "--idle" };
+
 export class LiveChart {
   readonly el: HTMLElement;
   private canvas: HTMLCanvasElement;
-  private strip: HTMLCanvasElement;
-  private samples: LiveSample[] = [];
+  private strips: HTMLCanvasElement[] = [];
+  private stripBox: HTMLElement;
+  private series: (LiveSeries & { samples: LiveSample[] })[] = [];
   private windowS = 60;
+  private log = false;
   private width = 0;
   private raf = 0;
   private hoverX: number | null = null;
@@ -24,8 +36,9 @@ export class LiveChart {
 
   constructor() {
     this.canvas = h("canvas", { class: "live-canvas", role: "img", "aria-label": "Round-trip time over the monitoring window" });
-    this.strip = h("canvas", { class: "loss-strip", role: "img", "aria-label": "Packet loss per second" });
-    this.el = h("div", { class: "chart live" }, this.canvas, h("div", { class: "strip-label" }, "Loss per second"), this.strip);
+    this.stripBox = h("div", {});
+    this.el = h("div", { class: "chart live" }, this.canvas, this.stripBox);
+    this.setSeries([LONE]);
     onResize(this.el, (w) => {
       this.width = w;
       this.draw();
@@ -46,29 +59,51 @@ export class LiveChart {
     });
   }
 
+  /** Start over with these series (one per server), each with its own loss strip. */
+  setSeries(list: LiveSeries[]): void {
+    this.series = list.map((s) => ({ ...s, samples: [] }));
+    this.m.top = 4 + 10 * list.length;
+    this.m.right = list.length > 1 ? 24 : 12; // room to name each row of lost-probe ticks
+    clear(this.stripBox);
+    this.strips = this.series.map((s) => {
+      const strip = h("canvas", { class: "loss-strip", role: "img", "aria-label": s.label ? `Packet loss per second, ${s.label}` : "Packet loss per second" });
+      const key = s.label ? h("span", { class: "legend-key dot", style: `--key:var(${s.token})` }) : null;
+      this.stripBox.append(h("div", { class: "strip-label" }, key, s.label ? `Loss per second · ${s.label}` : "Loss per second"), strip);
+      return strip;
+    });
+    this.draw();
+  }
+
   setWindow(seconds: number): void {
     this.windowS = seconds;
     this.draw();
   }
 
-  clear(): void {
-    this.samples = [];
+  setLog(log: boolean): void {
+    this.log = log;
     this.draw();
   }
 
-  push(sample: LiveSample): void {
-    this.samples.push(sample);
+  clear(): void {
+    for (const s of this.series) s.samples = [];
+    this.draw();
+  }
+
+  push(sample: LiveSample, series = 0): void {
+    const s = this.series[series];
+    if (!s) return;
+    s.samples.push(sample);
     const cutoff = Date.now() - 15 * 60 * 1000;
-    while (this.samples.length && this.samples[0]!.t < cutoff) this.samples.shift();
+    while (s.samples.length && s.samples[0]!.t < cutoff) s.samples.shift();
     this.raf ||= requestAnimationFrame(() => {
       this.raf = 0;
       this.draw();
     });
   }
 
-  visible(): LiveSample[] {
+  visible(series = 0): LiveSample[] {
     const from = Date.now() - this.windowS * 1000;
-    return this.samples.filter((s) => s.t >= from);
+    return (this.series[series]?.samples ?? []).filter((s) => s.t >= from);
   }
 
   private setup(canvas: HTMLCanvasElement, H: number): CanvasRenderingContext2D {
@@ -85,7 +120,7 @@ export class LiveChart {
   private plotHeight(): number {
     const box = this.canvas.getBoundingClientRect();
     const k = box.width ? this.width / box.width : 1; // layout pixels per screen pixel
-    const below = 96; // the loss strip, its label and the card's padding
+    const below = 52 + 44 * this.series.length; // the loss strips, their labels and the card's padding
     const room = (window.innerHeight - box.top - window.scrollY) * k - below;
     return Math.round(Math.min(340, Math.max(170, room)));
   }
@@ -98,21 +133,29 @@ export class LiveChart {
     const ctx = this.setup(this.canvas, H);
     const now = Date.now();
     const from = now - this.windowS * 1000;
-    const data = this.visible();
-    const got = data.filter((d) => d.rtt !== null).map((d) => d.rtt!) as number[];
+    const data = this.series.map((_, i) => this.visible(i));
+    const got = data.flat().filter((d) => d.rtt !== null).map((d) => d.rtt!);
     const sorted = [...got].sort((a, b) => a - b);
     const p99 = sorted[Math.floor(sorted.length * 0.99)] ?? 10;
-    const ticks = niceTicks(Math.max(1, p99 * 1.25), 4);
-    const ymax = ticks[ticks.length - 1]!;
+    let ticks: number[];
+    let y: (v: number) => number;
+    if (this.log) {
+      const scale = log125(sorted[0] ?? 1, sorted[sorted.length - 1] ?? 10, H - bottom, top);
+      ticks = scale.ticks;
+      y = (v) => Math.max(top, scale(v));
+    } else {
+      ticks = niceTicks(Math.max(1, p99 * 1.25), 4);
+      const ymax = ticks[ticks.length - 1]!;
+      y = (v) => H - bottom - (Math.min(v, ymax) / ymax) * (H - top - bottom);
+    }
     const x = (t: number) => left + ((t - from) / (this.windowS * 1000)) * (W - left - right);
-    const y = (v: number) => H - bottom - (Math.min(v, ymax) / ymax) * (H - top - bottom);
-    const ink = { grid: cssVar("--grid"), axis: cssVar("--axis"), muted: cssVar("--muted"), idle: cssVar("--idle"), crit: cssVar("--critical"), surface: cssVar("--surface") };
+    const ink = { grid: cssVar("--grid"), axis: cssVar("--axis"), muted: cssVar("--muted"), crit: cssVar("--critical"), surface: cssVar("--surface") };
 
     ctx.font = "11px system-ui, sans-serif";
     ctx.textBaseline = "middle";
     ctx.textAlign = "right";
-    for (const t of ticks) {
-      ctx.strokeStyle = t === 0 ? ink.axis : ink.grid;
+    for (const [i, t] of ticks.entries()) {
+      ctx.strokeStyle = i === 0 ? ink.axis : ink.grid;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(left, Math.round(y(t)) + 0.5);
@@ -130,35 +173,48 @@ export class LiveChart {
     ctx.textAlign = "left";
     ctx.fillText("ms", 4, top);
 
-    // RTT trace: thin line, then dots when sparse enough to read individually.
-    ctx.strokeStyle = ink.idle;
-    ctx.globalAlpha = 0.45;
-    ctx.lineWidth = 1.25;
-    ctx.beginPath();
-    let pen = false;
-    for (const d of data) {
-      if (d.rtt === null) {
-        pen = false;
-        continue;
-      }
-      if (pen) ctx.lineTo(x(d.t), y(d.rtt));
-      else ctx.moveTo(x(d.t), y(d.rtt));
-      pen = true;
-    }
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-    const dense = data.length > (W - left - right) / 3;
-    ctx.fillStyle = ink.idle;
-    for (const d of data) {
-      if (d.rtt === null) continue;
+    const plotted = data.reduce((n, d) => n + d.length, 0);
+    const dense = plotted > (W - left - right) / 3;
+    for (const [i, s] of this.series.entries()) {
+      const color = cssVar(s.token);
+      // RTT trace: thin line, then dots when sparse enough to read individually.
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = 0.45;
+      ctx.lineWidth = 1.25;
       ctx.beginPath();
-      ctx.arc(x(d.t), y(d.rtt), dense ? 1.5 : 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.fillStyle = ink.crit;
-    for (const d of data) {
-      if (d.rtt !== null) continue;
-      ctx.fillRect(x(d.t) - 1, top - 10, 2, 8);
+      let pen = false;
+      for (const d of data[i]!) {
+        if (d.rtt === null) {
+          pen = false;
+          continue;
+        }
+        if (pen) ctx.lineTo(x(d.t), y(d.rtt));
+        else ctx.moveTo(x(d.t), y(d.rtt));
+        pen = true;
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = color;
+      for (const d of data[i]!) {
+        if (d.rtt === null) continue;
+        ctx.beginPath();
+        ctx.arc(x(d.t), y(d.rtt), dense ? 1.5 : 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Lost probes: a row of red ticks above the plot, one row per series.
+      const row = top - 10 * (this.series.length - i);
+      if (s.short) {
+        ctx.fillStyle = ink.muted;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.font = "600 9px system-ui, sans-serif";
+        ctx.fillText(s.short, W - right + 6, row + 4);
+      }
+      ctx.fillStyle = ink.crit;
+      for (const d of data[i]!) {
+        if (d.rtt !== null) continue;
+        ctx.fillRect(x(d.t) - 1, row, 2, 8);
+      }
     }
 
     if (this.hoverX !== null && this.hoverX >= left) {
@@ -169,16 +225,16 @@ export class LiveChart {
       ctx.stroke();
     }
 
-    this.drawStrip(from, ink);
+    for (const [i, strip] of this.strips.entries()) this.drawStrip(strip, data[i] ?? [], from, ink);
   }
 
-  private drawStrip(from: number, ink: Record<string, string>): void {
+  private drawStrip(strip: HTMLCanvasElement, data: LiveSample[], from: number, ink: Record<string, string>): void {
     const W = this.width;
     const H = 18;
-    const ctx = this.setup(this.strip, H);
+    const ctx = this.setup(strip, H);
     const { left, right } = this.m;
     const buckets = new Map<number, { sent: number; lost: number }>();
-    for (const d of this.visible()) {
+    for (const d of data) {
       const k = Math.floor((d.t - from) / 1000);
       const b = buckets.get(k) ?? { sent: 0, lost: 0 };
       b.sent++;
@@ -200,19 +256,37 @@ export class LiveChart {
   }
 
   private tip(ev: PointerEvent): void {
-    const data = this.visible();
     const { left, right } = this.m;
     const W = this.width;
     const from = Date.now() - this.windowS * 1000;
     const t = from + ((pointerIn(ev, this.canvas, W).x - left) / (W - left - right)) * this.windowS * 1000;
-    let best: LiveSample | undefined;
-    for (const d of data) if (!best || Math.abs(d.t - t) < Math.abs(best.t - t)) best = d;
-    if (!best) return hideTip();
-    const second = data.filter((d) => Math.abs(d.t - best.t) <= 500);
-    const lost = second.filter((d) => d.rtt === null).length;
-    showTip(ev.clientX, ev.clientY, new Date(best.t).toLocaleTimeString(), [
-      { value: best.rtt === null ? "Lost" : text(ms(best.rtt)), label: "round trip", color: "var(--idle)", shape: "dot" },
-      { value: text(pct(second.length ? (lost / second.length) * 100 : 0)), label: "loss in this second" },
-    ]);
+    const nearest = (data: LiveSample[]) => {
+      let best: LiveSample | undefined;
+      for (const d of data) if (!best || Math.abs(d.t - t) < Math.abs(best.t - t)) best = d;
+      return best && Math.abs(best.t - t) <= 1000 ? best : undefined;
+    };
+    const rows = this.series.map((s, i) => {
+      const data = this.visible(i);
+      const best = nearest(data);
+      const second = best ? data.filter((d) => Math.abs(d.t - best.t) <= 500) : [];
+      const lost = second.filter((d) => d.rtt === null).length;
+      return { s, best, loss: text(pct(second.length ? (lost / second.length) * 100 : 0)) };
+    });
+    const at = rows.map((r) => r.best).find((b) => b);
+    if (!at) return hideTip();
+    const rtt = (b: LiveSample | undefined) => (!b ? "—" : b.rtt === null ? "Lost" : text(ms(b.rtt)));
+    if (rows.length === 1) {
+      const [r] = rows as [(typeof rows)[number]];
+      return showTip(ev.clientX, ev.clientY, new Date(at.t).toLocaleTimeString(), [
+        { value: rtt(r.best), label: "round trip", color: `var(${r.s.token})`, shape: "dot" },
+        { value: r.loss, label: "loss in this second" },
+      ]);
+    }
+    showTip(
+      ev.clientX,
+      ev.clientY,
+      new Date(at.t).toLocaleTimeString(),
+      rows.map((r) => ({ value: rtt(r.best), label: `${r.s.label} · ${r.loss} loss this second`, color: `var(${r.s.token})`, shape: "dot" as const })),
+    );
   }
 }

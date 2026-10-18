@@ -132,10 +132,57 @@ def cmd_serve(args: argparse.Namespace) -> None:
     )
 
 
-def cmd_config_merge(args: argparse.Namespace) -> None:
+def _show_diff(path: Path, current: str, new: str, label: str) -> None:
     import difflib
+
+    diff = difflib.unified_diff(
+        current.splitlines(keepends=True),
+        new.splitlines(keepends=True),
+        fromfile=str(path),
+        tofile=f"{path} ({label})",
+    )
+    sys.stdout.writelines(diff)
+    print()
+
+
+def _write_settings(path: Path, text: str) -> None:
+    """Replace ``path`` with ``text`` atomically, keeping a dated backup and its owner."""
     import shutil
     import time
+
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = path.with_name(f"{path.name}.{stamp}.bak")
+    n = 1
+    while backup.exists():  # two edits in one second must not lose the first backup
+        n += 1
+        backup = path.with_name(f"{path.name}.{stamp}-{n}.bak")
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        if path.exists():
+            shutil.copy2(path, backup)
+        tmp.write_text(text)
+        if path.exists():
+            shutil.copymode(path, tmp)
+            st = path.stat()
+            if os.geteuid() == 0:
+                os.chown(tmp, st.st_uid, st.st_gid)
+        os.replace(tmp, path)
+    except OSError as exc:
+        sys.exit(f"texas2step: {exc}")
+    print(f"Wrote {path}" + (f"; the previous file is {backup}." if backup.exists() else "."))
+
+
+def _settings_text(path: Path) -> str:
+    """The settings file, or this version's template when there is none yet."""
+    from . import config_merge
+
+    try:
+        return path.read_text() if path.exists() else config_merge.TEMPLATE.read_text()
+    except OSError as exc:
+        sys.exit(f"texas2step: {exc}")
+
+
+def cmd_config_merge(args: argparse.Namespace) -> None:
     import tomllib
 
     from . import config_merge
@@ -154,14 +201,7 @@ def cmd_config_merge(args: argparse.Namespace) -> None:
         print(f"{path} is up to date with this version's template.")
         return
     if not args.write:
-        diff = difflib.unified_diff(
-            current.splitlines(keepends=True),
-            merged.text.splitlines(keepends=True),
-            fromfile=str(path),
-            tofile=f"{path} (merged)",
-        )
-        sys.stdout.writelines(diff)
-        print()
+        _show_diff(path, current, merged.text, "merged")
     print(f"Kept {len(merged.kept)} setting(s): {', '.join(merged.kept) or 'none'}")
     if merged.renamed:
         print(f"Renamed: {', '.join(merged.renamed)}")
@@ -171,21 +211,7 @@ def cmd_config_merge(args: argparse.Namespace) -> None:
         print("Nothing written. To apply: sudo texas2step config merge --write")
         return
 
-    backup = path.with_name(f"{path.name}.{time.strftime('%Y%m%d-%H%M%S')}.bak")
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        if path.exists():
-            shutil.copy2(path, backup)
-        tmp.write_text(merged.text)
-        if path.exists():
-            shutil.copymode(path, tmp)
-            st = path.stat()
-            if os.geteuid() == 0:
-                os.chown(tmp, st.st_uid, st.st_gid)
-        os.replace(tmp, path)
-    except OSError as exc:
-        sys.exit(f"texas2step: {exc}")
-    print(f"Wrote {path}" + (f"; the previous file is {backup}." if backup.exists() else "."))
+    _write_settings(path, merged.text)
     for leftover in (
         path.with_name(path.name + ".dpkg-dist"),
         path.with_name(path.name + ".dpkg-old"),
@@ -193,6 +219,94 @@ def cmd_config_merge(args: argparse.Namespace) -> None:
         if leftover.exists():
             print(f"{leftover} is no longer needed and can be deleted.")
     print("Apply the settings: sudo systemctl restart texas2step")
+
+
+def _apply_edit(args: argparse.Namespace, edit: Callable[[str], Any], again: str) -> None:
+    """Show or write one config_edit change to the settings file."""
+    import tomllib
+
+    path = Path(args.config)
+    current = _settings_text(path)
+    try:
+        edited = edit(current)
+    except tomllib.TOMLDecodeError as exc:
+        sys.exit(f"texas2step: {path}: {exc}")
+    except (ValueError, RuntimeError) as exc:
+        sys.exit(f"texas2step: {exc}\nNothing written.")
+    if not edited.changes:
+        print(f"{path} unchanged: {'; '.join(edited.notes)}.")
+        return
+    if not args.write:
+        _show_diff(path, current, edited.text, "edited")
+    for change in edited.changes:
+        print(f"  {change}")
+    if not args.write:
+        print(f"Nothing written. To apply: sudo {again} --write")
+        return
+    _write_settings(path, edited.text)
+    print("Apply the settings: sudo systemctl restart texas2step")
+
+
+def cmd_config_set(args: argparse.Namespace) -> None:
+    import shlex
+
+    from . import config_edit
+
+    values: dict[str, Any] = {}
+    for pair in args.pairs:
+        name, sep, raw = pair.partition("=")
+        if not sep:
+            sys.exit(f"texas2step: expected KEY=VALUE, got {pair!r}")
+        try:
+            values[name.strip()] = config_edit.parse_value(name.strip(), raw.strip())
+        except ValueError as exc:
+            sys.exit(f"texas2step: {exc}")
+    again = shlex.join(["texas2step", "config", "set", *args.pairs])
+    _apply_edit(args, lambda text: config_edit.set_values(text, values), again)
+
+
+def _fetch_info(url: str) -> dict[str, Any]:
+    """What a texas2step server at ``url`` says about itself (/api/v1/info)."""
+    import ssl
+
+    # The system's trust store, so servers with certificates from an internal CA (added
+    # with update-ca-certificates) are trusted, as browsers on managed machines trust them.
+    verify = ssl.create_default_context()
+    with httpx.Client(timeout=5, follow_redirects=True, verify=verify) as client:
+        r = client.get(f"{engine._base(url)}{engine.API}/info")
+        r.raise_for_status()
+        return r.json()
+
+
+def cmd_config_add_location(args: argparse.Namespace) -> None:
+    import shlex
+
+    from . import config_edit
+
+    location = {
+        "id": args.id,
+        "name": args.name,
+        "url": args.url,
+        "location": args.location,
+        "url_v4": args.url_v4,
+        "url_v6": args.url_v6,
+    }
+    if not (args.id and args.name):
+        try:
+            server = _fetch_info(args.url).get("server") or {}
+        except (httpx.HTTPError, ValueError) as exc:
+            sys.exit(
+                f"texas2step: can't ask {args.url} who it is ({type(exc).__name__}: {exc}).\n"
+                "Check the URL, or give --id and --name (and --location) yourself."
+            )
+        location["id"] = args.id or server.get("id")
+        location["name"] = args.name or server.get("name")
+        location["location"] = args.location or server.get("location")
+    again = shlex.join(
+        ["texas2step", "config", "add-location", args.url]
+        + [f"--{k.replace('_', '-')}={v}" for k, v in location.items() if v and k != "url"]
+    )
+    _apply_edit(args, lambda text: config_edit.add_location(text, location), again)
 
 
 async def _save(target: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -273,6 +387,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     merge.add_argument("--write", action="store_true", help="write the merged file")
     merge.set_defaults(func=cmd_config_merge)
+
+    def settings_file(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--config",
+            default=os.environ.get("TEXAS2STEP_CONFIG", "/etc/texas2step/config.toml"),
+            help="settings file to change (default: %(default)s)",
+        )
+        p.add_argument("--write", action="store_true", help="write the changed file")
+
+    config_set = config_sub.add_parser(
+        "set",
+        help="change settings in the settings file",
+        description="Set each KEY to VALUE in place, keeping the rest of the file. VALUE is "
+        'read as TOML when it parses (61000, true, "text", ["a", "b"]), otherwise as text. '
+        "Shows the change; --write applies it and keeps a backup.",
+    )
+    config_set.add_argument("pairs", nargs="+", metavar="KEY=VALUE")
+    settings_file(config_set)
+    config_set.set_defaults(func=cmd_config_set)
+
+    add_location = config_sub.add_parser(
+        "add-location",
+        help="list another texas2step server in the location picker",
+        description="Add a [[locations]] table for the server at URL. Its id, name and "
+        "location are read from the server itself unless given. Shows the change; --write "
+        "applies it and keeps a backup.",
+    )
+    add_location.add_argument(
+        "url", help="the server's base URL, e.g. https://houston.example.net/texas2step"
+    )
+    add_location.add_argument("--id", help="short id, e.g. houston")
+    add_location.add_argument("--name", help="name in the picker, e.g. 'houston.example.net'")
+    add_location.add_argument("--location", help="free text, e.g. 'Houston, TX'")
+    add_location.add_argument("--url-v4", help="IPv4-only base URL")
+    add_location.add_argument("--url-v6", help="IPv6-only base URL")
+    settings_file(add_location)
+    add_location.set_defaults(func=cmd_config_add_location)
 
     def target(p: argparse.ArgumentParser) -> None:
         p.add_argument("url", help="base URL of a texas2step server")

@@ -155,6 +155,17 @@ The monitor sends probes continuously over the UDP channel (or the WebSocket fal
 at 5–50 per second. A probe that has not returned within one second is counted as lost.
 Statistics cover the visible window (1, 5 or 15 minutes).
 
+When the site lists two or more servers, the monitor can probe two of them at once. The
+browser opens a separate session to each server directly, over UDP where it can and
+TCP where it can't, and sends each probe to both from the same timer. Both paths are
+sampled at the same moments from the same client, so a difference between them belongs
+to the paths, not to when or where they were measured. The table gives each figure for
+both servers and the difference, B − A: milliseconds for times, percentage points for
+loss.
+
+Throughput is deliberately not compared this way. Two transfers at once would share
+the client's own link, and both would read low.
+
 ## Known limitations
 
 * The UDP test needs UDP from the client to the server. Set `rtc_port_min` and

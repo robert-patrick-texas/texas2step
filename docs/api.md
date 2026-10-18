@@ -73,9 +73,9 @@ At most two run at once per worker; extra requests get `429`.
 | POST | `/api/v1/measure/full` | `{"target", "seconds", "streams", "packets", "interval_ms", "loss": true}` |
 
 ```bash
-curl -s -X POST https://dal.example.net/texas2step/api/v1/measure/full \
+curl -s -X POST https://dallas.example.net/texas2step/api/v1/measure/full \
   -H 'content-type: application/json' \
-  -d '{"target": "https://hou.example.net/texas2step", "seconds": 10}'
+  -d '{"target": "https://houston.example.net/texas2step", "seconds": 10}'
 ```
 
 ## Results
@@ -95,7 +95,7 @@ Browser runs, `texas2step run --json` and `/measure/full` share one shape (snake
   "version": 1,
   "tool": "texas2step-web/<version>",
   "started_at": "2026-10-18T07:24:00Z",
-  "server": {"id": "dal1", "name": "Dallas DC", "location": "Dallas, TX", "url": "https://…", "version": "<version>"},
+  "server": {"id": "dallas", "name": "dallas.example.net", "location": "Dallas, TX", "url": "https://…", "version": "<version>"},
   "client": {"ip": "10.1.2.3", "family": "IPv4", "protocol": "h2", "user_agent": "…"},
   "config": {"streams": 4, "seconds": 10, "packets": 500, "interval_ms": 10},
   "latency": {"count": 20, "lost": 0, "min": 2.9, "median": 3.2, "p90": 3.8, "jitter": 0.4, "samples": [ … ], …},

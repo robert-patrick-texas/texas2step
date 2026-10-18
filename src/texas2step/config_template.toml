@@ -5,7 +5,7 @@
 # Reference: https://github.com/robert-patrick-texas/texas2step/blob/main/docs/configuration.md
 
 # --- Identity ----------------------------------------------------------------------
-# server_id = "local"                   # short id stored with results, e.g. "dal1"
+# server_id = "local"                   # short id stored with results, e.g. "dallas"
 # server_name = "texas2step"            # shown in the header and results
 # server_location = ""                  # free text, e.g. "Dallas, TX"
 # server_url_v4 = ""                    # IPv4-only base URL (enables the IPv4/IPv6 switch)
@@ -53,8 +53,8 @@ results_path = "/var/lib/texas2step/results.db"
 
 # --- Other texas2step servers in the location picker ---------------------------------------
 # [[locations]]
-# id = "hou1"
-# name = "Houston DC"
+# id = "houston"
+# name = "houston.example.net"
 # url = "https://www.example.org/texas2step"
 # location = "Houston, TX"
 

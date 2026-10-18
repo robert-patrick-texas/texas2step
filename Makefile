@@ -13,13 +13,13 @@ test:
 	uv run pytest
 
 lint:
-	uv run ruff check src tests scripts
-	uv run ruff format --check src tests scripts
+	uv run ruff check src tests scripts packaging
+	uv run ruff format --check src tests scripts packaging
 	cd web && npx tsc --noEmit
 
 fmt:
-	uv run ruff format src tests scripts
-	uv run ruff check --fix src tests scripts
+	uv run ruff format src tests scripts packaging
+	uv run ruff check --fix src tests scripts packaging
 
 check: lint test
 
@@ -29,7 +29,7 @@ docs:           ## render every .md file into the static site in html/
 docs-watch:     ## re-render html/ whenever a .md file changes
 	uv run python scripts/build_docs.py --watch
 
-deb:            ## build dist/texas2step-<version>-1-amd64.deb (Ubuntu 26.04)
+deb:            ## build dist/texas2step-<version>-1-amd64.deb and dist/texas2step-setup (Ubuntu 26.04)
 	packaging/build-deb.sh
 
 upgrade:        ## move every dependency to its newest release, then rebuild the UI

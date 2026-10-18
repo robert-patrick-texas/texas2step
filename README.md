@@ -32,7 +32,7 @@ Details and definitions: [docs/methodology.md](docs/methodology.md).
 
 The UI has four views: **Test** (gauge, live link animation, charts, exportable and
 shareable results), **Monitor** (continuous UDP probing with a scrolling RTT and loss
-trace), **History** (saved runs and trend), and **API** (copy-ready examples). Every
+trace, to one server or to two at once for a side-by-side comparison), **History** (saved runs and trend), and **API** (copy-ready examples). Every
 chart has a hover readout and a table equivalent.
 
 Visitors pick a theme from the header: Light, Dark, Federal, Texas, America, Energy or
@@ -52,8 +52,19 @@ sudo apt install ./texas2step-*-amd64.deb        # the package from the releases
 sudo nginx -t && sudo systemctl reload nginx     # → https://www.example.net/texas2step/
 ```
 
-The [install guide](docs/install.md) covers the rest: the optional `/speedtest` address,
-configuration, the firewall rule for the UDP test, upgrades and removal.
+Or let `texas2step-setup`, which ships next to the `.deb`, check the server first. It
+reports what it will change and what you must fix, then writes an install script for
+that server. The script installs, reinstalls or upgrades texas2step, merges your
+settings into the new template, publishes it through nginx and opens the UDP range:
+
+```bash
+sudo ./texas2step-setup --id houston --name "houston.example.net" --location "Houston, TX"
+sudo ./texas2step-install.sh                     # after reading it
+```
+
+The [install guide](docs/install.md) covers the rest: the setup tool's options, the
+optional `/speedtest` address, configuration, the firewall rule for the UDP test,
+upgrades and removal.
 
 To run it from source instead:
 
@@ -96,8 +107,8 @@ Every primitive is a plain HTTP endpoint (`/api/v1/ping`, `/down`, `/up`, `/ws`,
 
 ```bash
 curl -o /dev/null 'https://www.example.net/texas2step/api/v1/down?bytes=1000000000'
-curl -s -X POST https://dal.example.net/texas2step/api/v1/measure/full \
-     -H 'content-type: application/json' -d '{"target": "https://hou.example.net/texas2step"}'
+curl -s -X POST https://dallas.example.net/texas2step/api/v1/measure/full \
+     -H 'content-type: application/json' -d '{"target": "https://houston.example.net/texas2step"}'
 ```
 
 Full reference: [docs/api.md](docs/api.md), or `/api/docs` on a running server.

@@ -17,27 +17,27 @@ def test_toml_and_env_override(tmp_path, monkeypatch):
     path = tmp_path / "t.toml"
     path.write_text(
         """
-server_id = "dal1"
+server_id = "dallas"
 server_name = "Dallas"
 ice_servers = ["stun:stun.example:3478"]
 
 [[locations]]
-id = "hou1"
+id = "houston"
 name = "Houston"
-url = "https://hou.example/"
+url = "https://houston.example.net/"
 """
     )
     monkeypatch.setenv("TEXAS2STEP_CONFIG", str(path))
-    monkeypatch.setenv("TEXAS2STEP_SERVER_NAME", "Dallas DC1")
+    monkeypatch.setenv("TEXAS2STEP_SERVER_NAME", "dallas.example.net1")
     monkeypatch.setenv("TEXAS2STEP_WEBRTC_ENABLED", "off")
     monkeypatch.setenv("TEXAS2STEP_CORS_ORIGINS", "https://a.example, https://b.example")
     s = load_settings()
-    assert s.server_id == "dal1"
-    assert s.server_name == "Dallas DC1"
+    assert s.server_id == "dallas"
+    assert s.server_name == "dallas.example.net1"
     assert s.webrtc_enabled is False
     assert s.ice_servers == ["stun:stun.example:3478"]
     assert s.cors_origins == ["https://a.example", "https://b.example"]
-    assert [loc.id for loc in s.all_locations()] == ["dal1", "hou1"]
+    assert [loc.id for loc in s.all_locations()] == ["dallas", "houston"]
 
 
 def test_rtc_port_range(monkeypatch):

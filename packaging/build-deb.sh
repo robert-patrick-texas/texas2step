@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build dist/texas2step-<version>-<revision>-<arch>.deb. The version comes from
-# src/texas2step/__init__.py, the only place it is set.
+# Build dist/texas2step-<version>-<revision>-<arch>.deb, and dist/texas2step-setup, the
+# operators' setup tool for it. The version comes from src/texas2step/__init__.py, the
+# only place it is set.
 #
 # The package carries a self-contained virtualenv at /opt/texas2step/venv that runs on
 # the system Python and holds compiled wheels (aiortc, cryptography, ...). So build on
@@ -92,6 +93,14 @@ install -m755 packaging/debian/postinst packaging/debian/prerm packaging/debian/
 
 dpkg-deb --build --root-owner-group -Zxz "$stage" "dist/$name.deb" >/dev/null
 echo "dist/$name.deb ($(du -h "dist/$name.deb" | cut -f1))"
+
+# 5. The operators' setup tool, stamped with this package's file name and checksum so
+#    it can tell it was handed the package it was built with. Ship the two together.
+sha=$(sha256sum "dist/$name.deb" | cut -d' ' -f1)
+sed -e "s/@DEB_NAME@/$name.deb/" -e "s/@DEB_SHA256@/$sha/" packaging/texas2step-setup.py \
+    > dist/texas2step-setup
+chmod 755 dist/texas2step-setup
+echo "dist/texas2step-setup (checks and installs $name.deb)"
 
 if command -v lintian >/dev/null; then
     lintian "dist/$name.deb" || true

@@ -45,6 +45,40 @@ file up to date with the new version's template and keeps your values; see
 | `brand_links` | `[]` | Links in the header and footer, as `[[brand_links]]` tables (TOML only) |
 | `default_theme` | `system` | `system`, `light`, `dark`, `federal`, `texas`, `america`, `energy` or `military` |
 
+## Changing settings from the command line
+
+You can edit `/etc/texas2step/config.toml` by hand. These commands make the common changes
+for you and keep the rest of the file as it is, comments included. Each one first shows
+the change and writes nothing. Add `--write` to apply it, which keeps a dated backup
+beside the file. Then restart the service.
+
+```bash
+sudo texas2step config set server_id=houston server_name="houston.example.net" rtc_port_min=61000 rtc_port_max=61999
+sudo texas2step config set server_id=houston server_name="houston.example.net" --write
+sudo texas2step config add-location https://dallas.example.net/texas2step --write
+sudo systemctl restart texas2step
+```
+
+* **`config set KEY=VALUE ...`** writes each setting on its own line. If the file has the
+  setting commented out, the line is filled in where it stands; otherwise it is added
+  above the first `[[table]]`. A value is read as TOML when it is valid TOML (`61000`,
+  `true`, `["a", "b"]`), and as text otherwise. Unknown settings, and values the server
+  would refuse, are rejected before anything is written. Edit `[[locations]]` and
+  `[[brand_links]]` in the file, or use `add-location`.
+* **`config add-location URL`** lists another texas2step server in the location picker.
+  It asks that server for its id, name and location (`/api/v1/info`), using the
+  system's trusted certificates. Give `--id`, `--name` and `--location` to set them
+  yourself, or when the server can't be reached; `--url-v4` and `--url-v6` add the
+  single-family addresses. A server that is already listed, by id or by URL, is left
+  as it is.
+* **`config merge`** brings the whole file up to date after an upgrade; see
+  [Upgrade](install.md#upgrade).
+
+`--config FILE` works on another file instead. The
+[setup tool](install.md#install-or-upgrade-with-the-setup-tool) uses `config set` and
+`add-location` to apply its `--id`, `--name`, `--location`, `--udp-ports` and `--peer`
+options.
+
 ## Branding and themes
 
 texas2step can carry your organization's identity instead of its own. All of it is
@@ -104,13 +138,19 @@ picker; browsers then test against them directly (cross-origin), and
 
 ```toml
 [[locations]]
-id = "hou1"
-name = "Houston DC"
-url = "https://hou.example.net/texas2step"
+id = "houston"
+name = "houston.example.net"
+url = "https://houston.example.net/texas2step"
 location = "Houston, TX"
-url_v4 = "https://v4.hou.example.net/texas2step"   # optional: A record only
-url_v6 = "https://v6.hou.example.net/texas2step"   # optional: AAAA record only
+url_v4 = "https://v4.houston.example.net/texas2step"   # optional: A record only
+url_v6 = "https://v6.houston.example.net/texas2step"   # optional: AAAA record only
 ```
 
 Each listed server must allow the page's origin in its `cors_origins` (the default `*`
 does).
+
+With two or more servers listed, **Monitor** can probe two of them at once from the
+same browser and compare them on one chart. The browser reaches each server directly,
+so each one needs its UDP range open to clients, as for the packet-loss test. The
+address of a comparison, such as `/monitor?a=dallas&b=houston` (the servers' ids), opens
+it again later.

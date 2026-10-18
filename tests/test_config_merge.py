@@ -11,7 +11,7 @@ from texas2step.cli import main
 from texas2step.config_merge import TEMPLATE, merge
 
 OLD = """# my notes about this server
-server_name = "Dallas DC"
+server_name = "dallas.example.net"
 rtc_port_min = 61000
 rtc_port_max = 61999
 results_path = "/srv/texas2step/results.db"
@@ -20,9 +20,9 @@ brand_notice = "Authorized use only. \\"Quotes\\", back\\\\slash, café"
 old_setting = 5
 
 [[locations]]
-id = "hou1"
-name = "Houston DC"
-url = "https://hou.example.net/texas2step"
+id = "houston"
+name = "houston.example.net"
+url = "https://houston.example.net/texas2step"
 """
 
 
@@ -39,7 +39,9 @@ def test_values_land_in_the_new_template():
     assert got["brand_notice"] == 'Authorized use only. "Quotes", back\\slash, café'
     assert got["locations"] == old["locations"]
     # In place of the template's commented default, not appended somewhere.
-    assert merged.text.index('server_name = "Dallas DC"') < merged.text.index("# server_location")
+    assert merged.text.index('server_name = "dallas.example.net"') < merged.text.index(
+        "# server_location"
+    )
     # Settings this version added arrive as commented defaults.
     assert '# default_theme = "system"' in merged.text
     # Settings it no longer has are kept as comments, out of the server's way.
@@ -92,5 +94,5 @@ def test_command_takes_values_from_a_dpkg_old_file(tmp_path):
     path.write_text(template())
     (tmp_path / "config.toml.dpkg-old").write_text(OLD)
     main(["config", "merge", "--config", str(path), "--from", str(path) + ".dpkg-old", "--write"])
-    assert tomllib.loads(path.read_text())["server_name"] == "Dallas DC"
+    assert tomllib.loads(path.read_text())["server_name"] == "dallas.example.net"
     assert os.path.exists(path)

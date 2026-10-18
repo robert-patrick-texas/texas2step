@@ -18,6 +18,95 @@ work on the code, see [Development](development.md).
 * Inbound UDP to the server for the packet-loss test. See
   [Firewall and UDP](#4-firewall-and-udp).
 
+## Install or upgrade with the setup tool
+
+Each release comes with `texas2step-setup` next to the `.deb`. It checks the server,
+tells you what it will change and what you must fix first, and writes an install script
+for that server. It does a fresh install, a reinstall or an upgrade, whichever applies.
+To do the same by hand, follow steps 1 to 5 below instead.
+
+1. Copy both files to the server, into the same directory:
+
+   ```bash
+   scp texas2step-setup texas2step-*-amd64.deb admin@houston.example.net:
+   ```
+
+2. Run the check. It changes nothing on the system; it needs `sudo` only to read nginx's
+   configuration, the firewall and the package database.
+
+   ```bash
+   sudo ./texas2step-setup --id houston --name "houston.example.net" --location "Houston, TX" \
+       --peer https://www.example.net/texas2step
+   ```
+
+   It prints a report and saves it as `texas2step-preflight.txt`, in four sections:
+   **OK**, **Will change**, **You must fix** and **Note**. If anything is under
+   **You must fix**, fix it and run the check again. Until then it writes no install
+   script.
+
+3. Read `texas2step-install.sh`, then run it:
+
+   ```bash
+   sudo ./texas2step-install.sh
+   ```
+
+   It logs to `texas2step-install.log` beside itself. When it finishes, the service
+   answers both on `127.0.0.1:8080` and through nginx, and it prints the address to open.
+   You can run it again safely: it skips each step that is already done.
+
+What the check looks at, and what the script then does:
+
+| Area | Check | Install script |
+|---|---|---|
+| System | Ubuntu 26.04 LTS, the package's architecture, systemd, disk space | |
+| Package | The `.deb` is the one this tool was built with (SHA-256), and its dependencies are installed or available from apt | Verifies the checksum again, then installs with apt, keeping your settings file |
+| Version | Installed version: none, the same, older or newer | Fresh install, reinstall or upgrade. It refuses to downgrade unless you pass `--allow-downgrade` to the check. |
+| Settings | On an upgrade, whether your edited settings need the new template. If they do, the report shows the merge's changes. | Runs `texas2step config merge --write`, keeping a dated backup |
+| Identity | `--id`, `--name`, `--location` against the current settings | `texas2step config set ... --write` |
+| Peers | Each `--peer URL` is asked who it is (`/api/v1/info`). A peer that can't be reached is left out, with the command to add it later. | `texas2step config add-location ... --write` |
+| nginx | nginx is installed and running, its configuration passes `nginx -t`, and it loads `conf.d/*.conf`. It finds your HTTPS site, and checks that nothing else on that site uses `/texas2step/`. If texas2step is already published, nginx is left alone. | Adds `include snippets/texas2step.conf;` after the site's `server_name` line, runs `nginx -t` and reloads. The file is backed up to `/var/backups/texas2step/` first, and put back if the test fails. |
+| UDP | The probe's port range: the one you set, or 61000–61999. It checks this range against the firewall and the kernel's ephemeral ports. | Pins the range in the settings. Opens it in ufw or firewalld if one of them is active. |
+| Port 8080 | Nothing else listens there | |
+
+Options:
+
+| Option | Meaning |
+|---|---|
+| `--id`, `--name`, `--location` | This server's identity: `server_id`, `server_name`, `server_location`. Give every server its own `--id`. |
+| `--peer URL` | Another texas2step server to offer in the location picker and in two-destination monitoring. Repeat it for each server. |
+| `--site FILE` | The nginx site to publish on, when there are several HTTPS sites. Use `FILE:LINE` when the file holds several `server` blocks. Naming a site publishes texas2step there even if another site already does. |
+| `--speedtest` | Also add the `/speedtest` redirect |
+| `--no-nginx` | Install the service only, and publish it yourself |
+| `--udp-ports MIN-MAX` | The probe's UDP range, e.g. `61000-61999` |
+| `--no-firewall` | Leave the firewall alone; the report lists the rule to add |
+| `--allow-downgrade` | Allow installing an older version than the one installed |
+| `--deb FILE` | A package other than the one next to the tool. Its checksum must still match. |
+| `--out DIR` | Where to write the report and the script (default: the current directory) |
+
+**Firewalls.** The script adds the UDP rule only to ufw and firewalld, which keep their
+rules across reboots on their own. For iptables or a hand-written nftables ruleset, the
+report gives the exact rule and where to save it, and you add it yourself. The script
+never runs `netfilter-persistent save`: on a host that also runs Docker, that would
+save Docker's own rules as well. Nothing on the server can see a cloud security group
+or a network firewall in front of it, so open the range there as well.
+
+### Two servers
+
+To offer two servers to each other, for example for two-destination monitoring, install
+the second server with `--peer` pointing at the first. Then add the second server to
+the first, on the first server:
+
+```bash
+sudo texas2step config add-location https://houston.example.net/texas2step          # preview
+sudo texas2step config add-location https://houston.example.net/texas2step --write
+sudo systemctl restart texas2step
+```
+
+`add-location` asks the other server for its id, name and location. It uses the
+system's trusted certificates, so a certificate from your own CA works once the CA is
+installed with `update-ca-certificates`. If the server can't be reached yet, give
+`--id`, `--name` and `--location` yourself.
+
 ## 1. Install the package
 
 Download the newest `.deb` from the
@@ -110,8 +199,8 @@ Edit `/etc/texas2step/config.toml`, then run `sudo systemctl restart texas2step`
 file lists every setting with its default. The ones most sites set:
 
 ```toml
-server_id = "dal1"              # short id stored with results
-server_name = "Dallas DC"       # shown in the header and in results
+server_id = "dallas"              # short id stored with results
+server_name = "dallas.example.net"       # shown in the header and in results
 server_location = "Dallas, TX"
 ```
 
@@ -124,9 +213,10 @@ choose the default theme (Light, Dark, Federal, Texas, America, Energy or Milita
 
 **Several locations.** Install texas2step at each site, give each a distinct
 `server_id`, `server_name` and `server_location`, and list the others under
-`[[locations]]`. Users then pick a site in the header, and the browser tests that site
-directly. Sites can also measure each other with `POST /api/v1/measure/full`, but only
-toward listed locations.
+`[[locations]]`. `sudo texas2step config add-location <url> --write` adds one for you (see
+[Two servers](#two-servers)). Users then pick a site in the header, and the browser tests
+that site directly. Sites can also measure each other with `POST /api/v1/measure/full`,
+but only toward listed locations.
 
 **Listen address and workers.** These are set in `/etc/default/texas2step`. If you move
 the service off `127.0.0.1:8080`, change the `upstream` in
@@ -204,8 +294,13 @@ To see the ports in use during a test, run `sudo ss -uanp | grep texas2step`.
 
 ## Upgrade
 
-Run the commands from [step 1](#1-install-the-package) again: they fetch the newest
-release. The service restarts with your settings, and saved results are kept.
+The simplest way is the [setup tool](#install-or-upgrade-with-the-setup-tool). Copy the
+new `texas2step-setup` and `.deb` to the server, then run the check and the install
+script. The check shows how your settings file will be merged with the new template,
+and the script does the merge for you.
+
+By hand: run the commands from [step 1](#1-install-the-package) again. They fetch the
+newest release. The service restarts with your settings, and saved results are kept.
 
 When a new version's settings template differs from your edited
 `/etc/texas2step/config.toml`, apt asks what to do with it. Keep yours (**N**, the
