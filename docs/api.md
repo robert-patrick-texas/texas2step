@@ -1,7 +1,8 @@
 # API
 
 Interactive reference: `/api/docs` (OpenAPI explorer) and `/api/openapi.json` on any
-server. The **API** tab in the web UI has copy-ready examples against that server.
+server. The explorer is served by texas2step itself, so it works without internet access.
+The **API** tab in the web UI has copy-ready examples against that server.
 
 Paths below are relative to the server's base URL. That is
 `https://www.example.net/texas2step` for a server published at `/texas2step/` (see

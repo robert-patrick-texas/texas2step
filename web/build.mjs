@@ -24,6 +24,16 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, "assets"), { recursive: true });
 cpSync(join(here, "public"), out, { recursive: true });
 
+// Swagger UI for the OpenAPI explorer at /api/docs. The server serves it from here rather
+// than a CDN, so the explorer works without internet access. Its license files go along.
+const swagger = join(here, "node_modules", "swagger-ui-dist");
+mkdirSync(join(out, "assets", "swagger"));
+for (const file of ["swagger-ui-bundle.js", "swagger-ui.css", "swagger-ui-bundle.js.LICENSE.txt", "LICENSE", "NOTICE"]) {
+  // Source maps aren't shipped, so drop the references to them.
+  const text = readFileSync(join(swagger, file), "utf8").replace(/\n?\/[*/]# sourceMappingURL=\S+(?: \*\/)?\s*$/, "\n");
+  writeFileSync(join(out, "assets", "swagger", file), text);
+}
+
 const options = {
   entryPoints: { app: join(here, "src", "main.ts") },
   outdir: join(out, "assets"),

@@ -35,9 +35,16 @@ uv export --quiet --frozen --no-default-groups --no-emit-project --format requir
     --output-file "$work/requirements.txt"
 uv venv --quiet --relocatable --python "$python" "$venv"
 uv pip install --quiet --python "$venv/bin/python" -r "$work/requirements.txt"
-uv pip install --quiet --python "$venv/bin/python" --no-deps --no-index \
+# --no-cache: uv would otherwise reuse a wheel it cached for this same version number
+# from an earlier build, and ship stale code.
+uv pip install --quiet --python "$venv/bin/python" --no-deps --no-index --no-cache \
     --find-links "$work/wheel" "texas2step==$version"
 rm -f "$venv/.lock" "$venv/.gitignore"
+# The installed package must be exactly what is in src/ now.
+if ! diff -rq --exclude=__pycache__ src/texas2step "$venv/lib/python$pyver/site-packages/texas2step"; then
+    echo "error: the packaged texas2step differs from src/texas2step" >&2
+    exit 1
+fi
 
 # 2. System integration. Files under /etc become conffiles, so local edits survive
 #    upgrades.

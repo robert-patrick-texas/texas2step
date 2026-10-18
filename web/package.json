@@ -11,6 +11,11 @@
   },
   "devDependencies": {
     "esbuild": "0.28.2",
+    "swagger-ui-dist": "5.33.3",
     "typescript": "7.0.2"
+  },
+  "allowScripts": {
+    "@scarf/scarf": false,
+    "esbuild": true
   }
 }

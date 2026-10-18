@@ -46,6 +46,7 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make docs-watch` | Re-render `html/` whenever a `.md` file changes |
 | `make deb` | Build `dist/texas2step-<version>-1-amd64.deb` |
 | `make version` | Print the version |
+| `make upgrade` | Move every Python and npm dependency to its newest release, then rebuild the UI |
 
 ## Project layout
 
@@ -82,6 +83,14 @@ legacy/                the original single-file prototype, kept for reference
   stay in step. [Methodology](methodology.md) documents them.
 * After changing anything under `web/`, run `make web` and commit the regenerated
   `src/texas2step/static/` along with the source.
+* The one piece of browser code that isn't ours is Swagger UI, the OpenAPI explorer at
+  `/api/docs`. `web/build.mjs` copies it, with its license files, from the pinned
+  `swagger-ui-dist` npm package into `static/assets/swagger/`, so the explorer needs no
+  CDN. That package depends on `@scarf/scarf`, an install-time analytics reporter; its
+  install script is denied in `web/package.json` (`allowScripts`), so it never runs.
+* Dependencies are pinned exactly (`uv.lock`, `web/package.json` and
+  `web/package-lock.json`), so builds are repeatable. `make upgrade` moves them all to
+  their newest releases.
 
 ## Tests
 
@@ -167,8 +176,11 @@ Then add the include lines from [Install](install.md#2-publish-it-at-texas2step)
    * `make version`, which prints it for scripts.
 
    The documentation doesn't repeat it.
-2. Run `make check` and `make deb`.
-3. Commit, tag and publish the package:
+2. Run `make upgrade`, so the release ships every dependency's newest version, with its
+   security and bug fixes.
+3. Run `make check` and `make deb`. The package installs exactly the versions in
+   `uv.lock`.
+4. Commit (including the updated lockfiles), tag and publish the package:
 
 ```bash
 v=$(make -s version)

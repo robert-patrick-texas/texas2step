@@ -7,6 +7,12 @@ Files: *
 Copyright: 2026 Robert Patrick
 License: Apache-2.0
 
+Files: opt/texas2step/venv/lib/python3*/site-packages/texas2step/static/assets/swagger/*
+Copyright: 2020-2021 SmartBear Software Inc.
+License: Apache-2.0
+Comment: Swagger UI (swagger-ui-dist), for the OpenAPI explorer at /api/docs. The
+ libraries it bundles are listed in swagger-ui-bundle.js.LICENSE.txt alongside it.
+
 Files: opt/texas2step/venv/lib/*
 Copyright: The authors of each bundled Python package
 License: various

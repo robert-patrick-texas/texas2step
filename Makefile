@@ -1,4 +1,4 @@
-.PHONY: dev web web-watch test lint fmt check docs docs-watch deb version
+.PHONY: dev web web-watch test lint fmt check docs docs-watch deb version upgrade
 
 dev:            ## run the server with the current build of the UI
 	uv run texas2step serve --host 127.0.0.1 --port 8080
@@ -31,6 +31,13 @@ docs-watch:     ## re-render html/ whenever a .md file changes
 
 deb:            ## build dist/texas2step-<version>-1-amd64.deb (Ubuntu 26.04)
 	packaging/build-deb.sh
+
+upgrade:        ## move every dependency to its newest release, then rebuild the UI
+	uv lock --upgrade
+	uv sync
+	cd web && npm install --save-dev --save-exact $$(node -p \
+	    "Object.keys(require('./package.json').devDependencies).map((d) => d + '@latest').join(' ')")
+	$(MAKE) web
 
 version:        ## print the version; it is set only in src/texas2step/__init__.py
 	@sed -n 's/^__version__ = "\(.*\)"$$/\1/p' src/texas2step/__init__.py

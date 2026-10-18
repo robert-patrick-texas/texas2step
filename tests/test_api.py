@@ -1,3 +1,5 @@
+import re
+
 from texas2step import __version__
 
 
@@ -175,3 +177,28 @@ def test_path_prefix_must_be_a_plain_path(client, settings):
 def test_page_carries_the_version(client):
     # The UI reads its version from here; src/texas2step/__init__.py is the only source.
     assert f'<meta name="texas2step-version" content="{__version__}" />' in client.get("/").text
+
+
+def test_api_explorer_is_self_hosted(client, settings):
+    """/api/docs loads Swagger UI from this server, never a CDN, with or without a prefix."""
+    settings.trusted_proxies = ["testclient"]
+    for headers, root in (({}, ""), ({"x-forwarded-prefix": "/texas2step"}, "/texas2step")):
+        page = client.get("/api/docs", headers=headers).text
+        refs = re.findall(r"""(?:src|href|url)\s*[=:]\s*['"]([^'"]+)['"]""", page)
+        assert refs and not [r for r in refs if "://" in r], refs
+        assert f"{root}/api/openapi.json" in refs
+        for ref in refs:
+            # The test client has no proxy in front of it; the app accepts either form.
+            r = client.get(ref, headers=headers)
+            assert r.status_code == 200, ref
+        assert any(r.endswith(".js") or ".js?" in r for r in refs)
+        assert any(".css" in r for r in refs)
+
+
+def test_openapi_servers_follow_each_request(client, settings):
+    settings.trusted_proxies = ["testclient"]
+    prefixed = client.get("/api/openapi.json", headers={"x-forwarded-prefix": "/texas2step"}).json()
+    direct = client.get("/api/openapi.json").json()
+    assert prefixed["servers"] == [{"url": "/texas2step"}]
+    assert direct["servers"] == [{"url": "/"}]
+    assert "/api/v1/ping" in direct["paths"] and direct["info"]["title"] == "texas2step"

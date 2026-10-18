@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html
 import logging
 import re
@@ -11,7 +12,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -105,9 +107,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="texas2step",
         version=__version__,
         summary="Throughput, latency, jitter and packet-loss measurement between endpoints.",
-        docs_url="/api/docs",
+        docs_url=None,  # both served below
         redoc_url=None,
-        openapi_url="/api/openapi.json",
+        openapi_url=None,
         lifespan=lifespan,
     )
     app.state.settings = settings
@@ -157,6 +159,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/assets", StaticFiles(directory=STATIC / "assets"), name="assets")
     else:
         log.warning("frontend assets missing: run `npm run build` in web/")
+
+    swagger = STATIC / "assets" / "swagger"
+    stamps = {
+        name: hashlib.sha256((swagger / name).read_bytes()).hexdigest()[:10]
+        for name in ("swagger-ui-bundle.js", "swagger-ui.css")
+        if (swagger / name).is_file()
+    }
+
+    @app.get("/api/openapi.json", include_in_schema=False)
+    async def openapi(request: Request) -> JSONResponse:
+        # FastAPI would record the first prefix it sees in "servers" for good. Set it per
+        # request instead, so "Try it out" targets the address the explorer was opened at.
+        return JSONResponse(
+            {**app.openapi(), "servers": [{"url": request.scope.get("root_path", "") or "/"}]}
+        )
+
+    @app.get("/api/docs", include_in_schema=False)
+    async def api_docs(request: Request) -> HTMLResponse:
+        # Swagger UI comes from our own assets (copied in by web/build.mjs), not a CDN, so
+        # the explorer works on networks without internet access.
+        root = request.scope.get("root_path", "")
+        assets = f"{root}/assets/swagger"
+        return get_swagger_ui_html(
+            openapi_url=root + "/api/openapi.json",
+            title=f"{app.title} - Swagger UI",
+            swagger_js_url=f"{assets}/swagger-ui-bundle.js?v={stamps.get('swagger-ui-bundle.js')}",
+            swagger_css_url=f"{assets}/swagger-ui.css?v={stamps.get('swagger-ui.css')}",
+            swagger_favicon_url=f"{root}/favicon.svg",
+        )
 
     @app.get("/favicon.svg", include_in_schema=False)
     async def favicon() -> FileResponse:
