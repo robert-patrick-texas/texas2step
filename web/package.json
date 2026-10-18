@@ -1,0 +1,16 @@
+{
+  "name": "texas2step-web",
+  "private": true,
+  "type": "module",
+  "description": "Browser client for texas2step (TypeScript, no runtime dependencies).",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "check": "tsc --noEmit && node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}

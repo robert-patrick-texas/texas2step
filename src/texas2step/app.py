@@ -1,0 +1,157 @@
+"""ASGI application factory."""
+
+from __future__ import annotations
+
+import html
+import logging
+import re
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from . import __version__
+from .api import routers
+from .config import Settings, load_settings
+from .rtc import RtcEcho
+from .store import ResultStore
+
+log = logging.getLogger(__name__)
+
+STATIC = Path(__file__).parent / "static"
+SPA_ROUTES = ("/", "/monitor", "/history", "/api", "/r/{rid}")
+PREFIX = re.compile(r"(?:/(?!\.\.?(?:/|$))[A-Za-z0-9._~-]+)+")  # no "." or ".." segments
+
+
+class TimingAllowOrigin:
+    """Adds ``Timing-Allow-Origin: *`` so cross-origin clients can read Resource Timing.
+
+    Written as raw ASGI middleware: ``BaseHTTPMiddleware`` would re-buffer streamed
+    bodies and cap throughput.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def wrapped(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                message.setdefault("headers", []).append((b"timing-allow-origin", b"*"))
+            await send(message)
+
+        await self.app(scope, receive, wrapped)
+
+
+class ForwardedPrefix:
+    """Serves the app under the path a trusted reverse proxy names in X-Forwarded-Prefix.
+
+    nginx can publish texas2step at https://www.example.net/texas2step/. Given that
+    prefix, this sets the ASGI ``root_path``, so the page's <base href>, the static
+    assets and the OpenAPI docs all point back through the proxy. The proxy may strip
+    the prefix from the path or pass it through. The header is ignored from untrusted
+    clients and when it is not a plain path.
+    """
+
+    def __init__(self, app: ASGIApp, settings: Settings) -> None:
+        self.app = app
+        self.settings = settings
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        prefix = self._prefix(scope) if scope["type"] in ("http", "websocket") else ""
+        if prefix:
+            scope = dict(scope, root_path=prefix)
+            path: str = scope["path"]
+            if path != prefix and not path.startswith(prefix + "/"):
+                scope["path"] = prefix + path
+                raw_path: bytes | None = scope.get("raw_path")
+                if raw_path:
+                    scope["raw_path"] = prefix.encode() + raw_path
+        await self.app(scope, receive, send)
+
+    def _prefix(self, scope: Scope) -> str:
+        client = scope.get("client")
+        if not client or client[0] not in self.settings.trusted_proxies:
+            return ""
+        for name, value in scope["headers"]:
+            if name == b"x-forwarded-prefix":
+                prefix = value.decode("latin-1").strip().rstrip("/")
+                return prefix if len(prefix) <= 200 and PREFIX.fullmatch(prefix) else ""
+        return ""
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or load_settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        app.state.rtc.start()
+        if settings.results_enabled:
+            app.state.store = ResultStore(settings.results_path, settings.results_max_rows)
+        yield
+        await app.state.rtc.stop()
+        if app.state.store is not None:
+            app.state.store.close()
+
+    app = FastAPI(
+        title="texas2step",
+        version=__version__,
+        summary="Throughput, latency, jitter and packet-loss measurement between endpoints.",
+        docs_url="/api/docs",
+        redoc_url=None,
+        openapi_url="/api/openapi.json",
+        lifespan=lifespan,
+    )
+    app.state.settings = settings
+    app.state.store = None
+    app.state.rtc = RtcEcho(
+        settings.ice_servers,
+        settings.max_rtc_sessions,
+        settings.rtc_session_timeout,
+        enabled=settings.webrtc_enabled,
+        port_range=settings.rtc_ports,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["Server-Timing", "Content-Length"],
+        max_age=600,
+    )
+    app.add_middleware(TimingAllowOrigin)
+    app.add_middleware(ForwardedPrefix, settings=settings)
+
+    for router in routers:
+        app.include_router(router)
+
+    index = STATIC / "index.html"
+
+    async def spa(request: Request) -> HTMLResponse:
+        # Relative URLs in the page resolve against <base href>, which carries the prefix.
+        base = html.escape(request.scope.get("root_path", "") + "/")
+        page = index.read_text().replace('<base href="/" />', f'<base href="{base}" />', 1)
+        return HTMLResponse(page, headers={"Cache-Control": "no-cache"})
+
+    for route in SPA_ROUTES:
+        app.add_api_route(route, spa, include_in_schema=False, methods=["GET"])
+
+    if (STATIC / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=STATIC / "assets"), name="assets")
+    else:
+        log.warning("frontend assets missing: run `npm run build` in web/")
+
+    @app.get("/favicon.svg", include_in_schema=False)
+    async def favicon() -> FileResponse:
+        return FileResponse(STATIC / "favicon.svg", media_type="image/svg+xml")
+
+    return app

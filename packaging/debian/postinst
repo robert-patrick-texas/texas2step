@@ -1,0 +1,39 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "configure" ]; then
+    if ! getent passwd texas2step >/dev/null; then
+        adduser --system --group --home /var/lib/texas2step --no-create-home \
+            --quiet texas2step
+    fi
+    # Byte-compile once here: the service cannot write into /opt at run time.
+    /opt/texas2step/venv/bin/python -m compileall -q -j 0 /opt/texas2step/venv/lib \
+        >/dev/null 2>&1 || true
+fi
+
+# Enable and (re)start the service, as dh_installsystemd would.
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ]; then
+    deb-systemd-helper unmask texas2step.service >/dev/null || true
+    if deb-systemd-helper --quiet was-enabled texas2step.service; then
+        deb-systemd-helper enable texas2step.service >/dev/null || true
+    else
+        deb-systemd-helper update-state texas2step.service >/dev/null || true
+    fi
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null || true
+        if [ -n "$2" ]; then action=restart; else action=start; fi
+        deb-systemd-invoke "$action" texas2step.service >/dev/null || true
+    fi
+fi
+
+if [ "$1" = "configure" ] && [ -z "$2" ]; then
+    cat <<'MSG'
+texas2step listens on 127.0.0.1:8080 (systemctl status texas2step). To publish
+it at /texas2step/ on your site, add
+    include snippets/texas2step.conf;
+to your site's server { } block in /etc/nginx/sites-available/, then run
+    sudo nginx -t && sudo systemctl reload nginx
+MSG
+fi
+
+exit 0

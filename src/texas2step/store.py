@@ -1,0 +1,123 @@
+"""Result history in SQLite (stdlib only; calls run in a worker thread)."""
+
+from __future__ import annotations
+
+import json
+import secrets
+import sqlite3
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS results (
+    id            TEXT PRIMARY KEY,
+    created_at    REAL NOT NULL,
+    client_ip     TEXT,
+    server_id     TEXT,
+    source        TEXT,
+    download_mbps REAL,
+    upload_mbps   REAL,
+    latency_ms    REAL,
+    jitter_ms     REAL,
+    loss_pct      REAL,
+    payload       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS results_created ON results (created_at DESC);
+"""
+
+SUMMARY_COLUMNS = (
+    "id",
+    "created_at",
+    "client_ip",
+    "server_id",
+    "source",
+    "download_mbps",
+    "upload_mbps",
+    "latency_ms",
+    "jitter_ms",
+    "loss_pct",
+)
+
+
+def _dig(data: Any, *path: str) -> float | None:
+    for key in path:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return float(data) if isinstance(data, int | float) and not isinstance(data, bool) else None
+
+
+class ResultStore:
+    def __init__(self, path: str | Path, max_rows: int = 10_000) -> None:
+        self.path = str(path)
+        self.max_rows = max_rows
+        self._lock = threading.Lock()
+        if self.path != ":memory:":
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(self.path, check_same_thread=False)
+        self._db.row_factory = sqlite3.Row
+        with self._lock:
+            self._setup()
+
+    def _setup(self) -> None:
+        # Several uvicorn workers open the file at once. On a new file, SQLite reports
+        # "database is locked" immediately, without waiting, to every worker but the one
+        # switching it to WAL, so retry briefly.
+        for attempt in range(100):
+            try:
+                if self.path != ":memory:":
+                    self._db.execute("PRAGMA journal_mode=WAL")  # several workers may write
+                self._db.executescript(SCHEMA)
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc) or attempt == 99:
+                    raise
+                time.sleep(0.05)
+
+    def close(self) -> None:
+        with self._lock:
+            self._db.close()
+
+    def add(self, result: dict[str, Any], client_ip: str | None) -> dict[str, Any]:
+        rid = secrets.token_urlsafe(6)
+        created = time.time()
+        result = {**result, "id": rid, "saved_at": created}
+        row = (
+            rid,
+            created,
+            client_ip,
+            (result.get("server") or {}).get("id"),
+            result.get("tool"),
+            _dig(result, "download", "mbps"),
+            _dig(result, "upload", "mbps"),
+            _dig(result, "latency", "median"),
+            _dig(result, "latency", "jitter"),
+            _dig(result, "loss", "loss_pct"),
+            json.dumps(result, separators=(",", ":")),
+        )
+        with self._lock, self._db:
+            self._db.execute(f"INSERT INTO results VALUES ({','.join('?' * len(row))})", row)
+            self._db.execute(
+                "DELETE FROM results WHERE id NOT IN "
+                "(SELECT id FROM results ORDER BY created_at DESC LIMIT ?)",
+                (self.max_rows,),
+            )
+        return dict(zip(SUMMARY_COLUMNS, row[:-1], strict=True))
+
+    def recent(self, limit: int = 50, before: float | None = None) -> list[dict[str, Any]]:
+        sql = f"SELECT {', '.join(SUMMARY_COLUMNS)} FROM results"
+        args: list[Any] = []
+        if before is not None:
+            sql += " WHERE created_at < ?"
+            args.append(before)
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        args.append(limit)
+        with self._lock:
+            return [dict(r) for r in self._db.execute(sql, args)]
+
+    def get(self, rid: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._db.execute("SELECT payload FROM results WHERE id = ?", (rid,)).fetchone()
+        return json.loads(row["payload"]) if row else None

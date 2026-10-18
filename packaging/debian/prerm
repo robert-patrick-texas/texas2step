@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+
+if [ -d /run/systemd/system ] && [ "$1" = "remove" ]; then
+    deb-systemd-invoke stop texas2step.service >/dev/null || true
+fi
+
+# Drop the byte-code postinst compiled, so dpkg can remove or replace the directories.
+case "$1" in
+    remove|upgrade|deconfigure)
+        find /opt/texas2step -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+        ;;
+esac
+
+exit 0

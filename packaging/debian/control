@@ -1,0 +1,18 @@
+Package: texas2step
+Version: @VERSION@
+Architecture: @ARCH@
+Maintainer: Robert Patrick <193846785+robert-patrick-texas@users.noreply.github.com>
+Installed-Size: @SIZE@
+Depends: python3 (>= @PYVER@), python3 (<< @PYNEXT@), libc6 (>= @GLIBC@), adduser
+Recommends: nginx
+Section: net
+Priority: optional
+Homepage: https://github.com/robert-patrick-texas/texas2step
+Description: browser-based throughput, latency, jitter and packet-loss tests
+ texas2step serves a web page and REST API that measure the network path
+ between a browser and this server: multi-stream HTTP throughput, latency and
+ jitter idle and under load, and UDP packet loss over WebRTC.
+ .
+ This package installs a self-contained Python environment under
+ /opt/texas2step, a systemd service on 127.0.0.1:8080, and nginx snippets
+ that publish the service at /texas2step/ on an existing site.

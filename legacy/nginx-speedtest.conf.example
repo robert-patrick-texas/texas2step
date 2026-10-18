@@ -1,0 +1,44 @@
+# Nginx reverse-proxy example for Enterprise Speedtest
+# Place this in /etc/nginx/sites-available/speedtest and symlink to sites-enabled.
+# Assumes the FastAPI app is listening on 127.0.0.1:8000.
+# Replace the SSL paths and server_name with your values.
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name speedtest.internal.example.com;
+
+    # SSL certificates (use your internal CA or Let's Encrypt)
+    ssl_certificate     /etc/ssl/certs/speedtest.crt;
+    ssl_certificate_key /etc/ssl/private/speedtest.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    # Large streaming uploads/downloads – disable buffering
+    client_max_body_size 0;
+    proxy_request_buffering off;
+    proxy_buffering off;
+    proxy_http_version 1.1;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+
+        # Timeouts suitable for long speed tests
+        proxy_connect_timeout 10s;
+        proxy_send_timeout    300s;
+        proxy_read_timeout    300s;
+    }
+}
+
+# Optional HTTP→HTTPS redirect
+server {
+    listen 80;
+    listen [::]:80;
+    server_name speedtest.internal.example.com;
+    return 301 https://$host$request_uri;
+}

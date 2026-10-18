@@ -1,0 +1,77 @@
+[project]
+name = "texas2step"
+dynamic = ["version"]
+description = "Web-centric throughput, latency, jitter and packet-loss measurement between endpoints."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE.md"]
+authors = [{ name = "Robert Patrick" }]
+keywords = ["speedtest", "network", "latency", "jitter", "packet-loss", "webrtc"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Telecommunications Industry",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Networking :: Monitoring",
+]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.27",
+    "websockets>=13",
+    "aiortc>=1.9",
+]
+
+[project.urls]
+Homepage = "https://github.com/robert-patrick-texas/texas2step"
+Documentation = "https://robert-patrick-texas.github.io/texas2step/"
+Repository = "https://github.com/robert-patrick-texas/texas2step"
+Issues = "https://github.com/robert-patrick-texas/texas2step/issues"
+
+[project.scripts]
+texas2step = "texas2step.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+]
+# scripts/build_docs.py: Markdown to the static HTML site in html/
+docs = [
+    "markdown-it-py[linkify]>=3",
+    "pygments>=2.18",
+]
+
+[tool.uv]
+default-groups = ["dev", "docs"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/texas2step/__init__.py"  # the one place the version is set
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/texas2step"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/texas2step", "README.md", "deploy", "docs"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF"]
+ignore = ["B008"]

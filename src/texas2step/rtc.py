@@ -1,0 +1,283 @@
+"""Server side of the UDP probe: a WebRTC data-channel echo.
+
+Browsers cannot send raw UDP, but a WebRTC data channel opened with
+``ordered: false, maxRetransmits: 0`` is delivered over SCTP/DTLS/UDP without
+retransmission, so a packet the network drops stays dropped. The client sends
+numbered probes on the ``probe`` channel; we echo each one unchanged and keep
+receive/transmit counters so the client can separate upstream from downstream
+loss by asking on the reliable ``control`` channel.
+
+By default the OS picks the UDP ports. Given a port range, every host socket of an
+answered session is bound inside it instead, so a firewall can allow exactly that range.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import contextvars
+import errno
+import ipaddress
+import json
+import logging
+import random
+import secrets
+import socket
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+log = logging.getLogger(__name__)
+
+try:
+    from aioice import Candidate, Connection
+    from aioice.candidate import candidate_foundation, candidate_priority
+    from aioice.ice import StunProtocol, server_reflexive_candidate
+    from aiortc import (
+        RTCConfiguration,
+        RTCIceServer,
+        RTCPeerConnection,
+        RTCSessionDescription,
+        rtcicetransport,
+    )
+
+    AVAILABLE = True
+except ImportError:  # pragma: no cover - exercised only on installs without aiortc
+    AVAILABLE = False
+
+
+class RtcUnavailable(RuntimeError):
+    pass
+
+
+class RtcBusy(RuntimeError):
+    pass
+
+
+# The port range for ICE connections created while answering an offer (None: any port).
+_PORT_RANGE: contextvars.ContextVar[tuple[int, int] | None] = contextvars.ContextVar(
+    "rtc_port_range", default=None
+)
+_RCVBUF = 256 * 1024  # the receive buffer aioice gives its own sockets
+
+
+def _bind_in_range(address: str, ports: tuple[int, int]) -> socket.socket | None:
+    """A UDP socket bound to ``address`` on a free port in ``ports``, or None.
+
+    Ports are tried from a random offset so concurrent sessions, and the worker processes
+    sharing the range, rarely contend. A port in use is skipped; any other error means
+    this address cannot be bound at all.
+    """
+    low, high = ports
+    span = high - low + 1
+    offset = random.randrange(span)
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    try:
+        sock = socket.socket(family, socket.SOCK_DGRAM)
+    except OSError as exc:
+        log.info("could not open a UDP socket for %s: %s", address, exc)
+        return None
+    try:
+        for i in range(span):
+            try:
+                sock.bind((address, low + (offset + i) % span))
+            except OSError as exc:
+                if exc.errno != errno.EADDRINUSE:
+                    raise
+            else:
+                return sock
+        log.warning("UDP ports %d-%d are all in use on %s", low, high, address)
+    except OSError as exc:
+        log.info("could not bind %s in %d-%d: %s", address, low, high, exc)
+    sock.close()
+    return None
+
+
+if AVAILABLE:
+
+    class _PortRangeConnection(Connection):
+        """An aioice ``Connection`` that can keep its host candidates in a port range.
+
+        aioice binds every host socket to port 0, and aiortc has no option to change that.
+        A connection created while ``_PORT_RANGE`` is set binds its host sockets here
+        instead and leaves the STUN and TURN candidates to aioice. Without a range it
+        behaves exactly like its base class.
+        """
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self.port_range = _PORT_RANGE.get()
+
+        async def get_component_candidates(
+            self,
+            component: int,
+            addresses: list[str],
+            timeout: int = 5,  # noqa: ASYNC109 - the signature aioice calls
+        ) -> list[Candidate]:
+            if self.port_range is None:
+                return await super().get_component_candidates(component, addresses, timeout)
+
+            loop = asyncio.get_running_loop()
+            hosts: list[tuple[StunProtocol, Candidate]] = []
+            for address in addresses:
+                sock = _bind_in_range(address, self.port_range)
+                if sock is None:
+                    continue
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, _RCVBUF)
+                _, protocol = await loop.create_datagram_endpoint(
+                    lambda: StunProtocol(self), sock=sock
+                )
+                host, port = sock.getsockname()[:2]
+                candidate = Candidate(
+                    foundation=candidate_foundation("host", "udp", host),
+                    component=component,
+                    transport="udp",
+                    priority=candidate_priority(component, "host"),
+                    host=host,
+                    port=port,
+                    type="host",
+                )
+                protocol.local_candidate = candidate
+                hosts.append((protocol, candidate))
+            if addresses and not hosts:
+                low, high = self.port_range
+                raise RtcBusy(f"no free UDP port in {low}-{high}")
+            self._protocols += [protocol for protocol, _ in hosts]
+            candidates = [candidate for _, candidate in hosts]
+
+            # With no addresses, aioice still gathers a relayed (TURN) candidate, whose
+            # socket only talks to the TURN server. Server-reflexive (STUN) candidates are
+            # learned through the host sockets, so they are gathered here.
+            relay = super().get_component_candidates(component, [], timeout)
+            stun = self.stun_server
+            reflexive = [
+                asyncio.wait_for(server_reflexive_candidate(protocol, stun), timeout)
+                for protocol, candidate in hosts
+                if stun and ipaddress.ip_address(candidate.host).version == 4
+            ]
+            relayed, *found = await asyncio.gather(relay, *reflexive, return_exceptions=True)
+            if isinstance(relayed, list):
+                candidates += relayed
+            candidates += [result[0] for result in found if isinstance(result, tuple)]
+            return candidates
+
+
+@dataclass
+class Session:
+    id: str
+    pc: Any
+    created: float = field(default_factory=time.monotonic)
+    last_seen: float = field(default_factory=time.monotonic)
+    rx: int = 0
+    tx: int = 0
+    rx_bytes: int = 0
+
+    def counters(self) -> dict[str, int]:
+        return {"rx": self.rx, "tx": self.tx, "rx_bytes": self.rx_bytes}
+
+
+class RtcEcho:
+    def __init__(
+        self,
+        ice_servers: list[str],
+        max_sessions: int,
+        timeout: float,
+        enabled: bool = True,
+        port_range: tuple[int, int] | None = None,
+    ) -> None:
+        self.enabled = enabled and AVAILABLE
+        self.ice_servers = ice_servers
+        self.max_sessions = max_sessions
+        self.timeout = timeout
+        self.port_range = port_range
+        self.sessions: dict[str, Session] = {}
+        self._reaper: asyncio.Task[None] | None = None
+        if self.enabled and port_range is not None:
+            # aiortc builds its ICE connections from this module-level name. The subclass
+            # changes nothing for connections created outside answer().
+            rtcicetransport.Connection = _PortRangeConnection  # ty: ignore[invalid-assignment]
+
+    def start(self) -> None:
+        if self.enabled and self._reaper is None:
+            self._reaper = asyncio.create_task(self._reap())
+
+    async def stop(self) -> None:
+        if self._reaper:
+            self._reaper.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._reaper
+            self._reaper = None
+        await asyncio.gather(*(self._close(s) for s in list(self.sessions.values())))
+
+    async def answer(self, sdp: str, kind: str = "offer") -> dict[str, str]:
+        if not self.enabled:
+            raise RtcUnavailable("WebRTC probing is disabled or aiortc is not installed")
+        if len(self.sessions) >= self.max_sessions:
+            raise RtcBusy("too many concurrent probe sessions")
+
+        # An explicit (possibly empty) list: given None, aiortc falls back to a public
+        # STUN server, which an internal deployment should not contact unasked.
+        config = RTCConfiguration(iceServers=[RTCIceServer(urls=url) for url in self.ice_servers])
+        pc = RTCPeerConnection(configuration=config)
+        session = Session(id=secrets.token_urlsafe(8), pc=pc)
+        self.sessions[session.id] = session
+
+        @pc.on("datachannel")
+        def on_datachannel(channel: Any) -> None:
+            if channel.label == "probe":
+
+                @channel.on("message")
+                def on_probe(message: bytes | str) -> None:
+                    session.rx += 1
+                    session.rx_bytes += len(message)
+                    session.last_seen = time.monotonic()
+                    channel.send(message)
+                    session.tx += 1
+
+            elif channel.label == "control":
+
+                @channel.on("message")
+                def on_control(message: bytes | str) -> None:
+                    session.last_seen = time.monotonic()
+                    try:
+                        request = json.loads(message)
+                    except ValueError:
+                        return
+                    op = request.get("op")
+                    if op == "stats":
+                        channel.send(json.dumps({"op": "stats", **session.counters()}))
+                    elif op == "reset":
+                        session.rx = session.tx = session.rx_bytes = 0
+                        channel.send(json.dumps({"op": "reset"}))
+
+        @pc.on("connectionstatechange")
+        async def on_state() -> None:
+            if pc.connectionState in {"failed", "closed"}:
+                await self._close(session)
+
+        # The ICE connection is created by setRemoteDescription, in this task's context.
+        token = _PORT_RANGE.set(self.port_range)
+        try:
+            await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type=kind))
+            await pc.setLocalDescription(await pc.createAnswer())
+        except Exception:
+            await self._close(session)
+            raise
+        finally:
+            _PORT_RANGE.reset(token)
+        return {"id": session.id, "sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+
+    async def _close(self, session: Session) -> None:
+        if self.sessions.pop(session.id, None) is not None:
+            with contextlib.suppress(Exception):
+                await session.pc.close()
+
+    async def _reap(self) -> None:
+        while True:
+            await asyncio.sleep(5)
+            now = time.monotonic()
+            for session in list(self.sessions.values()):
+                idle = now - session.last_seen
+                if idle > self.timeout or (session.rx == 0 and now - session.created > 30):
+                    log.debug("closing idle rtc session %s", session.id)
+                    await self._close(session)

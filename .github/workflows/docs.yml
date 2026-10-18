@@ -1,0 +1,69 @@
+# Publish the Markdown documentation to GitHub Pages.
+#
+# Renders every .md file with scripts/build_docs.py (the same command as `make docs`) and
+# deploys html/. Enable Pages under Settings → Pages with Source "GitHub Actions"; until
+# then the build still runs, which checks every internal link, and the deploy is skipped.
+name: docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.md"
+      - "docs/images/**"
+      - "scripts/build_docs.py"
+      - "scripts/docs.css"
+      - "web/public/favicon.svg"
+      - "pyproject.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      pages: ${{ steps.pages.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+
+      - name: Render Markdown into html/ (fails on broken links)
+        run: uv run --only-group docs python scripts/build_docs.py
+
+      - name: Check that GitHub Pages is enabled
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/pages" --silent 2>/dev/null; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=GitHub Pages is not enabled::Enable it under Settings → Pages with Source \"GitHub Actions\", then re-run this workflow."
+          fi
+
+      - uses: actions/upload-pages-artifact@v5
+        if: steps.pages.outputs.enabled == 'true'
+        with:
+          path: html
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.pages == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

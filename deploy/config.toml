@@ -1,0 +1,50 @@
+# texas2step settings: /etc/texas2step/config.toml
+# Every key is optional; the commented values are the defaults. Any key can also be
+# set as an environment variable TEXAS2STEP_<KEY> (upper case).
+# After a change: sudo systemctl restart texas2step
+# Reference: https://github.com/robert-patrick-texas/texas2step/blob/main/docs/configuration.md
+
+# --- Identity ----------------------------------------------------------------------
+# server_id = "local"                   # short id stored with results, e.g. "dal1"
+# server_name = "texas2step"            # shown in the header and results
+# server_location = ""                  # free text, e.g. "Dallas, TX"
+# server_url_v4 = ""                    # IPv4-only base URL (enables the IPv4/IPv6 switch)
+# server_url_v6 = ""                    # IPv6-only base URL
+
+# --- Limits --------------------------------------------------------------------------
+# max_download_bytes = 1073741824
+# max_upload_bytes = 1073741824
+# max_stream_seconds = 60.0
+
+# --- UDP probe (WebRTC) ----------------------------------------------------------------
+# webrtc_enabled = true
+# ice_servers = []                      # e.g. ["stun:stun.example.net:3478"]; none = host candidates only
+# max_rtc_sessions = 32                 # per worker
+# rtc_session_timeout = 120.0
+# rtc_port_min = 0                      # pin the probe's UDP ports so the firewall can
+# rtc_port_max = 0                      # allow just that range, e.g. 61000 and 61999
+
+# --- Result history --------------------------------------------------------------------
+# results_enabled = true
+results_path = "/var/lib/texas2step/results.db"
+# results_max_rows = 10000
+
+# --- Server-side measurement (/api/v1/measure/*) ---------------------------------------
+# measure_enabled = true
+# allow_any_target = false              # true = any URL, not just [[locations]]
+
+# --- Defaults offered to the browser UI --------------------------------------------------
+# default_streams = 4
+# default_seconds = 10.0
+# default_packets = 500
+
+# --- HTTP ----------------------------------------------------------------------------------
+# cors_origins = ["*"]
+# trusted_proxies = ["127.0.0.1", "::1"]  # peers whose X-Forwarded-* headers are believed
+
+# --- Other texas2step servers in the location picker ---------------------------------------
+# [[locations]]
+# id = "hou1"
+# name = "Houston DC"
+# url = "https://www.example.org/texas2step"
+# location = "Houston, TX"

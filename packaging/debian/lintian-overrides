@@ -1,0 +1,11 @@
+# A self-contained virtualenv under /opt/texas2step, by design.
+texas2step: dir-or-file-in-opt
+# Third-party wheels are shipped exactly as their projects publish them.
+texas2step: unstripped-binary-or-object
+texas2step: embedded-library
+# uv's relocatable launchers are sh/Python polyglots: sh runs only the first two lines.
+texas2step: shell-script-fails-syntax-check
+# Distributed from GitHub, not the Debian archive.
+texas2step: initial-upload-closes-no-bugs
+# `texas2step --help` and the online docs cover the command.
+texas2step: no-manual-page

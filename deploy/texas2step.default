@@ -1,0 +1,13 @@
+# Settings for the texas2step service (read by texas2step.service).
+# After a change: sudo systemctl restart texas2step
+#
+# Where the service listens. nginx reaches it through the upstream in
+# /etc/nginx/conf.d/texas2step.conf, so change that too if you move it.
+#LISTEN_HOST=127.0.0.1
+#LISTEN_PORT=8080
+#
+# Worker processes. More help on multi-gigabit links, where Python's per-connection
+# CPU cost is the limit.
+#WORKERS=2
+#
+# Measurement settings live in /etc/texas2step/config.toml.

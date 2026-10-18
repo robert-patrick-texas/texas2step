@@ -1,0 +1,36 @@
+[Unit]
+Description=texas2step network measurement server
+Documentation=https://github.com/robert-patrick-texas/texas2step
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=texas2step
+Group=texas2step
+Environment=TEXAS2STEP_CONFIG=/etc/texas2step/config.toml
+Environment=LISTEN_HOST=127.0.0.1 LISTEN_PORT=8080 WORKERS=2
+EnvironmentFile=-/etc/default/texas2step
+ExecStart=/opt/texas2step/venv/bin/texas2step serve --host ${LISTEN_HOST} --port ${LISTEN_PORT} --workers ${WORKERS}
+# uvicorn exits 0 when a worker fails to start, so restart whatever the status.
+Restart=always
+RestartSec=3
+
+# Saved results live in /var/lib/texas2step.
+StateDirectory=texas2step
+WorkingDirectory=/var/lib/texas2step
+LimitNOFILE=65536
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+# AF_NETLINK lets the UDP probe list the host's addresses.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target

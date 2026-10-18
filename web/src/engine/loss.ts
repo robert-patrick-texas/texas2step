@@ -1,0 +1,211 @@
+// UDP probing over a WebRTC data channel (unordered, no retransmissions), with a
+// WebSocket fallback when UDP is blocked.
+import type { LossResult } from "../types";
+import type { WsProber } from "./latency";
+import { type Endpoint, sleep } from "./net";
+import { summarize } from "./stats";
+
+const HEADER = 12; // u32 sequence + f64 send time
+
+function waitFor(target: EventTarget, event: string, timeoutMs: number, ok: () => boolean): Promise<boolean> {
+  if (ok()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => done(false), timeoutMs);
+    const check = () => ok() && done(true);
+    const done = (v: boolean) => {
+      clearTimeout(timer);
+      target.removeEventListener(event, check);
+      resolve(v);
+    };
+    target.addEventListener(event, check);
+  });
+}
+
+export class RtcProbe {
+  onEcho: ((seq: number, rtt: number) => void) | null = null;
+  private controlWaiters: ((msg: Record<string, number>) => void)[] = [];
+
+  private constructor(
+    private readonly pc: RTCPeerConnection,
+    private readonly probe: RTCDataChannel,
+    private readonly control: RTCDataChannel,
+  ) {
+    probe.binaryType = "arraybuffer";
+    probe.onmessage = (ev) => {
+      const now = performance.now();
+      if (!(ev.data instanceof ArrayBuffer) || ev.data.byteLength < HEADER) return;
+      const view = new DataView(ev.data);
+      this.onEcho?.(view.getUint32(0, true), now - view.getFloat64(4, true));
+    };
+    control.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data)) as Record<string, number>;
+        this.controlWaiters.shift()?.(msg);
+      } catch {
+        /* ignore */
+      }
+    };
+  }
+
+  static async connect(ep: Endpoint, iceServers: RTCIceServer[], timeoutMs = 8000): Promise<RtcProbe> {
+    const pc = new RTCPeerConnection({ iceServers });
+    try {
+      const probe = pc.createDataChannel("probe", { ordered: false, maxRetransmits: 0 });
+      const control = pc.createDataChannel("control");
+      await pc.setLocalDescription(await pc.createOffer());
+      // The server answers without trickle ICE, so send a complete candidate list.
+      await waitFor(pc, "icegatheringstatechange", 2500, () => pc.iceGatheringState === "complete");
+      const answer = await ep.post<RTCSessionDescriptionInit>("/rtc/offer", {
+        sdp: pc.localDescription!.sdp,
+        type: "offer",
+      });
+      await pc.setRemoteDescription({ sdp: answer.sdp, type: "answer" });
+      const open = await waitFor(probe, "open", timeoutMs, () => probe.readyState === "open");
+      if (!open) throw new Error("UDP path did not open (ICE failed or UDP blocked)");
+      await waitFor(control, "open", 2000, () => control.readyState === "open");
+      return new RtcProbe(pc, probe, control);
+    } catch (err) {
+      pc.close();
+      throw err;
+    }
+  }
+
+  get open(): boolean {
+    return this.probe.readyState === "open";
+  }
+
+  send(seq: number, size: number): void {
+    const buf = new ArrayBuffer(Math.max(size, HEADER));
+    const view = new DataView(buf);
+    view.setUint32(0, seq >>> 0, true);
+    view.setFloat64(4, performance.now(), true);
+    this.probe.send(buf);
+  }
+
+  async counters(timeoutMs = 2000): Promise<{ rx: number; tx: number } | null> {
+    if (this.control.readyState !== "open") return null;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(null), timeoutMs);
+      this.controlWaiters.push((msg) => {
+        clearTimeout(timer);
+        resolve({ rx: msg.rx ?? 0, tx: msg.tx ?? 0 });
+      });
+      this.control.send(JSON.stringify({ op: "stats" }));
+    });
+  }
+
+  close(): void {
+    this.probe.close();
+    this.control.close();
+    this.pc.close();
+  }
+}
+
+export interface LossOptions {
+  packets: number;
+  intervalMs: number;
+  size: number;
+  waitMs: number;
+  signal: AbortSignal;
+  onSent?: (seq: number) => void;
+  onEcho?: (seq: number, rtt: number) => void;
+}
+
+function finish(
+  rtts: (number | null)[],
+  order: number[],
+  duplicates: number,
+  counters: { rx: number; tx: number } | null,
+  transport: LossResult["transport"],
+  opts: LossOptions,
+): LossResult {
+  const sent = rtts.length;
+  const received = rtts.filter((r) => r !== null).length;
+  let outOfOrder = 0;
+  for (let i = 1; i < order.length; i++) if (order[i]! < order[i - 1]!) outOfOrder++;
+  let up: number | null = null;
+  let down: number | null = null;
+  if (counters && sent) {
+    up = Math.max(0, ((sent - counters.rx) / sent) * 100);
+    if (counters.tx) down = Math.max(0, ((counters.tx - received) / counters.tx) * 100);
+  }
+  return {
+    transport,
+    sent,
+    received,
+    lost: sent - received,
+    loss_pct: sent ? ((sent - received) / sent) * 100 : 0,
+    up_loss_pct: up,
+    down_loss_pct: down,
+    out_of_order: outOfOrder,
+    duplicates,
+    interval_ms: opts.intervalMs,
+    size: opts.size,
+    rtt: summarize(
+      rtts.filter((r): r is number => r !== null),
+      0,
+      false,
+    ),
+    packets: rtts.map((r) => (r === null ? null : Math.round(r * 1000) / 1000)),
+  };
+}
+
+/** Paced against a schedule (not setInterval) so timer clamping cannot drop probes. */
+async function paced(opts: LossOptions, send: (seq: number) => void): Promise<void> {
+  const start = performance.now();
+  let seq = 0;
+  while (seq < opts.packets && !opts.signal.aborted) {
+    const due = Math.floor((performance.now() - start) / opts.intervalMs) + 1;
+    while (seq < Math.min(due, opts.packets)) {
+      send(seq);
+      opts.onSent?.(seq);
+      seq++;
+    }
+    await sleep(Math.max(0, start + seq * opts.intervalMs - performance.now()));
+  }
+}
+
+export async function measureLossRtc(probe: RtcProbe, opts: LossOptions): Promise<LossResult> {
+  const rtts: (number | null)[] = new Array<number | null>(opts.packets).fill(null);
+  const order: number[] = [];
+  let duplicates = 0;
+  let pending = opts.packets;
+  probe.onEcho = (seq, rtt) => {
+    if (seq >= opts.packets) return;
+    if (rtts[seq] !== null) {
+      duplicates++;
+      return;
+    }
+    rtts[seq] = rtt;
+    order.push(seq);
+    pending--;
+    opts.onEcho?.(seq, rtt);
+  };
+  await paced(opts, (seq) => probe.send(seq, opts.size));
+  const waitUntil = performance.now() + opts.waitMs;
+  while (pending > 0 && performance.now() < waitUntil && !opts.signal.aborted) await sleep(50);
+  probe.onEcho = null;
+  const counters = await probe.counters();
+  return finish(rtts, order, duplicates, counters, "webrtc", opts);
+}
+
+/** TCP fallback: delivery is reliable, so only probes that time out count as lost. */
+export async function measureLossWs(prober: WsProber, opts: LossOptions): Promise<LossResult> {
+  const rtts: (number | null)[] = new Array<number | null>(opts.packets).fill(null);
+  const order: number[] = [];
+  const inflight: Promise<void>[] = [];
+  await paced(opts, (seq) => {
+    inflight.push(
+      prober.ping(opts.waitMs).then((rtt) => {
+        if (rtt === null) return;
+        rtts[seq] = rtt;
+        order.push(seq);
+        opts.onEcho?.(seq, rtt);
+      }),
+    );
+  });
+  await Promise.all(inflight);
+  const result = finish(rtts, order, 0, null, "websocket", opts);
+  result.note = "UDP unavailable; measured over TCP, where loss shows up as delay, not drops.";
+  return result;
+}

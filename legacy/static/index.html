@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enterprise Network Speedtest</title>
+  <style>
+    :root { --bg: #0f172a; --card: #1e293b; --accent: #3b82f6; --text: #e2e8f0; --muted: #94a3b8; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+    .container { max-width: 960px; margin: 0 auto; }
+    h1 { margin-top: 0; }
+    .card { background: var(--card); border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+    button { background: var(--accent); color: white; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 14px; margin: 4px; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: #475569; }
+    select, input { background: #334155; color: white; border: 1px solid #475569; border-radius: 6px; padding: 8px; }
+    .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 12px; }
+    .metric { background: #334155; padding: 12px; border-radius: 8px; }
+    .metric .value { font-size: 1.4em; font-weight: 600; }
+    .metric .label { color: var(--muted); font-size: 0.85em; }
+    canvas { width: 100%; height: 220px; background: #0f172a; border-radius: 8px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .status { color: var(--muted); font-size: 0.9em; }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Enterprise Network Speedtest</h1>
+    <p class="status">Internal self-service throughput, latency, and stability measurement. HTTP-based probes only (not raw ICMP).</p>
+
+    <div class="card">
+      <div class="row">
+        <label>Test Location: <select id="locationSelect"></select></label>
+        <label>Address Family: 
+          <select id="familySelect">
+            <option value="auto">Auto</option>
+            <option value="ipv4">Force IPv4</option>
+            <option value="ipv6">Force IPv6</option>
+          </select>
+        </label>
+        <label>Streams: 
+          <select id="streamsSelect">
+            <option value="1">1 (Single-flow)</option>
+            <option value="4" selected>4 (Multi-flow)</option>
+            <option value="8">8</option>
+            <option value="16">16</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="btnDownload">Download Test</button>
+        <button id="btnUpload">Upload Test</button>
+        <button id="btnBoth">Full Test (DL + UL)</button>
+        <button id="btnMonitor" class="secondary">Start Monitor</button>
+        <button id="btnReport" class="secondary" disabled>Download HTML Report</button>
+      </div>
+      <div id="status" class="status" style="margin-top:8px">Ready.</div>
+    </div>
+
+    <div class="card">
+      <h3>Results</h3>
+      <div id="ipInfo" class="status">Connecting IP: —</div>
+      <div class="results" id="results">
+        <div class="metric"><div class="label">Download</div><div class="value" id="dlValue">—</div></div>
+        <div class="metric"><div class="label">Upload</div><div class="value" id="ulValue">—</div></div>
+        <div class="metric"><div class="label">RTT (avg)</div><div class="value" id="rttValue">—</div></div>
+        <div class="metric"><div class="label">Jitter</div><div class="value" id="jitterValue">—</div></div>
+        <div class="metric"><div class="label">Loss / Stalls</div><div class="value" id="lossValue">—</div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Monitor (real-time RTT / jitter / loss)</h3>
+      <canvas id="chart" width="900" height="220"></canvas>
+      <div class="status" id="monitorStatus">Monitor idle.</div>
+    </div>
+  </div>
+
+  <script>
+    const API = ""; // same origin by default; overridden by location selection
+    let currentBase = "";
+    let monitorInterval = null;
+    let monitorData = []; // {t, rtt, jitter, loss}
+    let sessionResults = {};
+
+    const els = {
+      locationSelect: document.getElementById("locationSelect"),
+      familySelect: document.getElementById("familySelect"),
+      streamsSelect: document.getElementById("streamsSelect"),
+      status: document.getElementById("status"),
+      ipInfo: document.getElementById("ipInfo"),
+      dlValue: document.getElementById("dlValue"),
+      ulValue: document.getElementById("ulValue"),
+      rttValue: document.getElementById("rttValue"),
+      jitterValue: document.getElementById("jitterValue"),
+      lossValue: document.getElementById("lossValue"),
+      btnReport: document.getElementById("btnReport"),
+      chart: document.getElementById("chart"),
+      monitorStatus: document.getElementById("monitorStatus"),
+    };
+
+    async function loadLocations() {
+      try {
+        const r = await fetch("/locations");
+        const data = await r.json();
+        els.locationSelect.innerHTML = "";
+        data.locations.forEach((loc, i) => {
+          const opt = document.createElement("option");
+          opt.value = loc.base_url || "";
+          opt.textContent = loc.name;
+          if (i === 0) opt.selected = true;
+          els.locationSelect.appendChild(opt);
+        });
+        currentBase = els.locationSelect.value;
+        if (data.locations.length <= 1) els.locationSelect.parentElement.style.display = "none";
+      } catch (e) {
+        els.locationSelect.innerHTML = '<option value="">Primary</option>';
+      }
+    }
+
+    els.locationSelect.addEventListener("change", () => {
+      currentBase = els.locationSelect.value;
+    });
+
+    function setStatus(msg) { els.status.textContent = msg; }
+
+    async function fetchIP() {
+      try {
+        const r = await fetch(currentBase + "/ip");
+        const data = await r.json();
+        els.ipInfo.textContent = `Connecting IP: ${data.ip} (${data.family})`;
+        sessionResults.ip = data;
+      } catch (e) {
+        els.ipInfo.textContent = "Connecting IP: unavailable";
+      }
+    }
+
+    // ---- Throughput helpers ----
+    async function measureDownload(streams = 1, durationMs = 8000) {
+      const start = performance.now();
+      let totalBytes = 0;
+      const controllers = [];
+
+      const doStream = async () => {
+        const ctrl = new AbortController();
+        controllers.push(ctrl);
+        const url = currentBase + "/download?bytes=" + (50 * 1024 * 1024); // 50 MiB per stream
+        const res = await fetch(url, { signal: ctrl.signal });
+        const reader = res.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          totalBytes += value.length;
+          if (performance.now() - start > durationMs) {
+            ctrl.abort();
+            break;
+          }
+        }
+      };
+
+      const promises = Array.from({ length: streams }, () => doStream().catch(() => {}));
+      await Promise.all(promises);
+      const elapsed = (performance.now() - start) / 1000;
+      const mbps = (totalBytes * 8) / (elapsed * 1_000_000);
+      return { mbps: Math.round(mbps * 100) / 100, bytes: totalBytes, seconds: elapsed };
+    }
+
+    async function measureUpload(streams = 1, durationMs = 8000) {
+      const start = performance.now();
+      let totalBytes = 0;
+      const chunk = new Uint8Array(256 * 1024); // 256 KiB chunks
+      crypto.getRandomValues(chunk);
+
+      const doStream = async () => {
+        const body = new ReadableStream({
+          start(controller) {
+            const id = setInterval(() => {
+              if (performance.now() - start > durationMs) {
+                clearInterval(id);
+                controller.close();
+                return;
+              }
+              controller.enqueue(chunk);
+              totalBytes += chunk.length;
+            }, 10);
+          }
+        });
+        await fetch(currentBase + "/upload", { method: "POST", body, duplex: "half" }).catch(() => {});
+      };
+
+      const promises = Array.from({ length: streams }, () => doStream());
+      await Promise.all(promises);
+      const elapsed = (performance.now() - start) / 1000;
+      const mbps = (totalBytes * 8) / (elapsed * 1_000_000);
+      return { mbps: Math.round(mbps * 100) / 100, bytes: totalBytes, seconds: elapsed };
+    }
+
+    async function measureLatency(samples = 10) {
+      const rtts = [];
+      let losses = 0;
+      for (let i = 0; i < samples; i++) {
+        const t0 = performance.now();
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 2000);
+          await fetch(currentBase + "/ping", { signal: ctrl.signal });
+          clearTimeout(timer);
+          rtts.push(performance.now() - t0);
+        } catch {
+          losses++;
+        }
+      }
+      if (rtts.length === 0) return { avg: null, jitter: null, loss: 100 };
+      const avg = rtts.reduce((a, b) => a + b, 0) / rtts.length;
+      const variance = rtts.reduce((a, b) => a + (b - avg) ** 2, 0) / rtts.length;
+      return {
+        avg: Math.round(avg * 10) / 10,
+        jitter: Math.round(Math.sqrt(variance) * 10) / 10,
+        loss: Math.round((losses / samples) * 100)
+      };
+    }
+
+    // ---- UI actions ----
+    document.getElementById("btnDownload").onclick = async () => {
+      setStatus("Running download test…");
+      const streams = parseInt(els.streamsSelect.value);
+      const res = await measureDownload(streams);
+      els.dlValue.textContent = res.mbps + " Mbps";
+      sessionResults.download = res;
+      sessionResults.streams = streams;
+      els.btnReport.disabled = false;
+      setStatus("Download complete.");
+      await fetchIP();
+    };
+
+    document.getElementById("btnUpload").onclick = async () => {
+      setStatus("Running upload test…");
+      const streams = parseInt(els.streamsSelect.value);
+      const res = await measureUpload(streams);
+      els.ulValue.textContent = res.mbps + " Mbps";
+      sessionResults.upload = res;
+      sessionResults.streams = streams;
+      els.btnReport.disabled = false;
+      setStatus("Upload complete.");
+      await fetchIP();
+    };
+
+    document.getElementById("btnBoth").onclick = async () => {
+      setStatus("Running full test…");
+      const streams = parseInt(els.streamsSelect.value);
+      const lat = await measureLatency(12);
+      els.rttValue.textContent = lat.avg ? lat.avg + " ms" : "—";
+      els.jitterValue.textContent = lat.jitter ? lat.jitter + " ms" : "—";
+      els.lossValue.textContent = lat.loss + " %";
+      sessionResults.latency = lat;
+
+      const dl = await measureDownload(streams);
+      els.dlValue.textContent = dl.mbps + " Mbps";
+      sessionResults.download = dl;
+
+      const ul = await measureUpload(streams);
+      els.ulValue.textContent = ul.mbps + " Mbps";
+      sessionResults.upload = ul;
+      sessionResults.streams = streams;
+
+      els.btnReport.disabled = false;
+      setStatus("Full test complete.");
+      await fetchIP();
+    };
+
+    // ---- Monitor mode ----
+    function drawChart() {
+      const ctx = els.chart.getContext("2d");
+      const w = els.chart.width;
+      const h = els.chart.height;
+      ctx.clearRect(0, 0, w, h);
+      if (monitorData.length < 2) return;
+
+      const maxRtt = Math.max(50, ...monitorData.map(d => d.rtt || 0));
+      const points = monitorData.slice(-120); // last ~2 min at 1s
+
+      ctx.strokeStyle = "#3b82f6";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      points.forEach((d, i) => {
+        const x = (i / (points.length - 1)) * w;
+        const y = h - ((d.rtt || 0) / maxRtt) * (h - 20);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+
+      // jitter band (simple)
+      ctx.strokeStyle = "rgba(59,130,246,0.3)";
+      ctx.beginPath();
+      points.forEach((d, i) => {
+        const x = (i / (points.length - 1)) * w;
+        const y = h - (((d.rtt || 0) + (d.jitter || 0)) / maxRtt) * (h - 20);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    document.getElementById("btnMonitor").onclick = () => {
+      if (monitorInterval) {
+        clearInterval(monitorInterval);
+        monitorInterval = null;
+        document.getElementById("btnMonitor").textContent = "Start Monitor";
+        els.monitorStatus.textContent = "Monitor stopped.";
+        return;
+      }
+      document.getElementById("btnMonitor").textContent = "Stop Monitor";
+      els.monitorStatus.textContent = "Monitor running (1 Hz)…";
+      let samples = [];
+      monitorInterval = setInterval(async () => {
+        const t0 = performance.now();
+        try {
+          await fetch(currentBase + "/ping");
+          samples.push(performance.now() - t0);
+        } catch {
+          samples.push(null);
+        }
+        if (samples.length >= 5) {
+          const valid = samples.filter(s => s !== null);
+          const avg = valid.length ? valid.reduce((a,b)=>a+b,0)/valid.length : null;
+          const jitter = valid.length > 1 ? Math.max(...valid) - Math.min(...valid) : 0;
+          const loss = ((samples.length - valid.length) / samples.length) * 100;
+          monitorData.push({ t: Date.now(), rtt: avg, jitter, loss });
+          samples = [];
+          drawChart();
+          els.monitorStatus.textContent = `RTT ${avg ? avg.toFixed(1) : "—"} ms | Jitter ${jitter.toFixed(1)} ms | Loss ${loss.toFixed(0)}%`;
+        }
+      }, 200); // ~5 samples/sec, aggregated every second
+    };
+
+    // ---- HTML Report ----
+    document.getElementById("btnReport").onclick = () => {
+      const now = new Date().toISOString();
+      const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Speedtest Report ${now}</title>
+<style>body{font-family:system-ui;padding:20px;background:#0f172a;color:#e2e8f0} table{border-collapse:collapse} td,th{border:1px solid #334155;padding:8px}</style>
+</head><body>
+<h1>Enterprise Speedtest Report</h1>
+<p>Generated: ${now}</p>
+<p>Connecting IP: ${sessionResults.ip ? sessionResults.ip.ip + " (" + sessionResults.ip.family + ")" : "—"}</p>
+<p>Streams used: ${sessionResults.streams || "—"}</p>
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Download</td><td>${sessionResults.download ? sessionResults.download.mbps + " Mbps" : "—"}</td></tr>
+<tr><td>Upload</td><td>${sessionResults.upload ? sessionResults.upload.mbps + " Mbps" : "—"}</td></tr>
+<tr><td>RTT avg</td><td>${sessionResults.latency ? sessionResults.latency.avg + " ms" : "—"}</td></tr>
+<tr><td>Jitter</td><td>${sessionResults.latency ? sessionResults.latency.jitter + " ms" : "—"}</td></tr>
+<tr><td>Loss / Stalls</td><td>${sessionResults.latency ? sessionResults.latency.loss + " %" : "—"}</td></tr>
+</table>
+<p>Monitor samples collected: ${monitorData.length}</p>
+</body></html>`;
+      const blob = new Blob([html], { type: "text/html" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `speedtest-report-${now.slice(0,19).replace(/:/g,"-")}.html`;
+      a.click();
+    };
+
+    // Init
+    loadLocations();
+    fetchIP();
+  </script>
+</body>
+</html>

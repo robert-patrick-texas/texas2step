@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+
+if [ -d /run/systemd/system ]; then
+    systemctl --system daemon-reload >/dev/null || true
+fi
+
+if [ "$1" = "remove" ] && command -v deb-systemd-helper >/dev/null; then
+    deb-systemd-helper mask texas2step.service >/dev/null || true
+fi
+
+if [ "$1" = "purge" ]; then
+    if command -v deb-systemd-helper >/dev/null; then
+        deb-systemd-helper purge texas2step.service >/dev/null || true
+        deb-systemd-helper unmask texas2step.service >/dev/null || true
+    fi
+    # Saved results. The texas2step system user is kept, as Debian policy advises.
+    rm -rf /var/lib/texas2step
+fi
+
+exit 0
