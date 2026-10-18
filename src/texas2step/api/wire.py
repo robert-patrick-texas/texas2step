@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.requests import ClientDisconnect
 
 from .. import payload
 from ..rtc import RtcBusy, RtcUnavailable
@@ -75,16 +76,21 @@ async def up(request: Request) -> Response:
     limit = request.app.state.settings.max_upload_bytes
     total = first_len = 0
     first = last = None
-    async for data in request.stream():
-        if not data:
-            continue
-        now = time.perf_counter()
-        if first is None:
-            first, first_len = now, len(data)
-        last = now
-        total += len(data)
-        if total > limit:
-            raise HTTPException(413, f"upload exceeds {limit} bytes")
+    try:
+        async for data in request.stream():
+            if not data:
+                continue
+            now = time.perf_counter()
+            if first is None:
+                first, first_len = now, len(data)
+            last = now
+            total += len(data)
+            if total > limit:
+                raise HTTPException(413, f"upload exceeds {limit} bytes")
+    except ClientDisconnect:
+        # Browsers cancel in-flight uploads when a timed test ends. Nobody is left to
+        # answer, so this is never sent; 499 is nginx's code for "client closed request".
+        return Response(status_code=499)
     t_done = time.perf_counter()
     rx_ms = (last - first) * 1000 if first is not None and last is not None else 0.0
     mbps = (total - first_len) * 8 / (rx_ms * 1000) if rx_ms > 0 else None

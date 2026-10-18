@@ -1,6 +1,7 @@
 import re
 
 from texas2step import __version__
+from texas2step.app import create_app
 
 
 def test_ping_headers(client):
@@ -202,3 +203,37 @@ def test_openapi_servers_follow_each_request(client, settings):
     assert prefixed["servers"] == [{"url": "/texas2step"}]
     assert direct["servers"] == [{"url": "/"}]
     assert "/api/v1/ping" in direct["paths"] and direct["info"]["title"] == "texas2step"
+
+
+async def test_upload_abandoned_by_the_client_is_not_an_error(settings):
+    """Browsers cancel in-flight uploads when a timed test ends; that isn't a server error."""
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"x" * 65536, "more_body": True},
+            {"type": "http.disconnect"},
+        ]
+    )
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        return next(messages)
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/up",
+        "raw_path": b"/api/v1/up",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [(b"host", b"testserver")],
+        "client": ("127.0.0.1", 50000),
+        "server": ("testserver", 80),
+    }
+    await create_app(settings)(scope, receive, send)  # raised ClientDisconnect before the fix
+    assert sent[0]["status"] == 499
