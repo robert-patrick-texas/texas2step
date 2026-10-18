@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.0   # setup-uv publishes full version tags only
 
       - name: Render Markdown into html/ (fails on broken links)
         run: uv run --only-group docs python scripts/build_docs.py
