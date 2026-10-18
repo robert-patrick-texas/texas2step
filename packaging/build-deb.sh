@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build dist/texas2step_<version>-<revision>_<arch>.deb.
+# Build dist/texas2step-<version>-<revision>-<arch>.deb. The version comes from
+# src/texas2step/__init__.py, the only place it is set.
 #
 # The package carries a self-contained virtualenv at /opt/texas2step/venv that runs on
 # the system Python and holds compiled wheels (aiortc, cryptography, ...). So build on
@@ -18,7 +19,7 @@ revision=${REVISION:-1}
 version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/texas2step/__init__.py)
 arch=$(dpkg --print-architecture)
 read -r pyver pynext < <("$python" -c 'import sys; v = sys.version_info; print(f"{v[0]}.{v[1]} {v[0]}.{v[1] + 1}")')
-name="texas2step_${version}-${revision}_${arch}"
+name="texas2step-${version}-${revision}-${arch}"
 work=build/deb
 stage="$work/$name"
 venv="$stage/opt/texas2step/venv"

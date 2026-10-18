@@ -2,8 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <!-- The server rewrites this per request when texas2step sits under a path prefix. -->
+    <!-- The server fills these in on every request: the path prefix it is published
+         under (e.g. /texas2step/) and its version, from src/texas2step/__init__.py. -->
     <base href="/" />
+    <meta name="texas2step-version" content="" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>texas2step</title>
     <meta name="description" content="Throughput, latency, jitter and packet loss between you and this server." />

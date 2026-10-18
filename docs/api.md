@@ -92,9 +92,9 @@ Browser runs, `texas2step run --json` and `/measure/full` share one shape (snake
 ```jsonc
 {
   "version": 1,
-  "tool": "texas2step-web/0.1.0",
+  "tool": "texas2step-web/<version>",
   "started_at": "2026-10-18T07:24:00Z",
-  "server": {"id": "dal1", "name": "Dallas DC", "location": "Dallas, TX", "url": "https://…", "version": "0.1.0"},
+  "server": {"id": "dal1", "name": "Dallas DC", "location": "Dallas, TX", "url": "https://…", "version": "<version>"},
   "client": {"ip": "10.1.2.3", "family": "IPv4", "protocol": "h2", "user_agent": "…"},
   "config": {"streams": 4, "seconds": 10, "packets": 500, "interval_ms": 10},
   "latency": {"count": 20, "lost": 0, "min": 2.9, "median": 3.2, "p90": 3.8, "jitter": 0.4, "samples": [ … ], …},

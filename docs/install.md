@@ -20,13 +20,15 @@ work on the code, see [Development](development.md).
 
 ## 1. Install the package
 
-Download the `.deb` from the
+Download the newest `.deb` from the
 [releases page](https://github.com/robert-patrick-texas/texas2step/releases) and install
-it with apt, which also pulls in its few dependencies:
+it with apt, which also pulls in its few dependencies. From the command line:
 
 ```bash
-curl -LO https://github.com/robert-patrick-texas/texas2step/releases/download/v0.1.0/texas2step_0.1.0-1_amd64.deb
-sudo apt install ./texas2step_0.1.0-1_amd64.deb
+cd "$(mktemp -d)"
+curl -sL https://api.github.com/repos/robert-patrick-texas/texas2step/releases/latest \
+    | grep -o 'https://[^"]*-amd64\.deb' | xargs curl -sLO
+sudo apt install ./texas2step-*-amd64.deb
 ```
 
 The service starts straight away, listening on `127.0.0.1:8080`, so it's reachable only
@@ -34,7 +36,7 @@ through nginx. Check it:
 
 ```bash
 systemctl status texas2step
-curl -s http://127.0.0.1:8080/api/v1/health      # {"status":"ok","version":"0.1.0"}
+curl -s http://127.0.0.1:8080/api/v1/health      # {"status":"ok","version":"…"}
 ```
 
 What the package installs:
@@ -197,12 +199,8 @@ To see the ports in use during a test, run `sudo ss -uanp | grep texas2step`.
 
 ## Upgrade
 
-Install the newer package the same way. The service restarts, and your configuration
-and saved results are kept.
-
-```bash
-sudo apt install ./texas2step_<version>_amd64.deb
-```
+Run the commands from [step 1](#1-install-the-package) again: they fetch the newest
+release. The service restarts, and your configuration and saved results are kept.
 
 ## Remove
 

@@ -139,7 +139,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def spa(request: Request) -> HTMLResponse:
         # Relative URLs in the page resolve against <base href>, which carries the prefix.
         base = html.escape(request.scope.get("root_path", "") + "/")
-        page = index.read_text().replace('<base href="/" />', f'<base href="{base}" />', 1)
+        page = (
+            index.read_text()
+            .replace('<base href="/" />', f'<base href="{base}" />', 1)
+            .replace(
+                '<meta name="texas2step-version" content="" />',
+                f'<meta name="texas2step-version" content="{html.escape(__version__)}" />',
+                1,
+            )
+        )
         return HTMLResponse(page, headers={"Cache-Control": "no-cache"})
 
     for route in SPA_ROUTES:

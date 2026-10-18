@@ -43,7 +43,7 @@ the [releases page](https://github.com/robert-patrick-texas/texas2step/releases)
 one line to your site's `server { }` block:
 
 ```bash
-sudo apt install ./texas2step_0.1.0-1_amd64.deb
+sudo apt install ./texas2step-*-amd64.deb        # the package from the releases page
 #   in /etc/nginx/sites-available/<your site>:  include snippets/texas2step.conf;
 sudo nginx -t && sudo systemctl reload nginx     # → https://www.example.net/texas2step/
 ```
@@ -76,7 +76,6 @@ texas2step loss     https://www.example.net/texas2step --packets 1000 --interval
 ```
 
 ```
-texas2step → http://127.0.0.1:8765  (Dallas Lab · v0.1.0)
 client 127.0.0.1 (IPv4, HTTP/1.1)
 
   Latency            1.26 ms   jitter 0.09 ms   (min 1.17 · p90 1.53 · 20 samples)

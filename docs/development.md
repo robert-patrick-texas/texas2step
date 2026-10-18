@@ -44,7 +44,8 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make check` | lint and test |
 | `make docs` | Render every `.md` file into the static site in `html/` |
 | `make docs-watch` | Re-render `html/` whenever a `.md` file changes |
-| `make deb` | Build `dist/texas2step_<version>-1_amd64.deb` |
+| `make deb` | Build `dist/texas2step-<version>-1-amd64.deb` |
+| `make version` | Print the version |
 
 ## Project layout
 
@@ -125,7 +126,7 @@ make deb          # or: packaging/build-deb.sh
 * Creates a relocatable virtualenv on the system `/usr/bin/python3`, and installs the
   exact dependency versions from `uv.lock` into it.
 * Adds the files from `deploy/`.
-* Writes `dist/texas2step_<version>-<revision>_amd64.deb`, then runs lintian.
+* Writes `dist/texas2step-<version>-<revision>-amd64.deb`, then runs lintian.
 
 The virtualenv holds compiled wheels and links to the system Python, so build on the
 Ubuntu release you're packaging for. The package then depends on that release's Python
@@ -146,8 +147,8 @@ docker build -t t2s-test -f Dockerfile.test . && rm Dockerfile.test
 docker run -d --name t2s-test --privileged --cgroupns=host \
     -v /sys/fs/cgroup:/sys/fs/cgroup:rw -p 127.0.0.1:18080:80 t2s-test
 docker exec t2s-test rm -f /usr/sbin/policy-rc.d     # the image blocks service starts
-docker cp dist/texas2step_0.1.0-1_amd64.deb t2s-test:/root/
-docker exec t2s-test apt-get install -y /root/texas2step_0.1.0-1_amd64.deb
+docker cp dist/texas2step-*-amd64.deb t2s-test:/root/
+docker exec t2s-test sh -c 'apt-get install -y /root/texas2step-*-amd64.deb'
 ```
 
 Then add the include lines from [Install](install.md#2-publish-it-at-texas2step) to
@@ -156,15 +157,23 @@ Then add the include lines from [Install](install.md#2-publish-it-at-texas2step)
 
 ## Release
 
-1. Set the version in `src/texas2step/__init__.py`. It is the only place:
-   `pyproject.toml`, the UI and the package all read it from there.
-2. Run `make web` (the footer shows the version), `make check` and `make deb`.
-3. Update the download URL in [Install](install.md#1-install-the-package).
-4. Commit, tag and publish the package:
+1. Set the version in `src/texas2step/__init__.py`, the only place it is written. Everything
+   else reads it from there:
+   * `pyproject.toml`, through hatch's dynamic version, so the wheel and `pip show` too.
+   * The server (`/api/v1/info`, `/api/v1/health`), and the web UI, which the server
+     tells the version in each page it serves. No UI rebuild is needed for a new version.
+   * The CLI (`texas2step --version`).
+   * `packaging/build-deb.sh`, for the package version and file name.
+   * `make version`, which prints it for scripts.
+
+   The documentation doesn't repeat it.
+2. Run `make check` and `make deb`.
+3. Commit, tag and publish the package:
 
 ```bash
-git tag v0.1.0 && git push origin main v0.1.0
-gh release create v0.1.0 dist/texas2step_0.1.0-1_amd64.deb --title "texas2step 0.1.0" --generate-notes
+v=$(make -s version)
+git commit -am "Release $v" && git tag "v$v" && git push origin main "v$v"
+gh release create "v$v" "dist/texas2step-$v-1-amd64.deb" --title "texas2step $v" --generate-notes
 ```
 
 ## License

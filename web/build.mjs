@@ -9,9 +9,6 @@ import * as esbuild from "esbuild";
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, "..", "src", "texas2step", "static");
 const watch = process.argv.includes("--watch");
-const version = /__version__ = "([^"]+)"/.exec(
-  readFileSync(join(here, "..", "src", "texas2step", "__init__.py"), "utf8"),
-)[1];
 
 function stamp() {
   // Cache-bust assets by content hash; index.html itself is served no-cache.
@@ -38,7 +35,6 @@ const options = {
   format: "esm",
   logLevel: "info",
   legalComments: "none",
-  define: { __VERSION__: JSON.stringify(version) },
   plugins: [{ name: "stamp", setup: (b) => b.onEnd((r) => r.errors.length || stamp()) }],
 };
 

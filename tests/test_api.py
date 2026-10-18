@@ -91,7 +91,7 @@ def test_cors_preflight_for_upload(client):
 def test_results_round_trip(client):
     result = {
         "version": 1,
-        "tool": "texas2step-web/0.1.0",
+        "tool": f"texas2step-web/{__version__}",
         "server": {"id": "t1"},
         "download": {"mbps": 940.5},
         "upload": {"mbps": 410.0},
@@ -170,3 +170,8 @@ def test_path_prefix_must_be_a_plain_path(client, settings):
     for bad in ('/x"><script>alert(1)</script>', "texas2step", "/a b", "/../etc"):
         page = client.get("/", headers={"x-forwarded-prefix": bad}).text
         assert '<base href="/" />' in page, bad
+
+
+def test_page_carries_the_version(client):
+    # The UI reads its version from here; src/texas2step/__init__.py is the only source.
+    assert f'<meta name="texas2step-version" content="{__version__}" />' in client.get("/").text

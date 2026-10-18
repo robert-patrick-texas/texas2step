@@ -47,6 +47,8 @@ docs = [
 
 [tool.uv]
 default-groups = ["dev", "docs"]
+# The version is read from __init__.py, so reinstall the project when that file changes.
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/texas2step/__init__.py" }]
 
 [build-system]
 requires = ["hatchling>=1.27"]

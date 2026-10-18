@@ -26,7 +26,9 @@ export interface RunEvents {
   partial(result: TestResult): void;
 }
 
-export const VERSION = __VERSION__;
+/** This UI's version, written into the page by the server that served it. */
+export const VERSION =
+  document.querySelector<HTMLMetaElement>('meta[name="texas2step-version"]')?.content || "dev";
 
 export class TestRun {
   private ctrl = new AbortController();

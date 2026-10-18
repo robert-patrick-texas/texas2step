@@ -1,4 +1,4 @@
-.PHONY: dev web web-watch test lint fmt check docs docs-watch deb
+.PHONY: dev web web-watch test lint fmt check docs docs-watch deb version
 
 dev:            ## run the server with the current build of the UI
 	uv run texas2step serve --host 127.0.0.1 --port 8080
@@ -29,5 +29,8 @@ docs:           ## render every .md file into the static site in html/
 docs-watch:     ## re-render html/ whenever a .md file changes
 	uv run python scripts/build_docs.py --watch
 
-deb:            ## build dist/texas2step_<version>_amd64.deb (Ubuntu 26.04)
+deb:            ## build dist/texas2step-<version>-1-amd64.deb (Ubuntu 26.04)
 	packaging/build-deb.sh
+
+version:        ## print the version; it is set only in src/texas2step/__init__.py
+	@sed -n 's/^__version__ = "\(.*\)"$$/\1/p' src/texas2step/__init__.py
