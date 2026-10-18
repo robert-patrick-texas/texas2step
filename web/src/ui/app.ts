@@ -2,6 +2,7 @@
 import { appPath, Endpoint, routeOf } from "../engine/net";
 import type { Location, ServerInfo, WhoAmI } from "../types";
 import { $, clear, h, save, setText, store } from "./dom";
+import { mountThemeMenu } from "./theme";
 
 export interface Settings {
   streams: number;
@@ -40,7 +41,7 @@ export class App {
   }
 
   async start(): Promise<void> {
-    this.initTheme();
+    mountThemeMenu($("#theme-menu"));
     document.addEventListener("click", (ev) => {
       const a = (ev.target as Element).closest<HTMLAnchorElement>("a[data-link]");
       if (!a || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
@@ -158,43 +159,5 @@ export class App {
     }
     select.addEventListener("change", () => void this.select(this.locations.find((l) => l.id === select.value) ?? null));
     root.append(h("label", { class: "picker" }, h("span", { class: "picker-status" }), select));
-  }
-
-  // ---- Theme ---------------------------------------------------------------------
-
-  private initTheme(): void {
-    const btn = $("#theme-toggle");
-    const modes = ["system", "light", "dark"] as const;
-    const icons: Record<(typeof modes)[number], string> = {
-      system: "M12 3a9 9 0 1 0 0 18zm0 1.5a7.5 7.5 0 0 1 0 15z",
-      light: "M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0-5v3m0 14v3M2 12h3m14 0h3M4.9 4.9l2.1 2.1m10 10 2.1 2.1m0-14.2-2.1 2.1m-10 10-2.1 2.1",
-      dark: "M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z",
-    };
-    let mode: (typeof modes)[number] = (() => {
-      try {
-        const t = localStorage.getItem("t2s.theme");
-        return t === "light" || t === "dark" ? t : "system";
-      } catch {
-        return "system";
-      }
-    })();
-    const paint = () => {
-      if (mode === "system") delete document.documentElement.dataset.theme;
-      else document.documentElement.dataset.theme = mode;
-      btn.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icons[mode]}"/></svg>`;
-      btn.setAttribute("aria-label", `Colour theme: ${mode}. Click to change.`);
-      btn.title = `Theme: ${mode}`;
-      try {
-        if (mode === "system") localStorage.removeItem("t2s.theme");
-        else localStorage.setItem("t2s.theme", mode);
-      } catch {
-        /* ignore */
-      }
-    };
-    btn.addEventListener("click", () => {
-      mode = modes[(modes.indexOf(mode) + 1) % modes.length]!;
-      paint();
-    });
-    paint();
   }
 }

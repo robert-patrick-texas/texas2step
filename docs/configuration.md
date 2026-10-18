@@ -34,6 +34,62 @@ setting and its default as `/etc/texas2step/config.toml` (source:
 | `default_streams` / `default_seconds` / `default_packets` | 4 / 10 / 500 | Defaults advertised by `/api/v1/info` |
 | `cors_origins` | `["*"]` | Origins allowed to call the API from a browser |
 | `trusted_proxies` | `["127.0.0.1", "::1"]` | Peers whose `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Prefix` and `X-Client-Protocol` are believed |
+| `brand_name` | `texas2step` | Name in the header and the browser tab |
+| `brand_organization` | `""` | Organization shown beside the name and in the footer |
+| `brand_url` | `""` | The organization's website; the organization name links to it |
+| `brand_logo` | `""` | Path to an SVG, PNG, JPEG or WebP file shown in place of the star |
+| `brand_notice` | `""` | A line of text across the top of every page |
+| `brand_links` | `[]` | Links in the header and footer, as `[[brand_links]]` tables (TOML only) |
+| `default_theme` | `system` | `system`, `light`, `dark`, `federal`, `texas` or `america` |
+
+## Branding and themes
+
+texas2step can carry your organization's identity instead of its own. All of it is
+optional, and none of it changes what is measured.
+
+```toml
+brand_name = "NetCheck"                       # header and browser tab
+brand_organization = "Acme IT"
+brand_url = "https://www.acme.example"        # "Acme IT" links here
+brand_logo = "/etc/texas2step/logo.svg"       # replaces the star mark
+brand_notice = "Authorized use only. Activity on this system may be monitored."
+default_theme = "federal"
+
+[[brand_links]]
+label = "Service desk"
+url = "https://help.acme.example"
+
+[[brand_links]]
+label = "Email the NOC"
+url = "mailto:noc@acme.example"
+```
+
+* **Where it shows.** The name and logo lead the header. The organization sits beside them
+  and opens its website in a new tab. `brand_links` appear in the header on wide screens
+  and in the footer on every screen. The notice runs across the top of every page.
+  Once the site is renamed, the footer reads "Powered by texas2step".
+* **Logo.** SVG, PNG, JPEG, WebP or GIF, about 30 px tall on screen; wide logos keep their
+  shape, up to 180 px wide. The `texas2step` service user must be able to read the file
+  (`/etc/texas2step/` is a good place). If the file is missing or unreadable, the server
+  logs a warning and keeps the star.
+* **Links** must start with `https://`, `http://`, `mailto:` or `tel:`. Anything else stops
+  the server at startup with an error naming the setting. `[[brand_links]]` can only be
+  set in the TOML file, not through environment variables.
+* **Themes.** Visitors choose from the palette button in the header. Their choice is
+  remembered in their browser. `default_theme` sets what a first-time visitor sees;
+  `system` follows their light or dark OS setting.
+
+  | Theme | Look |
+  |---|---|
+  | Light, Dark | The original texas2step look: warm neutrals and a Texas-sunset accent |
+  | Federal | Deep-navy masthead with a gold rule, cool grey-blue surfaces, serif headings and crisp corners, in the style of federal websites such as whitehouse.gov and energy.gov (colours and type only, no seals or insignia) |
+  | Texas | Night-sky navy, a red-to-gold horizon and a blue, white and red rule under the header |
+  | America | Crisp white with Old Glory red and blue, a flag-stripe band and a faint field of stars |
+
+  Charts keep the same validated data colours in every theme, so results look the same
+  whichever theme took them.
+
+Restart the service after changing any of these: `sudo systemctl restart texas2step`.
 
 ## Locations
 

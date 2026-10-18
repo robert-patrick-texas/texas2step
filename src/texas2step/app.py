@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import html
 import logging
 import re
 from collections.abc import AsyncGenerator
@@ -17,7 +16,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from . import __version__
+from . import __version__, page
 from .api import routers
 from .config import Settings, load_settings
 from .rtc import RtcEcho
@@ -137,20 +136,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.include_router(router)
 
     index = STATIC / "index.html"
+    logo = page.logo_file(settings)
+    shell = page.Shell(settings, logo)
 
     async def spa(request: Request) -> HTMLResponse:
         # Relative URLs in the page resolve against <base href>, which carries the prefix.
-        base = html.escape(request.scope.get("root_path", "") + "/")
-        page = (
-            index.read_text()
-            .replace('<base href="/" />', f'<base href="{base}" />', 1)
-            .replace(
-                '<meta name="texas2step-version" content="" />',
-                f'<meta name="texas2step-version" content="{html.escape(__version__)}" />',
-                1,
-            )
-        )
-        return HTMLResponse(page, headers={"Cache-Control": "no-cache"})
+        body = shell.render(index.read_text(), request.scope.get("root_path", ""), __version__)
+        return HTMLResponse(body, headers={"Cache-Control": "no-cache"})
 
     for route in SPA_ROUTES:
         app.add_api_route(route, spa, include_in_schema=False, methods=["GET"])
@@ -188,6 +180,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             swagger_css_url=f"{assets}/swagger-ui.css?v={stamps.get('swagger-ui.css')}",
             swagger_favicon_url=f"{root}/favicon.svg",
         )
+
+    if logo:
+
+        @app.get("/brand/logo", include_in_schema=False)
+        async def brand_logo() -> FileResponse:
+            # The URL carries a content hash, so it can be cached. The policy stops an SVG
+            # logo from running scripts if someone opens it directly.
+            return FileResponse(
+                logo,
+                media_type=page.LOGO_TYPES[logo.suffix.lower()],
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+                },
+            )
 
     @app.get("/favicon.svg", include_in_schema=False)
     async def favicon() -> FileResponse:

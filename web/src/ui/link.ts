@@ -2,6 +2,7 @@
 // traffic server → you, the lower lane you → server. Particles follow what the test is
 // doing right now, so the page shows *where* the bytes are going, not only how many.
 import { cssVar, h, reducedMotion, setText } from "./dom";
+import { isDarkTheme, onThemeChange } from "./theme";
 
 export type LinkMode = "idle" | "latency" | "download" | "upload" | "loss";
 
@@ -59,8 +60,7 @@ export class LinkView {
       this.visible = !!e?.isIntersecting;
       if (this.visible) this.loop();
     }).observe(this.el);
-    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => this.readColors());
-    new MutationObserver(() => this.readColors()).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    onThemeChange(this.el, () => this.readColors());
     this.readColors();
     this.loop();
   }
@@ -196,8 +196,7 @@ export class LinkView {
       ctx.stroke();
     }
 
-    const dark = document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-    ctx.globalCompositeOperation = dark ? "lighter" : "source-over";
+    ctx.globalCompositeOperation = isDarkTheme() ? "lighter" : "source-over";
     for (const p of this.particles) {
       const x = p.lane === 1 ? 4 + p.t * (w - 8) : w - 4 - p.t * (w - 8);
       const fade = Math.min(1, p.t * 8, (1 - p.t) * 8);

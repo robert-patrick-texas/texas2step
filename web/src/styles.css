@@ -1,6 +1,13 @@
 /* texas2step — design tokens first, then layout, then components. */
 
-:root {
+/* Themes. Light is the base, on :root. Every other theme is a [data-theme] block that
+   restates the tokens it changes. The blocks match any element, so the theme picker
+   previews a theme by setting data-theme on its swatch. "Match system" leaves the
+   attribute off and follows the OS light/dark setting. Series and status colours are
+   the validated light or dark sets, whichever suits the theme's surfaces. */
+
+:root,
+[data-theme="light"] {
   color-scheme: light;
   --page: #f3f2ee;
   --surface: #fdfdfc;
@@ -20,29 +27,38 @@
   --dl-from: #86b6ef;
   --ul-from: #f6b08e;
   --idle-from: #8fdcbf;
+  --good-ink: #006300;
 
   /* Status (reserved for meaning) */
   --good: #0ca30c;
   --warning: #fab219;
   --serious: #ec835a;
   --critical: #d03b3b;
-  --good-ink: #006300;
 
-  /* Brand: Texas sunset, decorative only */
+  /* Brand: Texas sunset, decorative only. --sun-2 also tints glows and rings. */
   --sun-1: #f5a524;
   --sun-2: #e8467c;
   --sun-3: #7c5cff;
   --brand: linear-gradient(120deg, var(--sun-1), var(--sun-2) 55%, var(--sun-3));
+  --mark-1: var(--sun-1);
+  --mark-2: var(--sun-2);
+  --mark-3: var(--sun-3);
+  --mark-star: #ffffff;
+  --on-brand: #ffffff;
 
   --radius: 18px;
   --radius-sm: 10px;
+  --radius-pill: 999px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font);
   --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --notice: #0e1013;
+  --notice-ink: #f3f2ee;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root:not([data-theme]) {
     color-scheme: dark;
     --page: #090b0f;
     --surface: #121419;
@@ -61,10 +77,20 @@
     --ul-from: #8f3612;
     --idle-from: #0f5e43;
     --good-ink: #0ca30c;
+    --sun-1: #f5a524;
+    --sun-2: #e8467c;
+    --sun-3: #7c5cff;
+    --brand: linear-gradient(120deg, var(--sun-1), var(--sun-2) 55%, var(--sun-3));
+    --mark-1: var(--sun-1);
+    --mark-2: var(--sun-2);
+    --mark-3: var(--sun-3);
+    --mark-star: #ffffff;
+    --notice: #1b1e25;
+    --notice-ink: #d4d8df;
   }
 }
 
-:root[data-theme="dark"] {
+[data-theme="dark"] {
   color-scheme: dark;
   --page: #090b0f;
   --surface: #121419;
@@ -83,7 +109,132 @@
   --ul-from: #8f3612;
   --idle-from: #0f5e43;
   --good-ink: #0ca30c;
+  --sun-1: #f5a524;
+  --sun-2: #e8467c;
+  --sun-3: #7c5cff;
+  --brand: linear-gradient(120deg, var(--sun-1), var(--sun-2) 55%, var(--sun-3));
+  --mark-1: var(--sun-1);
+  --mark-2: var(--sun-2);
+  --mark-3: var(--sun-3);
+  --mark-star: #ffffff;
+  --notice: #1b1e25;
+  --notice-ink: #d4d8df;
 }
+
+/* Federal: a deep-navy masthead with a gold rule, cool grey-blue surfaces and serif
+   headings, after whitehouse.gov and energy.gov. Colours and type only, no insignia. */
+[data-theme="federal"] {
+  color-scheme: light;
+  --page: #eef1f6;
+  --surface: #ffffff;
+  --surface-2: #f4f6f9;
+  --ink: #0d132d;
+  --ink-2: #39415a;
+  --muted: #646d82;
+  --grid: #dfe4ec;
+  --axis: #b6bfcf;
+  --border: rgba(13, 19, 45, 0.13);
+  --shadow: 0 1px 2px rgba(13, 19, 45, 0.06), 0 10px 26px -18px rgba(13, 19, 45, 0.35);
+  --dl: #2a78d6;
+  --ul: #eb6834;
+  --idle: #1baf7a;
+  --dl-from: #86b6ef;
+  --ul-from: #f6b08e;
+  --idle-from: #8fdcbf;
+  --good-ink: #006300;
+  --sun-1: #2f5bd0;
+  --sun-2: #ffbd00;
+  --sun-3: #0d132d;
+  --brand: linear-gradient(140deg, #2a4fb3, #141f4d 62%, #0d132d);
+  --mark-1: #2f5bd0;
+  --mark-2: #1a2d74;
+  --mark-3: #0d132d;
+  --mark-star: #ffbd00;
+  --on-brand: #ffffff;
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-pill: 4px;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, Cambria,
+    "Times New Roman", serif;
+  --notice: #060a1a;
+  --notice-ink: #d9dee8;
+}
+
+/* Texas: a night sky over the plains, a red-to-gold horizon and the lone star. */
+[data-theme="texas"] {
+  color-scheme: dark;
+  --page: #070b15;
+  --surface: #0e1424;
+  --surface-2: #0a101d;
+  --ink: #f3f4f7;
+  --ink-2: #bcc3d1;
+  --muted: #8d95a8;
+  --grid: #1d2537;
+  --axis: #2f3a52;
+  --border: rgba(255, 255, 255, 0.08);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 22px 44px -26px rgba(0, 0, 0, 0.9);
+  --dl: #3987e5;
+  --ul: #d95926;
+  --idle: #199e70;
+  --dl-from: #1c5cab;
+  --ul-from: #8f3612;
+  --idle-from: #0f5e43;
+  --good-ink: #0ca30c;
+  --sun-1: #bf0a30;
+  --sun-2: #f05a28;
+  --sun-3: #f6b73c;
+  --brand: linear-gradient(120deg, var(--sun-1), var(--sun-2) 55%, var(--sun-3));
+  --mark-1: #002868;
+  --mark-2: #4b1f5c;
+  --mark-3: #bf0a30;
+  --mark-star: #ffffff;
+  --on-brand: #ffffff;
+  --radius: 12px;
+  --radius-sm: 7px;
+  --radius-pill: 8px;
+  --font-display: var(--font);
+  --notice: #0b1a3a;
+  --notice-ink: #d2d8e4;
+}
+
+/* America: Old Glory red and blue on crisp white, a flag stripe and a faint field of
+   stars. */
+[data-theme="america"] {
+  color-scheme: light;
+  --page: #f7f7f5;
+  --surface: #ffffff;
+  --surface-2: #f3f4f7;
+  --ink: #0a1630;
+  --ink-2: #3b4458;
+  --muted: #687084;
+  --grid: #e4e6eb;
+  --axis: #c3c8d3;
+  --border: rgba(10, 49, 97, 0.12);
+  --shadow: 0 1px 2px rgba(10, 22, 48, 0.05), 0 12px 30px -18px rgba(10, 22, 48, 0.3);
+  --dl: #2a78d6;
+  --ul: #eb6834;
+  --idle: #1baf7a;
+  --dl-from: #86b6ef;
+  --ul-from: #f6b08e;
+  --idle-from: #8fdcbf;
+  --good-ink: #006300;
+  --sun-1: #b31942;
+  --sun-2: #b31942;
+  --sun-3: #0a3161;
+  --brand: linear-gradient(125deg, #c8203f, #b31942 35%, #0a3161);
+  --mark-1: #0a3161;
+  --mark-2: #0a3161;
+  --mark-3: #b31942;
+  --mark-star: #ffffff;
+  --on-brand: #ffffff;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --radius-pill: 6px;
+  --font-display: var(--font);
+  --notice: #0a3161;
+  --notice-ink: #ffffff;
+}
+
 
 * {
   box-sizing: border-box;
@@ -113,6 +264,7 @@ h2,
 h3 {
   margin: 0;
   letter-spacing: -0.015em;
+  font-family: var(--font-display);
 }
 
 button {
@@ -196,7 +348,7 @@ button {
 .tabs a {
   position: relative;
   padding: 8px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   text-decoration: none;
   color: var(--ink-2);
   font-weight: 550;
@@ -227,7 +379,7 @@ button {
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface);
   box-shadow: 0 0 0 1px var(--border);
   font-size: 13px;
@@ -294,6 +446,11 @@ button {
   fill-opacity: 0.12;
 }
 
+.icon-btn svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+
 /* ---- Page frame ------------------------------------------------------------- */
 
 #view {
@@ -317,6 +474,275 @@ button {
 
 .footer a {
   color: var(--ink-2);
+}
+
+/* ---- Branding: logo, organization, links, notice ---------------------------- */
+
+.bm-1 {
+  stop-color: var(--mark-1);
+}
+
+.bm-2 {
+  stop-color: var(--mark-2);
+}
+
+.bm-3 {
+  stop-color: var(--mark-3);
+}
+
+.bm-star {
+  fill: var(--mark-star);
+}
+
+img.brand-mark {
+  width: auto;
+  max-width: 180px;
+  object-fit: contain;
+  filter: none;
+}
+
+.brand-org {
+  margin-left: -10px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+  color: var(--ink-2);
+  font-size: 13px;
+  font-weight: 550;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+a.brand-org:hover,
+.topbar-links a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.topbar-links {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.topbar-links a {
+  color: var(--ink-2);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.notice {
+  padding: 7px max(16px, calc((100vw - 1240px) / 2));
+  background: var(--notice);
+  color: var(--notice-ink);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+/* ---- Theme picker ------------------------------------------------------------ */
+
+.theme-menu {
+  position: relative;
+}
+
+.theme-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  min-width: 228px;
+  padding: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 0 0 1px var(--border), 0 22px 44px -18px rgba(0, 0, 0, 0.45);
+}
+
+.theme-pop[hidden] {
+  display: none;
+}
+
+.theme-pop-title {
+  padding: 6px 10px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.theme-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+  background: none;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.theme-item:hover,
+.theme-item:focus-visible {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  outline: none;
+}
+
+.theme-item[aria-checked="true"] {
+  font-weight: 650;
+}
+
+.theme-check {
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+}
+
+.theme-item[aria-checked="true"] .theme-check {
+  opacity: 1;
+}
+
+/* A swatch carries data-theme, so it is drawn in that theme's own tokens: the page,
+   a card, and the brand gradient. */
+.theme-swatch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 24px;
+  border-radius: 5px;
+  background: var(--page);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 18%, transparent);
+  overflow: hidden;
+}
+
+.theme-swatch::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 15px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.theme-swatch::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  left: 4px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--brand);
+}
+
+.theme-swatch.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.theme-swatch.split::before,
+.theme-swatch.split::after {
+  display: none;
+}
+
+.theme-swatch.split > span {
+  background: var(--page);
+}
+
+/* ---- Theme chrome: what tokens alone can't say ------------------------------ */
+
+[data-theme="federal"] .topbar {
+  --surface: #182046;
+  --ink: #ffffff;
+  --ink-2: #c9d0e0;
+  --muted: #9ba4bc;
+  --border: rgba(255, 255, 255, 0.16);
+  color-scheme: dark;
+  background: #0d132d;
+  color: var(--ink);
+  border-bottom: 3px solid var(--sun-2);
+  backdrop-filter: none;
+}
+
+[data-theme="federal"] .tabs a[aria-current] {
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--sun-2);
+}
+
+[data-theme="federal"] .brand-word em {
+  background: none;
+  color: var(--sun-2);
+}
+
+[data-theme="federal"] .backdrop {
+  background: linear-gradient(180deg, #dde3ee, var(--page) 520px);
+}
+
+[data-theme="texas"] .topbar::after,
+[data-theme="america"] .topbar::before {
+  content: "";
+  position: absolute;
+  right: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+[data-theme="texas"] .topbar::after {
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, #002868 0 33.3%, #ffffff 33.3% 66.6%, #bf0a30 66.6%);
+}
+
+[data-theme="texas"] .tabs a[aria-current],
+[data-theme="america"] .tabs a[aria-current] {
+  box-shadow: 0 0 0 1px var(--border), inset 0 -2px 0 var(--sun-1);
+}
+
+[data-theme="texas"] .backdrop {
+  background:
+    radial-gradient(80vw 40vw at 88% -14%, rgba(0, 40, 104, 0.6), transparent 70%),
+    radial-gradient(100vw 32vw at 50% 118%, color-mix(in srgb, var(--sun-2) 22%, transparent), transparent 72%),
+    radial-gradient(60vw 26vw at 8% 112%, color-mix(in srgb, var(--sun-1) 20%, transparent), transparent 70%),
+    var(--page);
+}
+
+[data-theme="america"] .topbar::before {
+  top: 0;
+  height: 4px;
+  background:
+    linear-gradient(90deg, #0a3161 0 22%, transparent 22%),
+    repeating-linear-gradient(90deg, #b31942 0 18px, #ffffff 18px 30px);
+}
+
+[data-theme="america"] .backdrop {
+  background:
+    radial-gradient(55vw 34vw at 0% -12%, color-mix(in srgb, #0a3161 10%, transparent), transparent 70%),
+    radial-gradient(55vw 34vw at 100% -12%, color-mix(in srgb, #b31942 8%, transparent), transparent 70%),
+    var(--page);
+}
+
+[data-theme="america"] .backdrop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, color-mix(in srgb, #0a3161 26%, transparent) 1.2px, transparent 1.8px)
+    0 0 / 24px 24px;
+  -webkit-mask-image: radial-gradient(58vw 32vw at 0% 0%, #000, transparent 72%);
+  mask-image: radial-gradient(58vw 32vw at 0% 0%, #000, transparent 72%);
 }
 
 .card {
@@ -532,7 +958,7 @@ button {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  color: #fff;
+  color: var(--on-brand);
   background: var(--brand);
   box-shadow:
     0 18px 50px -12px color-mix(in srgb, var(--sun-2) 55%, transparent),
@@ -771,7 +1197,7 @@ button {
   display: inline-flex;
   align-items: center;
   padding: 0 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-weight: 650;
   color: var(--ink);
   background: color-mix(in srgb, var(--good) 18%, transparent);
@@ -1284,7 +1710,7 @@ button {
   align-items: center;
   gap: 5px;
   padding: 3px 10px 3px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 12.5px;
   font-weight: 650;
   --tone: var(--muted);
@@ -1391,7 +1817,7 @@ button {
 }
 
 .btn.primary {
-  color: #fff;
+  color: var(--on-brand);
   background: var(--brand);
   box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--sun-2) 70%, transparent);
 }
@@ -1443,7 +1869,7 @@ button {
 
 .chip {
   padding: 5px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 12.5px;
   font-weight: 600;
   color: var(--ink-2);
@@ -1694,10 +2120,20 @@ button {
   }
 }
 
+@media (max-width: 1180px) {
+  .topbar-links {
+    display: none;
+  }
+}
+
 @media (max-width: 760px) {
   .topbar {
     flex-wrap: wrap;
     gap: 10px 16px;
+  }
+
+  .brand-org {
+    display: none;
   }
 
   .tabs {

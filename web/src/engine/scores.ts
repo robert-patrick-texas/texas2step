@@ -63,8 +63,8 @@ const CASES: { id: Readiness["id"]; label: string; tiers: [Need, Need, Need] }[]
     ],
   },
   {
-    id: "gaming",
-    label: "Online gaming",
+    id: "interactive",
+    label: "Reaction time, VDI and SSH",
     tiers: [
       { down: 10, up: 3, latency: 20, jitter: 5, loss: 0.1, bloat: 30 },
       { down: 5, up: 1, latency: 50, jitter: 15, loss: 1, bloat: 100 },

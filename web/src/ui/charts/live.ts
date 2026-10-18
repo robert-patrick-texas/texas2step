@@ -2,6 +2,7 @@
 // and a per-second loss strip underneath.
 import { cssVar, h, onResize } from "../dom";
 import { compact, ms, niceTicks, pct, text } from "../format";
+import { onThemeChange } from "../theme";
 import { hideTip, showTip } from "../tooltip";
 
 export interface LiveSample {
@@ -28,6 +29,7 @@ export class LiveChart {
       this.width = w;
       this.draw();
     });
+    onThemeChange(this.el, () => this.draw());
     this.canvas.addEventListener("pointermove", (ev) => {
       this.hoverX = ev.clientX - this.canvas.getBoundingClientRect().left;
       this.draw();

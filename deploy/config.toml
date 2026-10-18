@@ -42,9 +42,23 @@ results_path = "/var/lib/texas2step/results.db"
 # cors_origins = ["*"]
 # trusted_proxies = ["127.0.0.1", "::1"]  # peers whose X-Forwarded-* headers are believed
 
+# --- Branding and themes -------------------------------------------------------------------
+# brand_name = "texas2step"             # header and browser tab
+# brand_organization = ""               # shown beside the name and in the footer
+# brand_url = ""                        # the organization's website
+# brand_logo = ""                       # e.g. "/etc/texas2step/logo.svg" (SVG, PNG, JPEG, WebP)
+# brand_notice = ""                     # a line across the top of every page
+# default_theme = "system"              # system, light, dark, federal, texas or america
+# Header and footer links: see [[brand_links]] at the end of this file.
+
 # --- Other texas2step servers in the location picker ---------------------------------------
 # [[locations]]
 # id = "hou1"
 # name = "Houston DC"
 # url = "https://www.example.org/texas2step"
 # location = "Houston, TX"
+
+# --- Links in the header and footer (TOML only) ---------------------------------------------
+# [[brand_links]]
+# label = "Service desk"
+# url = "https://help.example.net"      # https://, http://, mailto: or tel:

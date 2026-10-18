@@ -1,6 +1,6 @@
 import pytest
 
-from texas2step.config import Location, Settings, load_settings
+from texas2step.config import Link, Location, Settings, load_settings
 
 
 def test_defaults(monkeypatch):
@@ -67,3 +67,39 @@ def test_target_allow_list():
     assert s.is_allowed_target("https://v6.a.example/")
     assert not s.is_allowed_target("http://169.254.169.254")
     assert Settings(allow_any_target=True).is_allowed_target("http://anything")
+
+
+def test_branding_from_toml(tmp_path):
+    path = tmp_path / "brand.toml"
+    path.write_text(
+        """
+brand_name = "Network Check"
+brand_organization = "Acme IT"
+brand_url = "https://www.acme.example"
+default_theme = "federal"
+
+[[brand_links]]
+label = "Service desk"
+url = "https://help.acme.example"
+
+[[brand_links]]
+label = "Email the NOC"
+url = "mailto:noc@acme.example"
+"""
+    )
+    s = load_settings(path)
+    assert (s.brand_name, s.default_theme) == ("Network Check", "federal")
+    assert [link.label for link in s.brand_links] == ["Service desk", "Email the NOC"]
+
+
+def test_branding_rejects_unsafe_or_unknown_values(tmp_path):
+    with pytest.raises(ValueError, match="brand_url"):
+        Settings(brand_url="javascript:alert(1)")
+    with pytest.raises(ValueError, match="brand_links"):
+        Settings(brand_links=[Link("Help", "javascript:alert(1)")])
+    with pytest.raises(ValueError, match="default_theme"):
+        Settings(default_theme="neon")
+    path = tmp_path / "typo.toml"
+    path.write_text('[[brand_links]]\nlable = "Help"\nurl = "https://help.example"\n')
+    with pytest.raises(ValueError, match="brand_links"):
+        load_settings(path)

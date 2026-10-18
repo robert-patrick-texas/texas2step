@@ -139,10 +139,15 @@ floors, the rest are ceilings, and missing measurements are not held against you
 |---|---|---|---|
 | 4K video streaming | ↓ 25 Mbps, loss ≤ 1 %, latency ≤ 150 ms | ↓ 15, loss ≤ 2 % | ↓ 5, loss ≤ 5 % |
 | Video calls | ↓ 10, ↑ 5, latency ≤ 50, jitter ≤ 10, loss ≤ 0.5 %, bloat ≤ 60 | ↓ 4, ↑ 2, ≤ 100, ≤ 30, ≤ 1.5 %, ≤ 200 | ↓ 1.5, ↑ 1, ≤ 200, ≤ 50, ≤ 3 % |
-| Online gaming | ↓ 10, ↑ 3, latency ≤ 20, jitter ≤ 5, loss ≤ 0.1 %, bloat ≤ 30 | ↓ 5, ↑ 1, ≤ 50, ≤ 15, ≤ 1 %, ≤ 100 | ≤ 100, ≤ 30, ≤ 2 % |
+| Reaction time, VDI and SSH | ↓ 10, ↑ 3, latency ≤ 20, jitter ≤ 5, loss ≤ 0.1 %, bloat ≤ 30 | ↓ 5, ↑ 1, ≤ 50, ≤ 15, ≤ 1 %, ≤ 100 | ≤ 100, ≤ 30, ≤ 2 % |
 | Large file transfers | ↓ 500, ↑ 500 | ↓ 100, ↑ 50 | ↓ 25, ↑ 10 |
 
 Below "fair" is "poor". Latency, jitter and bloat are in milliseconds.
+
+"Reaction time, VDI and SSH" (id `interactive`) covers work where every keystroke or click
+waits on a round trip: remote desktops and virtual desktops, SSH and terminal sessions,
+and anything else that has to react instantly. Low latency, jitter and bufferbloat matter
+far more for these than bandwidth does.
 
 ## Live monitor
 

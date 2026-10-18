@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import Any
 
 ENV_PREFIX = "TEXAS2STEP_"
+THEMES = ("system", "light", "dark", "federal", "texas", "america")
+# Branding URLs end up in href attributes, so only these schemes are accepted.
+LINK_SCHEMES = ("https://", "http://", "mailto:", "tel:")
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,14 @@ class Location:
 
     def public(self) -> dict[str, str]:
         return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
+class Link:
+    """A link in the page header and footer, such as the IT service desk."""
+
+    label: str
+    url: str
 
 
 @dataclass
@@ -83,12 +94,33 @@ class Settings:
     # Other servers offered in the location picker (this server is always first).
     locations: list[Location] = field(default_factory=list)
 
+    # Branding of the web UI.
+    brand_name: str = "texas2step"
+    brand_organization: str = ""
+    brand_url: str = ""  # the organization's website; its name links there
+    brand_logo: str = ""  # an SVG, PNG, JPEG or WebP file shown in place of the star mark
+    brand_notice: str = ""  # a line across the top of every page, e.g. an acceptable-use notice
+    brand_links: list[Link] = field(default_factory=list)
+    default_theme: str = "system"  # one of THEMES; visitors can still pick another
+
     def __post_init__(self) -> None:
         ports = (self.rtc_port_min, self.rtc_port_max)
         if ports != (0, 0) and not 1 <= ports[0] <= ports[1] <= 65535:
             raise ValueError(
                 f"rtc_port_min/rtc_port_max: need 1 <= min <= max <= 65535, or both 0; got {ports}"
             )
+        if self.default_theme not in THEMES:
+            raise ValueError(f"default_theme: expected one of {', '.join(THEMES)}")
+        if not self.brand_name.strip():
+            raise ValueError("brand_name: must not be empty")
+        urls = [("brand_url", self.brand_url)] if self.brand_url else []
+        for link in self.brand_links:
+            if not link.label.strip():
+                raise ValueError("brand_links: every link needs a label")
+            urls.append((f"brand_links ({link.label})", link.url))
+        for name, url in urls:
+            if not url.lower().startswith(LINK_SCHEMES):
+                raise ValueError(f"{name}: URL must start with {', '.join(LINK_SCHEMES)}")
 
     @property
     def rtc_ports(self) -> tuple[int, int] | None:
@@ -142,8 +174,11 @@ def _coerce(raw: Any, hint: Any, name: str) -> Any:
         (item,) = typing.get_args(hint)
         if isinstance(raw, str):
             raw = [part.strip() for part in raw.split(",") if part.strip()]
-        if item is Location:
-            return [Location(**entry) for entry in raw]
+        if dataclasses.is_dataclass(item):
+            try:
+                return [item(**entry) for entry in raw]
+            except TypeError as exc:
+                raise ValueError(f"{name}: {exc}") from exc
         return [_coerce(entry, item, name) for entry in raw]
     return raw
 
@@ -162,7 +197,7 @@ def load_settings(config_path: str | os.PathLike[str] | None = None) -> Settings
 
     for name, hint in hints.items():
         env = os.environ.get(ENV_PREFIX + name.upper())
-        if env is not None and name != "locations":
+        if env is not None and name not in {"locations", "brand_links"}:
             values[name] = _coerce(env, hint, name)
 
     return Settings(**values)

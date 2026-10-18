@@ -1,6 +1,7 @@
 // Every UDP probe as one cell, in send order: shade = round-trip time, red = lost.
 import { cssVar, h, onResize } from "../dom";
 import { ms, text } from "../format";
+import { isDarkTheme, onThemeChange } from "../theme";
 import { hideTip, showTip } from "../tooltip";
 import { ramp } from "./common";
 
@@ -30,6 +31,7 @@ export class PacketGrid {
       this.width = w;
       this.draw();
     });
+    onThemeChange(this.el, () => this.draw());
     this.canvas.addEventListener("pointermove", (ev) => this.hover(ev));
     this.canvas.addEventListener("pointerleave", hideTip);
   }
@@ -70,8 +72,7 @@ export class PacketGrid {
   }
 
   private dark(): boolean {
-    const t = document.documentElement.dataset.theme;
-    return t === "dark" || (t !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    return isDarkTheme();
   }
 
   private color(cell: Cell, stops: string[]): string {

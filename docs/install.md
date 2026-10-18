@@ -117,6 +117,11 @@ server_location = "Dallas, TX"
 
 All settings are described in [Configuration](configuration.md).
 
+**Branding and themes.** You can rename the site, show your logo and organization, add
+links to your service desk or support group, put a notice at the top of every page, and
+choose the default theme (Light, Dark, Federal, Texas or America). See
+[Branding and themes](configuration.md#branding-and-themes).
+
 **Several locations.** Install texas2step at each site, give each a distinct
 `server_id`, `server_name` and `server_location`, and list the others under
 `[[locations]]`. Users then pick a site in the header, and the browser tests that site

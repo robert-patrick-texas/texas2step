@@ -2,8 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <!-- The server fills these in on every request: the path prefix it is published
-         under (e.g. /texas2step/) and its version, from src/texas2step/__init__.py. -->
+    <!-- A template: the server fills in the path prefix it is published under (e.g.
+         /texas2step/), its version, the default theme and the site's branding, including
+         the "t2s:" slot comments below. See src/texas2step/page.py. -->
     <base href="/" />
     <meta name="texas2step-version" content="" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -13,30 +14,38 @@
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/app.css" />
     <script>
-      // Apply the saved theme before first paint.
-      try {
-        const t = localStorage.getItem("t2s.theme");
-        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
-      } catch {}
+      // Apply the visitor's theme, or else the site default, before first paint.
+      (() => {
+        const root = document.documentElement;
+        let theme = root.dataset.defaultTheme;
+        try {
+          theme = localStorage.getItem("t2s.theme") || theme;
+        } catch {}
+        if (/^(light|dark|federal|texas|america)$/.test(theme || "")) root.dataset.theme = theme;
+      })();
     </script>
   </head>
   <body>
     <div class="backdrop" aria-hidden="true"></div>
+    <!--t2s:notice-->
     <header class="topbar">
       <a class="brand" href="./" data-link aria-label="texas2step home">
+        <!--t2s:mark-->
         <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
           <defs>
             <linearGradient id="bm" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#f5a524" />
-              <stop offset=".55" stop-color="#e8467c" />
-              <stop offset="1" stop-color="#7c5cff" />
+              <stop offset="0" class="bm-1" />
+              <stop offset=".55" class="bm-2" />
+              <stop offset="1" class="bm-3" />
             </linearGradient>
           </defs>
-          <rect width="32" height="32" rx="9" fill="url(#bm)" />
-          <path d="M16 6.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7z" fill="#fff" />
+          <rect width="32" height="32" rx="9" fill="url(#bm)" class="bm-tile" />
+          <path d="M16 6.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7z" class="bm-star" />
         </svg>
-        <span class="brand-word">texas<em>2</em>step</span>
+        <!--/t2s:mark-->
+        <!--t2s:name--><span class="brand-word">texas<em>2</em>step</span><!--/t2s:name-->
       </a>
+      <!--t2s:org-->
       <nav class="tabs" aria-label="Sections">
         <a href="./" data-link>Test</a>
         <a href="monitor" data-link>Monitor</a>
@@ -44,20 +53,22 @@
         <a href="api" data-link>API</a>
       </nav>
       <div class="topbar-actions">
+        <!--t2s:links-->
         <div class="server-picker" id="server-picker"></div>
-        <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle colour theme"></button>
+        <div class="theme-menu" id="theme-menu"></div>
       </div>
     </header>
     <main id="view" tabindex="-1"></main>
     <footer class="footer">
-      <span id="footer-version">texas2step</span>
+      <!--t2s:footer-->
+      <!--t2s:powered--><span id="footer-version">texas2step</span>
       <span class="dot" aria-hidden="true">·</span>
       <a href="api/docs">OpenAPI</a>
       <span class="dot" aria-hidden="true">·</span>
       <span>Measurements run in your browser against the selected server</span>
     </footer>
     <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
-    <noscript><p class="noscript">texas2step needs JavaScript to run measurements.</p></noscript>
+    <noscript><p class="noscript">This page needs JavaScript to run measurements.</p></noscript>
     <script type="module" src="assets/app.js"></script>
   </body>
 </html>

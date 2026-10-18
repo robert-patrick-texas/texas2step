@@ -53,7 +53,7 @@ export interface LossResult {
 export type Level = "great" | "good" | "fair" | "poor" | "unknown";
 
 export interface Readiness {
-  id: "streaming" | "calls" | "gaming" | "transfers";
+  id: "streaming" | "calls" | "interactive" | "transfers";
   label: string;
   level: Level;
   detail: string;

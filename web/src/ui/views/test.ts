@@ -66,7 +66,7 @@ const LEVEL: Record<Level, { label: string; icon: string }> = {
 const USE_ICON: Record<Readiness["id"], string> = {
   streaming: "M3 5h18v12H3zM8 21h8M10 8.5v5l4.5-2.5z",
   calls: "M3 7h12v10H3zM15 10.5l6-3.5v10l-6-3.5",
-  gaming: "M6 9h12a3 3 0 0 1 3 3v3a2.5 2.5 0 0 1-4.5 1.5L15 15H9l-1.5 1.5A2.5 2.5 0 0 1 3 15v-3a3 3 0 0 1 3-3zM8 11v3M6.5 12.5h3M16 12h.01M18 13.5h.01",
+  interactive: "M3 5h18v14H3zM7 10l3 2.5L7 15M12.5 15H17",
   transfers: "M7 20V5M3.5 8.5 7 5l3.5 3.5M17 4v15m-3.5-3.5L17 19l3.5-3.5",
 };
 
@@ -439,7 +439,8 @@ export class TestView implements View {
         h(
           "li",
           { class: "ready-row" },
-          glyph(USE_ICON[item.id], "glyph use"),
+          // Results saved before 0.1.0 used "gaming" for the interactive case.
+          glyph(USE_ICON[item.id] ?? USE_ICON.interactive, "glyph use"),
           h("div", { class: "ready-text" }, h("strong", {}, item.label), h("span", {}, item.detail)),
           h("span", { class: "level", "data-level": item.level }, glyph(level.icon, "glyph lvl"), level.label),
         ),

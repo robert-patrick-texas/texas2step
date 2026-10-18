@@ -1,7 +1,10 @@
 import re
 
+from fastapi.testclient import TestClient
+
 from texas2step import __version__
 from texas2step.app import create_app
+from texas2step.config import Link, Settings
 
 
 def test_ping_headers(client):
@@ -237,3 +240,61 @@ async def test_upload_abandoned_by_the_client_is_not_an_error(settings):
     }
     await create_app(settings)(scope, receive, send)  # raised ClientDisconnect before the fix
     assert sent[0]["status"] == 499
+
+
+def test_default_page_is_unbranded(client):
+    page = client.get("/").text
+    assert "<title>texas2step</title>" in page and "texas<em>2</em>step" in page
+    assert 'class="bm-star"' in page
+    for absent in (
+        "data-default-theme",
+        'class="notice"',
+        "brand-org",
+        "topbar-links",
+        "Powered by",
+    ):
+        assert absent not in page, absent
+
+
+def test_branding_is_written_into_the_page(tmp_path):
+    logo = tmp_path / "logo.svg"
+    logo.write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"/>')
+    settings = Settings(
+        results_path=str(tmp_path / "r.db"),
+        brand_name="Acme <Net> Check",
+        brand_organization="Acme IT",
+        brand_url="https://acme.example",
+        brand_logo=str(logo),
+        brand_notice="Authorized use only. <script>alert(1)</script>",
+        brand_links=[
+            Link("Service desk", "https://help.acme.example"),
+            Link("Email", "mailto:noc@acme.example"),
+        ],
+        default_theme="texas",
+    )
+    with TestClient(create_app(settings)) as c:
+        page = c.get("/history").text
+        assert "<title>Acme &lt;Net&gt; Check</title>" in page
+        assert '<span class="brand-word">Acme &lt;Net&gt; Check</span>' in page
+        assert 'aria-label="Acme &lt;Net&gt; Check home"' in page
+        assert 'data-default-theme="texas"' in page
+        assert "Authorized use only. &lt;script&gt;alert(1)&lt;/script&gt;" in page
+        assert "<script>alert(1)</script>" not in page
+        org = '<a class="brand-org" href="https://acme.example" target="_blank" rel="noopener">'
+        assert org + "Acme IT</a>" in page
+        assert '<a href="mailto:noc@acme.example">Email</a>' in page
+        assert "Powered by" in page and 'class="bm-star"' not in page
+        src = re.search(r'<img class="brand-mark" src="([^"]+)"', page).group(1)
+        r = c.get("/" + src)  # relative to <base href="/">
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("image/svg+xml")
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert "default-src 'none'" in r.headers["content-security-policy"]
+
+
+def test_missing_logo_falls_back_to_the_star(tmp_path, caplog):
+    settings = Settings(results_path=str(tmp_path / "r.db"), brand_logo=str(tmp_path / "x.svg"))
+    with TestClient(create_app(settings)) as c:
+        assert 'class="bm-star"' in c.get("/").text
+        assert c.get("/brand/logo").status_code == 404
+    assert "no such file" in caplog.text

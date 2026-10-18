@@ -24,7 +24,7 @@ works on air-gapped and internal networks.
 | **Latency under load** | Probes every 250 ms on a separate connection during each transfer, graded A+ to F | WebSocket |
 | **Packet loss** | Numbered probes on an unreliable data channel, echoed; up- and downstream loss separated | UDP (WebRTC) |
 | **Stream fairness** | Per-stream rates and Jain's index | HTTP |
-| **Readiness** | Streaming, calls, gaming and bulk-transfer grades | derived |
+| **Readiness** | Grades for streaming, video calls, reaction time/VDI/SSH and bulk transfers | derived |
 
 Details and definitions: [docs/methodology.md](docs/methodology.md).
 
@@ -32,9 +32,13 @@ Details and definitions: [docs/methodology.md](docs/methodology.md).
 
 The UI has four views: **Test** (gauge, live link animation, charts, exportable and
 shareable results), **Monitor** (continuous UDP probing with a scrolling RTT and loss
-trace), **History** (saved runs and trend), and **API** (copy-ready examples). Light and
-dark themes follow the OS or the toggle, and every chart has a hover readout and a
-table equivalent.
+trace), **History** (saved runs and trend), and **API** (copy-ready examples). Every
+chart has a hover readout and a table equivalent.
+
+Visitors pick a theme from the header: Light, Dark, Federal, Texas or America, or one that
+follows the OS. Operators can rename the site, add their logo, organization and
+support links, show a notice on every page and set the default theme; see
+[Branding and themes](docs/configuration.md#branding-and-themes).
 
 ## Install
 
