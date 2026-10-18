@@ -14,6 +14,8 @@ export const THEMES = [
   { id: "federal", label: "Federal" },
   { id: "texas", label: "Texas" },
   { id: "america", label: "America" },
+  { id: "energy", label: "Energy" },
+  { id: "military", label: "Military" },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]["id"];

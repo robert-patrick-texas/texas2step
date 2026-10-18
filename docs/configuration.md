@@ -43,7 +43,7 @@ file up to date with the new version's template and keeps your values; see
 | `brand_logo` | `""` | Path to an SVG, PNG, JPEG or WebP file shown in place of the star |
 | `brand_notice` | `""` | A line of text across the top of every page |
 | `brand_links` | `[]` | Links in the header and footer, as `[[brand_links]]` tables (TOML only) |
-| `default_theme` | `system` | `system`, `light`, `dark`, `federal`, `texas` or `america` |
+| `default_theme` | `system` | `system`, `light`, `dark`, `federal`, `texas`, `america`, `energy` or `military` |
 
 ## Branding and themes
 
@@ -88,6 +88,8 @@ url = "mailto:noc@acme.example"
   | Federal | Deep-navy masthead with a gold rule, cool grey-blue surfaces, serif headings and crisp corners, in the style of federal websites such as whitehouse.gov and energy.gov (colours and type only, no seals or insignia) |
   | Texas | Night-sky navy, a red-to-gold horizon and a blue, white and red rule under the header |
   | America | Cool white with Old Glory blue and red, a flag-stripe band and a faint field of stars |
+  | Energy | A national lab after hours: near-black blue surfaces, Cherenkov blue into fusion-plasma violet, a glowing beam line under the header and a faint machine-room lattice, for the Department of Energy's supercomputing, fusion and nuclear sites (colours only, no seals or insignia) |
+  | Military | Ranger-green masthead with a coyote-tan rule, khaki surfaces, olive-drab buttons, condensed capital headings and a faint topographic map (colours and type only, no insignia, branch marks or camouflage) |
 
   Charts keep the same validated data colours in every theme, so results look the same
   whichever theme took them.

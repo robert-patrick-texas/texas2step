@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 ENV_PREFIX = "TEXAS2STEP_"
-THEMES = ("system", "light", "dark", "federal", "texas", "america")
+THEMES = ("system", "light", "dark", "federal", "texas", "america", "energy", "military")
 # Branding URLs end up in href attributes, so only these schemes are accepted.
 LINK_SCHEMES = ("https://", "http://", "mailto:", "tel:")
 

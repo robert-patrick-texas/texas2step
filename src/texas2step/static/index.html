@@ -12,7 +12,7 @@
     <meta name="description" content="Throughput, latency, jitter and packet loss between you and this server." />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="assets/app.css?v=208a376b54" />
+    <link rel="stylesheet" href="assets/app.css?v=193e1eea2c" />
     <script>
       // Apply the visitor's theme (or the site default) and page size before first paint.
       (() => {
@@ -23,7 +23,7 @@
           theme = localStorage.getItem("t2s.theme") || theme;
           size = localStorage.getItem("t2s.size") || "";
         } catch {}
-        if (/^(light|dark|federal|texas|america)$/.test(theme || "")) root.dataset.theme = theme;
+        if (/^(light|dark|federal|texas|america|energy|military)$/.test(theme || "")) root.dataset.theme = theme;
         if (/^(0\.[789]|1\.1|1\.25)$/.test(size)) root.style.setProperty("--ui-zoom", size);
       })();
     </script>
@@ -73,6 +73,6 @@
     </footer>
     <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
     <noscript><p class="noscript">This page needs JavaScript to run measurements.</p></noscript>
-    <script type="module" src="assets/app.js?v=70d17c920c"></script>
+    <script type="module" src="assets/app.js?v=3a71f9c087"></script>
   </body>
 </html>

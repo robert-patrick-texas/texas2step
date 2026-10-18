@@ -23,7 +23,7 @@
           theme = localStorage.getItem("t2s.theme") || theme;
           size = localStorage.getItem("t2s.size") || "";
         } catch {}
-        if (/^(light|dark|federal|texas|america)$/.test(theme || "")) root.dataset.theme = theme;
+        if (/^(light|dark|federal|texas|america|energy|military)$/.test(theme || "")) root.dataset.theme = theme;
         if (/^(0\.[789]|1\.1|1\.25)$/.test(size)) root.style.setProperty("--ui-zoom", size);
       })();
     </script>

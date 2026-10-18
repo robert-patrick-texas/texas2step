@@ -235,6 +235,86 @@
   --notice-ink: #ffffff;
 }
 
+/* Energy: a national lab after hours, home of the supercomputers and the fusion and
+   reactor halls. Near-black blue surfaces, Cherenkov blue (the glow of a reactor pool)
+   into fusion-plasma violet, a beam line under the header and a faint machine-room
+   lattice. Colours and type only, no seals or insignia. */
+[data-theme="energy"] {
+  color-scheme: dark;
+  --page: #04080f;
+  --surface: #0a121f;
+  --surface-2: #070d18;
+  --ink: #eaf2fa;
+  --ink-2: #aabdd0;
+  --muted: #8195aa;
+  --grid: #18243a;
+  --axis: #2b3c58;
+  --border: rgba(122, 200, 255, 0.11);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 22px 44px -26px rgba(0, 0, 0, 0.9);
+  --dl: #3987e5;
+  --ul: #d95926;
+  --idle: #199e70;
+  --dl-from: #1c5cab;
+  --ul-from: #8f3612;
+  --idle-from: #0f5e43;
+  --good-ink: #0ca30c;
+  --sun-1: #1fd2ff;
+  --sun-2: #1fb8ff;
+  --sun-3: #8f5cff;
+  --brand: linear-gradient(120deg, #0fb5e6, #1f5fe0 50%, #7440f0);
+  --mark-1: #1fd2ff;
+  --mark-2: #1f5fe0;
+  --mark-3: #7440f0;
+  --mark-star: #ffffff;
+  --on-brand: #ffffff;
+  --radius: 8px;
+  --radius-sm: 5px;
+  --radius-pill: 6px;
+  --font-display: var(--font);
+  --notice: #06213a;
+  --notice-ink: #c4e9ff;
+}
+
+/* Military: field-manual khaki under a ranger-green masthead with a coyote-tan rule,
+   olive drab for action, condensed capitals and a faint topographic map. Colours and
+   type only, no insignia, branch marks or camouflage. */
+[data-theme="military"] {
+  color-scheme: light;
+  --page: #e9e5d6;
+  --surface: #faf8f1;
+  --surface-2: #f2efe3;
+  --ink: #1b1f14;
+  --ink-2: #454a38;
+  --muted: #6a6e59;
+  --grid: #d9d4c1;
+  --axis: #b6b09a;
+  --border: rgba(40, 45, 25, 0.16);
+  --shadow: 0 1px 2px rgba(30, 34, 20, 0.07), 0 10px 26px -18px rgba(30, 34, 20, 0.4);
+  --dl: #2a78d6;
+  --ul: #eb6834;
+  --idle: #1baf7a;
+  --dl-from: #86b6ef;
+  --ul-from: #f6b08e;
+  --idle-from: #8fdcbf;
+  --good-ink: #006300;
+  --sun-1: #b09656;
+  --sun-2: #56652b;
+  --sun-3: #262c1b;
+  --brand: linear-gradient(135deg, #6f7d3c, #4b5320 50%, #2c3320);
+  --mark-1: #7d8c47;
+  --mark-2: #4b5320;
+  --mark-3: #2c3320;
+  --mark-star: #ece3c4;
+  --on-brand: #ffffff;
+  --radius: 4px;
+  --radius-sm: 3px;
+  --radius-pill: 3px;
+  --font-display: "DIN Condensed", Bahnschrift, "Ubuntu Condensed", "Roboto Condensed", "Arial Narrow",
+    "DejaVu Sans Condensed", var(--font);
+  --notice: #262c1b;
+  --notice-ink: #ebe5cf;
+}
+
 
 * {
   box-sizing: border-box;
@@ -713,7 +793,8 @@ a.brand-org:hover,
 }
 
 [data-theme="texas"] .topbar::after,
-[data-theme="america"] .topbar::before {
+[data-theme="america"] .topbar::before,
+[data-theme="energy"] .topbar::after {
   content: "";
   position: absolute;
   right: 0;
@@ -728,7 +809,8 @@ a.brand-org:hover,
 }
 
 [data-theme="texas"] .tabs a[aria-current],
-[data-theme="america"] .tabs a[aria-current] {
+[data-theme="america"] .tabs a[aria-current],
+[data-theme="energy"] .tabs a[aria-current] {
   box-shadow: 0 0 0 1px var(--border), inset 0 -2px 0 var(--sun-1);
 }
 
@@ -767,6 +849,86 @@ a.brand-org:hover,
     0 0 / 24px 24px;
   -webkit-mask-image: radial-gradient(58vw 32vw at 0% 0%, #000, transparent 72%);
   mask-image: radial-gradient(58vw 32vw at 0% 0%, #000, transparent 72%);
+}
+
+[data-theme="energy"] .topbar {
+  background: color-mix(in srgb, #02050b 80%, transparent);
+}
+
+/* A beam line: Cherenkov blue into plasma violet, fading out at both ends. */
+[data-theme="energy"] .topbar::after {
+  bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--sun-1) 25%, var(--sun-3) 75%, transparent);
+  box-shadow: 0 0 10px 1px color-mix(in srgb, var(--sun-1) 45%, transparent);
+}
+
+[data-theme="energy"] .backdrop {
+  background:
+    radial-gradient(70vw 36vw at 30% -16%, color-mix(in srgb, var(--sun-1) 13%, transparent), transparent 70%),
+    radial-gradient(56vw 34vw at 100% 112%, color-mix(in srgb, var(--sun-3) 15%, transparent), transparent 70%),
+    var(--page);
+}
+
+[data-theme="energy"] .backdrop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(color-mix(in srgb, var(--sun-1) 9%, transparent) 1px, transparent 1px) 0 0 / 36px 36px,
+    linear-gradient(90deg, color-mix(in srgb, var(--sun-1) 9%, transparent) 1px, transparent 1px) 0 0 / 36px 36px;
+  -webkit-mask-image: radial-gradient(90vw 46vw at 30% 0%, #000, transparent 75%);
+  mask-image: radial-gradient(90vw 46vw at 30% 0%, #000, transparent 75%);
+}
+
+[data-theme="military"] .topbar {
+  --surface: #353c26;
+  --ink: #f3efe0;
+  --ink-2: #d2ccb4;
+  --muted: #a9a68c;
+  --border: rgba(243, 239, 224, 0.16);
+  color-scheme: dark;
+  background: #232918;
+  color: var(--ink);
+  border-bottom: 3px solid var(--sun-1);
+  backdrop-filter: none;
+}
+
+[data-theme="military"] .tabs a {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+[data-theme="military"] .tabs a[aria-current] {
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--sun-1);
+}
+
+[data-theme="military"] .brand-word em {
+  background: none;
+  color: var(--sun-1);
+}
+
+[data-theme="military"] :is(h1, h2, h3) {
+  font-stretch: condensed;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+[data-theme="military"] .backdrop {
+  background:
+    radial-gradient(64vw 40vw at 0% -10%, color-mix(in srgb, var(--sun-2) 16%, transparent), transparent 70%),
+    var(--page);
+}
+
+/* Contour lines: low-frequency noise, its value range cut into thin bands. */
+[data-theme="military"] .backdrop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0.12;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='720' height='720'%3E%3Cfilter id='t' x='0' y='0' width='100%25' height='100%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.004' numOctaves='2' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .29 0 0 0 0 .33 0 0 0 0 .13 2.2 0 0 0 -0.6'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='table' tableValues='0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23t)'/%3E%3C/svg%3E") 0 0 / 720px 720px;
 }
 
 .card {
