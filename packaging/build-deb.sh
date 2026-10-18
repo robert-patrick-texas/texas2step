@@ -50,7 +50,7 @@ fi
 #    upgrades.
 install -Dm644 deploy/texas2step.service "$stage/usr/lib/systemd/system/texas2step.service"
 install -Dm644 deploy/texas2step.default "$stage/etc/default/texas2step"
-install -Dm644 deploy/config.toml "$stage/etc/texas2step/config.toml"
+install -Dm644 src/texas2step/config_template.toml "$stage/etc/texas2step/config.toml"
 install -Dm644 deploy/nginx/texas2step-http.conf "$stage/etc/nginx/conf.d/texas2step.conf"
 install -Dm644 deploy/nginx/texas2step.conf "$stage/etc/nginx/snippets/texas2step.conf"
 install -Dm644 deploy/nginx/texas2step-speedtest.conf \

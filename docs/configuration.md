@@ -10,7 +10,10 @@ Lists in environment variables are comma separated. Booleans accept `1/0`,
 `true/false`, `yes/no` and `on/off`. Unknown keys in the TOML file are an error, so
 typos don't fail silently. The package installs a fully commented file listing every
 setting and its default as `/etc/texas2step/config.toml` (source:
-[`deploy/config.toml`](../deploy/config.toml)); restart the service after editing it.
+[`src/texas2step/config_template.toml`](../src/texas2step/config_template.toml)); restart
+the service after editing it. After an upgrade, `texas2step config merge` brings your
+file up to date with the new version's template and keeps your values; see
+[Upgrade](install.md#upgrade).
 
 | Setting | Default | Meaning |
 |---|---|---|

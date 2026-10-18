@@ -8,6 +8,7 @@ import json
 import os
 import sys
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -131,6 +132,69 @@ def cmd_serve(args: argparse.Namespace) -> None:
     )
 
 
+def cmd_config_merge(args: argparse.Namespace) -> None:
+    import difflib
+    import shutil
+    import time
+    import tomllib
+
+    from . import config_merge
+
+    path = Path(args.config)
+    source = Path(args.source) if args.source else path
+    try:
+        merged = config_merge.merge(source.read_text(), config_merge.TEMPLATE.read_text())
+        current = path.read_text() if path.exists() else ""
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        sys.exit(f"texas2step: {exc}")
+    except (ValueError, RuntimeError) as exc:
+        sys.exit(f"texas2step: the merged settings would not load: {exc}\nNothing written.")
+
+    if merged.text == current:
+        print(f"{path} is up to date with this version's template.")
+        return
+    if not args.write:
+        diff = difflib.unified_diff(
+            current.splitlines(keepends=True),
+            merged.text.splitlines(keepends=True),
+            fromfile=str(path),
+            tofile=f"{path} (merged)",
+        )
+        sys.stdout.writelines(diff)
+        print()
+    print(f"Kept {len(merged.kept)} setting(s): {', '.join(merged.kept) or 'none'}")
+    if merged.renamed:
+        print(f"Renamed: {', '.join(merged.renamed)}")
+    if merged.retired:
+        print(f"No longer used, kept as comments: {', '.join(merged.retired)}")
+    if not args.write:
+        print("Nothing written. To apply: sudo texas2step config merge --write")
+        return
+
+    backup = path.with_name(f"{path.name}.{time.strftime('%Y%m%d-%H%M%S')}.bak")
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        if path.exists():
+            shutil.copy2(path, backup)
+        tmp.write_text(merged.text)
+        if path.exists():
+            shutil.copymode(path, tmp)
+            st = path.stat()
+            if os.geteuid() == 0:
+                os.chown(tmp, st.st_uid, st.st_gid)
+        os.replace(tmp, path)
+    except OSError as exc:
+        sys.exit(f"texas2step: {exc}")
+    print(f"Wrote {path}" + (f"; the previous file is {backup}." if backup.exists() else "."))
+    for leftover in (
+        path.with_name(path.name + ".dpkg-dist"),
+        path.with_name(path.name + ".dpkg-old"),
+    ):
+        if leftover.exists():
+            print(f"{leftover} is no longer needed and can be deleted.")
+    print("Apply the settings: sudo systemctl restart texas2step")
+
+
 async def _save(target: str, result: dict[str, Any]) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(f"{engine._base(target)}{engine.API}/results", json=result)
@@ -187,6 +251,28 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--config", help="TOML settings file (see docs/configuration.md)")
     serve.add_argument("--log-level", default="info")
     serve.set_defaults(func=cmd_serve)
+
+    config = sub.add_parser("config", help="manage the settings file")
+    config_sub = config.add_subparsers(dest="action", required=True)
+    merge = config_sub.add_parser(
+        "merge",
+        help="bring the settings file up to date with this version, keeping its values",
+        description="Rebuild the settings file from this version's template, keeping every "
+        "value it sets. Shows the changes; --write applies them and keeps a backup.",
+    )
+    merge.add_argument(
+        "--config",
+        default=os.environ.get("TEXAS2STEP_CONFIG", "/etc/texas2step/config.toml"),
+        help="settings file to update (default: %(default)s)",
+    )
+    merge.add_argument(
+        "--from",
+        dest="source",
+        metavar="FILE",
+        help="take the values from FILE instead, e.g. config.toml.dpkg-old",
+    )
+    merge.add_argument("--write", action="store_true", help="write the merged file")
+    merge.set_defaults(func=cmd_config_merge)
 
     def target(p: argparse.ArgumentParser) -> None:
         p.add_argument("url", help="base URL of a texas2step server")

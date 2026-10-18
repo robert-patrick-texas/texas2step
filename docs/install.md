@@ -205,7 +205,34 @@ To see the ports in use during a test, run `sudo ss -uanp | grep texas2step`.
 ## Upgrade
 
 Run the commands from [step 1](#1-install-the-package) again: they fetch the newest
-release. The service restarts, and your configuration and saved results are kept.
+release. The service restarts with your settings, and saved results are kept.
+
+When a new version's settings template differs from your edited
+`/etc/texas2step/config.toml`, apt asks what to do with it. Keep yours (**N**, the
+default). Then bring it up to date with the new template:
+
+```bash
+sudo texas2step config merge           # shows the changes; writes nothing
+sudo texas2step config merge --write   # applies them, keeping a dated backup
+sudo systemctl restart texas2step
+```
+
+The merge rebuilds the file from the new version's template and carries over every
+value you set:
+
+* Each setting stays in its place in the new layout.
+* `[[locations]]` and `[[brand_links]]` move to the end of the file.
+* A setting the new version no longer uses is kept as a comment.
+
+Before writing, it checks that the result gives back every one of your values and that
+the server accepts it. Comments you added yourself aren't carried over; the backup keeps
+them. The package reminds you to run it when an upgrade needs it.
+
+If you answered **Y** instead, apt saved your old file as
+`/etc/texas2step/config.toml.dpkg-old`. Add `--from /etc/texas2step/config.toml.dpkg-old`
+to both merge commands to put your values back. To skip the question on future
+upgrades, add `-o Dpkg::Options::=--force-confold` to the `apt install` command; it
+always keeps your file.
 
 ## Remove
 

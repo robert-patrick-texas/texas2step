@@ -183,17 +183,22 @@ def _coerce(raw: Any, hint: Any, name: str) -> Any:
     return raw
 
 
+def parse_toml(data: dict[str, Any], source: str) -> dict[str, Any]:
+    """Settings values from parsed TOML; unknown keys are an error, so typos don't pass."""
+    hints = typing.get_type_hints(Settings)
+    unknown = set(data) - set(hints)
+    if unknown:
+        raise ValueError(f"unknown settings in {source}: {', '.join(sorted(unknown))}")
+    return {k: _coerce(v, hints[k], k) for k, v in data.items()}
+
+
 def load_settings(config_path: str | os.PathLike[str] | None = None) -> Settings:
     hints = typing.get_type_hints(Settings)
     values: dict[str, Any] = {}
 
     path = config_path or os.environ.get(ENV_PREFIX + "CONFIG")
     if path:
-        data = tomllib.loads(Path(path).read_text())
-        unknown = set(data) - set(hints)
-        if unknown:
-            raise ValueError(f"unknown settings in {path}: {', '.join(sorted(unknown))}")
-        values.update({k: _coerce(v, hints[k], k) for k, v in data.items()})
+        values.update(parse_toml(tomllib.loads(Path(path).read_text()), str(path)))
 
     for name, hint in hints.items():
         env = os.environ.get(ENV_PREFIX + name.upper())

@@ -26,6 +26,27 @@ if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-decon
     fi
 fi
 
+# On upgrade, dpkg leaves config.toml.dpkg-dist (the operator kept their file) or
+# config.toml.dpkg-old (they took the new one). Either way, point at the merge tool.
+if [ "$1" = "configure" ] && [ -n "$2" ]; then
+    conf=/etc/texas2step/config.toml
+    if [ -e "$conf.dpkg-dist" ]; then
+        cat <<MSG
+This version's settings template differs from your $conf.
+To bring it up to date and keep every value you set, preview the changes, then apply them:
+    sudo texas2step config merge
+    sudo texas2step config merge --write
+MSG
+    elif [ -e "$conf.dpkg-old" ]; then
+        cat <<MSG
+Your previous settings were saved as $conf.dpkg-old. To put your values back
+into the new file, preview the changes, then apply them:
+    sudo texas2step config merge --from $conf.dpkg-old
+    sudo texas2step config merge --from $conf.dpkg-old --write
+MSG
+    fi
+fi
+
 if [ "$1" = "configure" ] && [ -z "$2" ]; then
     cat <<'MSG'
 texas2step listens on 127.0.0.1:8080 (systemctl status texas2step). To publish
