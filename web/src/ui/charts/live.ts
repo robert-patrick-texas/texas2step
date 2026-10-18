@@ -1,7 +1,8 @@
 // Scrolling RTT chart for the monitor: one dot per probe, lost probes as ticks on top,
 // and a per-second loss strip underneath.
-import { cssVar, h, onResize } from "../dom";
+import { cssVar, h, onResize, pointerIn } from "../dom";
 import { compact, ms, niceTicks, pct, text } from "../format";
+import { onSizeChange } from "../size";
 import { onThemeChange } from "../theme";
 import { hideTip, showTip } from "../tooltip";
 
@@ -30,8 +31,11 @@ export class LiveChart {
       this.draw();
     });
     onThemeChange(this.el, () => this.draw());
+    onSizeChange(this.el, () => this.draw());
+    const refit = () => (this.el.isConnected ? this.draw() : window.removeEventListener("resize", refit));
+    window.addEventListener("resize", refit);
     this.canvas.addEventListener("pointermove", (ev) => {
-      this.hoverX = ev.clientX - this.canvas.getBoundingClientRect().left;
+      this.hoverX = pointerIn(ev, this.canvas, this.width).x;
       this.draw();
       this.tip(ev);
     });
@@ -77,10 +81,19 @@ export class LiveChart {
     return ctx;
   }
 
+  /** Tall enough to fill the window below the chart, so the whole card fits on screen. */
+  private plotHeight(): number {
+    const box = this.canvas.getBoundingClientRect();
+    const k = box.width ? this.width / box.width : 1; // layout pixels per screen pixel
+    const below = 96; // the loss strip, its label and the card's padding
+    const room = (window.innerHeight - box.top - window.scrollY) * k - below;
+    return Math.round(Math.min(340, Math.max(170, room)));
+  }
+
   private draw(): void {
     const W = this.width;
     if (!W) return;
-    const H = 260;
+    const H = this.plotHeight();
     const { top, right, bottom, left } = this.m;
     const ctx = this.setup(this.canvas, H);
     const now = Date.now();
@@ -191,7 +204,7 @@ export class LiveChart {
     const { left, right } = this.m;
     const W = this.width;
     const from = Date.now() - this.windowS * 1000;
-    const t = from + ((ev.clientX - this.canvas.getBoundingClientRect().left - left) / (W - left - right)) * this.windowS * 1000;
+    const t = from + ((pointerIn(ev, this.canvas, W).x - left) / (W - left - right)) * this.windowS * 1000;
     let best: LiveSample | undefined;
     for (const d of data) if (!best || Math.abs(d.t - t) < Math.abs(best.t - t)) best = d;
     if (!best) return hideTip();

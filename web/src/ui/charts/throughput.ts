@@ -1,6 +1,6 @@
 // Throughput over time: download and upload on one Mbps axis, ramp-up shaded.
 import type { Direction } from "../../types";
-import { clear, h, onResize, s } from "../dom";
+import { clear, h, onResize, pointerIn, s } from "../dom";
 import { mbpsTick, rate, text } from "../format";
 import { hideTip, showTip } from "../tooltip";
 import { areaPath, axisX, gridY, legend, linear, linePath } from "./common";
@@ -53,7 +53,7 @@ export class ThroughputChart {
   private render(): void {
     const W = this.width;
     if (!W) return;
-    const H = 240;
+    const H = 210;
     const m = { top: 16, right: 16, bottom: 30, left: 52 };
     const series = (Object.entries(this.data) as [Direction, ThroughputSeries][]).filter(([, d]) => d.timeline.length || d.stable !== null);
     const duration = Math.max(1, ...series.map(([, d]) => d.durationS));
@@ -95,8 +95,7 @@ export class ThroughputChart {
     const dots = s("g", {});
     const hit = s("rect", { x: m.left, y: m.top, width: W - m.left - m.right, height: H - m.top - m.bottom, class: "hit" });
     hit.addEventListener("pointermove", (ev) => {
-      const box = svg.getBoundingClientRect();
-      const t = Math.max(0, ((ev.clientX - box.left - m.left) / (W - m.left - m.right)) * duration);
+      const t = Math.max(0, ((pointerIn(ev, svg, W).x - m.left) / (W - m.left - m.right)) * duration);
       const rows = [];
       clear(dots);
       let px = 0;

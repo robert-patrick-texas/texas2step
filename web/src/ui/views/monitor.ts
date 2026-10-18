@@ -29,6 +29,7 @@ export class MonitorView implements View {
   private startBtn!: HTMLButtonElement;
   private transport!: HTMLElement;
   private figures: Record<string, HTMLElement> = {};
+  private lostCount: HTMLElement | null = null;
   private total = { sent: 0, lost: 0 };
 
   constructor(private readonly app: App) {}
@@ -54,7 +55,12 @@ export class MonitorView implements View {
     const fig = (key: string, label: string) => {
       const value = h("span", { class: "tile-value" }, "—");
       this.figures[key] = value;
-      return h("div", { class: "tile compact" }, h("div", { class: "tile-label" }, label), h("div", { class: "tile-figure" }, value));
+      const figure = h("div", { class: "tile-figure" }, value);
+      if (key === "loss") {
+        this.lostCount = h("span", { class: "tile-count" });
+        figure.append(this.lostCount);
+      }
+      return h("div", { class: "tile compact" }, h("div", { class: "tile-label" }, label), figure);
     };
 
     root.append(
@@ -159,7 +165,14 @@ export class MonitorView implements View {
     setText(f.median!, fmt(ms(got.length ? percentile(got, 50) : null)));
     setText(f.p95!, fmt(ms(got.length ? percentile(got, 95) : null)));
     setText(f.jitter!, fmt(ms(got.length > 1 ? jitter(got) : null)));
-    setText(f.loss!, fmt(pct(data.length ? ((data.length - got.length) / data.length) * 100 : null)));
+    const lost = data.length - got.length;
+    setText(f.loss!, fmt(pct(data.length ? (lost / data.length) * 100 : null)));
+    // The packets behind the percentage: red once any are lost.
+    if (this.lostCount) {
+      setText(this.lostCount, data.length ? `(${lost.toLocaleString()})` : "");
+      this.lostCount.classList.toggle("bad", lost > 0);
+      this.lostCount.title = `${lost.toLocaleString()} of ${data.length.toLocaleString()} probes lost in the window`;
+    }
     setText(f.probes!, this.total.sent.toLocaleString());
   }
 }

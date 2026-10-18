@@ -14,14 +14,17 @@
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/app.css" />
     <script>
-      // Apply the visitor's theme, or else the site default, before first paint.
+      // Apply the visitor's theme (or the site default) and page size before first paint.
       (() => {
         const root = document.documentElement;
         let theme = root.dataset.defaultTheme;
+        let size = "";
         try {
           theme = localStorage.getItem("t2s.theme") || theme;
+          size = localStorage.getItem("t2s.size") || "";
         } catch {}
         if (/^(light|dark|federal|texas|america)$/.test(theme || "")) root.dataset.theme = theme;
+        if (/^(0\.[789]|1\.1|1\.25)$/.test(size)) root.style.setProperty("--ui-zoom", size);
       })();
     </script>
   </head>
@@ -55,6 +58,7 @@
       <div class="topbar-actions">
         <!--t2s:links-->
         <div class="server-picker" id="server-picker"></div>
+        <div id="size-picker"></div>
         <div class="theme-menu" id="theme-menu"></div>
       </div>
     </header>

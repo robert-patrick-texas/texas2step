@@ -2,6 +2,7 @@
 import { appPath, Endpoint, routeOf } from "../engine/net";
 import type { Location, ServerInfo, WhoAmI } from "../types";
 import { $, clear, h, save, setText, store } from "./dom";
+import { mountSizePicker } from "./size";
 import { mountThemeMenu } from "./theme";
 
 export interface Settings {
@@ -41,6 +42,7 @@ export class App {
   }
 
   async start(): Promise<void> {
+    mountSizePicker($("#size-picker"));
     mountThemeMenu($("#theme-menu"));
     document.addEventListener("click", (ev) => {
       const a = (ev.target as Element).closest<HTMLAnchorElement>("a[data-link]");

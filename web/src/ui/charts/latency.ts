@@ -1,7 +1,7 @@
 // Latency distribution: one strip per condition (idle, loaded by download, loaded by
 // upload) on a shared log axis, with the interquartile box and median marked.
 import type { LatencyStats } from "../../types";
-import { clear, h, onResize, s } from "../dom";
+import { clear, h, onResize, pointerIn, s } from "../dom";
 import { ms, text } from "../format";
 import { hideTip, showTip } from "../tooltip";
 import { hashJitter, log125 } from "./common";
@@ -99,7 +99,7 @@ export class LatencyChart {
       const hit = s("rect", { x: m.left, y: top, width: W - m.left - m.right, height: rowH, class: "hit" });
       hit.addEventListener("pointermove", (ev) => {
         if (!data.length) return;
-        const px = ev.clientX - svg.getBoundingClientRect().left;
+        const px = pointerIn(ev, svg, W).x;
         let best = 0;
         data.forEach((v, i) => {
           if (Math.abs(x(v) - px) < Math.abs(x(data[best]!) - px)) best = i;

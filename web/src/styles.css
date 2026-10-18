@@ -245,6 +245,8 @@ html {
 }
 
 body {
+  /* The page-size picker (ui/size.ts) scales everything, like browser zoom. */
+  zoom: var(--ui-zoom, 1);
   margin: 0;
   min-height: 100vh;
   background: var(--page);
@@ -457,7 +459,7 @@ button {
   width: 100%;
   max-width: 1240px;
   margin: 0 auto;
-  padding: 28px 16px 48px;
+  padding: 20px 16px 36px;
   flex: 1;
   outline: none;
 }
@@ -545,6 +547,17 @@ a.brand-org:hover,
 
 .theme-menu {
   position: relative;
+}
+
+.size-picker {
+  padding: 6px 6px 6px 12px;
+}
+
+.size-glyph {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .theme-pop {
@@ -749,7 +762,7 @@ a.brand-org:hover,
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: 0 0 0 1px var(--border), var(--shadow);
-  padding: 22px;
+  padding: 18px 20px;
 }
 
 .banner {
@@ -774,10 +787,10 @@ a.brand-org:hover,
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(300px, 460px) 1fr;
-  gap: 40px;
+  grid-template-columns: minmax(280px, 400px) 1fr;
+  gap: 32px;
   align-items: center;
-  margin-bottom: 24px;
+  margin-bottom: 18px;
 }
 
 .hero-head h1 {
@@ -799,7 +812,7 @@ a.brand-org:hover,
 .gauge {
   position: relative;
   width: 100%;
-  max-width: 460px;
+  max-width: 400px;
   aspect-ratio: 1;
   margin: 0 auto;
   --level: 0;
@@ -1142,7 +1155,7 @@ a.brand-org:hover,
 }
 
 .tile {
-  padding: 14px 16px;
+  padding: 11px 15px;
   border-radius: 14px;
   background: var(--surface);
   box-shadow: 0 0 0 1px var(--border), var(--shadow);
@@ -1175,6 +1188,18 @@ a.brand-org:hover,
 
 .tile.compact .tile-value {
   font-size: 22px;
+}
+
+.tile-count {
+  align-self: center;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile-count.bad {
+  color: var(--critical);
 }
 
 .tile-unit {
@@ -1409,7 +1434,7 @@ a.brand-org:hover,
 }
 
 .card-head {
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .card-head h2 {
@@ -1845,19 +1870,19 @@ a.brand-org:hover,
   gap: 16px;
   align-items: flex-end;
   justify-content: space-between;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .page-head h1 {
-  font-size: clamp(26px, 3.2vw, 36px);
+  font-size: clamp(24px, 2.6vw, 30px);
   font-weight: 680;
   letter-spacing: -0.03em;
 }
 
 .lede {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--ink-2);
-  max-width: 68ch;
+  max-width: 88ch;
 }
 
 .head-actions {
@@ -1880,8 +1905,8 @@ a.brand-org:hover,
 .toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px 28px;
-  margin-bottom: 18px;
+  gap: 12px 28px;
+  margin-bottom: 14px;
 }
 
 .live-canvas,
@@ -2122,6 +2147,13 @@ a.brand-org:hover,
 
 @media (max-width: 1180px) {
   .topbar-links {
+    display: none;
+  }
+}
+
+/* Phones have pinch-zoom; the size picker would only crowd the header. */
+@media (max-width: 600px) {
+  #size-picker {
     display: none;
   }
 }

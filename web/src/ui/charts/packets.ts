@@ -1,5 +1,5 @@
 // Every UDP probe as one cell, in send order: shade = round-trip time, red = lost.
-import { cssVar, h, onResize } from "../dom";
+import { cssVar, h, onResize, pointerIn } from "../dom";
 import { ms, text } from "../format";
 import { isDarkTheme, onThemeChange } from "../theme";
 import { hideTip, showTip } from "../tooltip";
@@ -142,9 +142,9 @@ export class PacketGrid {
 
   private hover(ev: PointerEvent): void {
     const { cols, size, gap } = this.layout;
-    const box = this.canvas.getBoundingClientRect();
-    const col = Math.floor((ev.clientX - box.left) / (size + gap));
-    const row = Math.floor((ev.clientY - box.top) / (size + gap));
+    const at = pointerIn(ev, this.canvas, this.width);
+    const col = Math.floor(at.x / (size + gap));
+    const row = Math.floor(at.y / (size + gap));
     const i = row * cols + col;
     const cell = this.cells[i];
     if (cell === undefined || col >= cols) return hideTip();

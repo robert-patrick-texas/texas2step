@@ -3,7 +3,7 @@ import { appPath } from "../../engine/net";
 import type { ResultSummary } from "../../types";
 import type { App, View } from "../app";
 import { axisX, gridY, legend, linear, linePath } from "../charts/common";
-import { clear, h, onResize, s } from "../dom";
+import { clear, h, onResize, pointerIn, s } from "../dom";
 import { mbpsTick, ms, pct, rate, text, when } from "../format";
 import { hideTip, showTip } from "../tooltip";
 
@@ -73,7 +73,7 @@ export class HistoryView implements View {
       { key: "upload_mbps" as const, label: "Upload", color: "var(--ul)" },
     ];
     onResize(plot, (W) => {
-      const H = 220;
+      const H = 200;
       const m = { top: 12, right: 16, bottom: 30, left: 52 };
       const max = Math.max(1, ...results.flatMap((r) => [r.download_mbps ?? 0, r.upload_mbps ?? 0]));
       const x = linear(0, Math.max(1, results.length - 1), m.left, W - m.right);
@@ -96,7 +96,7 @@ export class HistoryView implements View {
       const cross = s("line", { y1: m.top, y2: H - m.bottom, class: "crosshair", visibility: "hidden" });
       const hit = s("rect", { x: m.left, y: m.top, width: W - m.left - m.right, height: H - m.top - m.bottom, class: "hit" });
       hit.addEventListener("pointermove", (ev) => {
-        const px = ev.clientX - svg.getBoundingClientRect().left;
+        const px = pointerIn(ev, svg, W).x;
         const i = Math.round(((px - m.left) / (W - m.left - m.right)) * (results.length - 1));
         const r = results[Math.max(0, Math.min(results.length - 1, i))]!;
         cross.setAttribute("x1", String(x(results.indexOf(r))));

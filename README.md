@@ -36,7 +36,7 @@ trace), **History** (saved runs and trend), and **API** (copy-ready examples). E
 chart has a hover readout and a table equivalent.
 
 Visitors pick a theme from the header: Light, Dark, Federal, Texas or America, or one that
-follows the OS. Operators can rename the site, add their logo, organization and
+follows the OS. A page-size drop-down beside it (70% to 125%) fits more on smaller screens. Operators can rename the site, add their logo, organization and
 support links, show a notice on every page and set the default theme; see
 [Branding and themes](docs/configuration.md#branding-and-themes).
 

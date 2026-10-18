@@ -73,6 +73,16 @@ export function onResize(el: Element, draw: (width: number) => void): () => void
   return () => ro.disconnect();
 }
 
+/**
+ * The pointer's position over `el` in the element's own pixels (`width` of them across),
+ * whatever the page size: on-screen and layout pixels differ once the page is zoomed.
+ */
+export function pointerIn(ev: MouseEvent, el: Element, width: number): { x: number; y: number } {
+  const box = el.getBoundingClientRect();
+  const k = box.width ? width / box.width : 1;
+  return { x: (ev.clientX - box.left) * k, y: (ev.clientY - box.top) * k };
+}
+
 export function cssVar(name: string, el: Element = document.documentElement): string {
   return getComputedStyle(el).getPropertyValue(name).trim();
 }

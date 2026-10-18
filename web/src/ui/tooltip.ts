@@ -1,5 +1,6 @@
 // One shared tooltip. Values lead, labels follow; series are keyed with a short line.
 import { $, clear, h } from "./dom";
+import { pageZoom } from "./size";
 
 export interface TipRow {
   value: string;
@@ -27,7 +28,9 @@ export function showTip(clientX: number, clientY: number, title: string, rows: T
   let y = clientY + pad;
   if (x + width > window.innerWidth - 8) x = clientX - width - pad;
   if (y + height > window.innerHeight - 8) y = clientY - height - pad;
-  el.style.transform = `translate(${Math.max(8, x)}px, ${Math.max(8, y)}px)`;
+  // Worked out in screen pixels; the tooltip itself is laid out in zoomed page pixels.
+  const zoom = pageZoom();
+  el.style.transform = `translate(${Math.max(8, x) / zoom}px, ${Math.max(8, y) / zoom}px)`;
 }
 
 export function hideTip(): void {
