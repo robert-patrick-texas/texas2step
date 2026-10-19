@@ -11,11 +11,11 @@ export const THEMES = [
   { id: "system", label: "Match system" },
   { id: "light", label: "Light" },
   { id: "dark", label: "Dark" },
-  { id: "federal", label: "Federal" },
-  { id: "texas", label: "Texas" },
   { id: "america", label: "America" },
   { id: "energy", label: "Energy" },
+  { id: "federal", label: "Federal" },
   { id: "military", label: "Military" },
+  { id: "texas", label: "Texas" },
 ] as const;
 
 export type ThemeId = (typeof THEMES)[number]["id"];

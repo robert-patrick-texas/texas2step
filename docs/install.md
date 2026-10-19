@@ -208,7 +208,7 @@ All settings are described in [Configuration](configuration.md).
 
 **Branding and themes.** You can rename the site, show your logo and organization, add
 links to your service desk or support group, put a notice at the top of every page, and
-choose the default theme (Light, Dark, Federal, Texas, America, Energy or Military). See
+choose the default theme (Light, Dark, America, Energy, Federal, Military or Texas). See
 [Branding and themes](configuration.md#branding-and-themes).
 
 **Several locations.** Install texas2step at each site, give each a distinct
