@@ -24,8 +24,8 @@ const KINDS: Record<Kind, string> = { https: "HTTPS", ws: "WebSocket", udp: "UDP
 
 const httpName = (p: string | null | undefined) =>
   ({ h2: "HTTP/2", "http/1.1": "HTTP/1.1", h3: "HTTP/3", "HTTP/2.0": "HTTP/2" })[p ?? ""] ?? (p || "");
-const hostPort = (ip: string | null | undefined, port: number | null | undefined) =>
-  !ip ? "—" : port ? (ip.includes(":") ? `[${ip}]:${port}` : `${ip}:${port}`) : ip;
+// "address : port", spaced so the port can't be read as part of an IPv4 or IPv6 address.
+const hostPort = (ip: string | null | undefined, port: number | null | undefined) => (!ip ? "—" : port ? `${ip} : ${port}` : ip);
 const seconds = (msecs: number) => `${Math.max(1, Math.round(msecs / 1000))} s`;
 
 /** One way of reaching the server, with what its answers have shown. */

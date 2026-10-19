@@ -63,7 +63,13 @@ export class Lane {
 
   /** A ping leaves now; call the result with whether it came back. */
   send(): (ok: boolean) => void {
-    const shot: Shot = { t0: performance.now(), result: null, settled: 0 };
+    // One ping and its pong at a time: while one is still on its way, the lane skips the
+    // next attempt (the attempt itself still goes out; this is only the picture).
+    const now = performance.now();
+    if (this.shots.some((s) => s.result === null || now - Math.max(s.t0 + TRAVEL, s.settled) < (s.result === "ok" ? TRAVEL : FADE))) {
+      return () => {};
+    }
+    const shot: Shot = { t0: now, result: null, settled: 0 };
     this.shots.push(shot);
     if (this.shots.length > 6) this.shots.shift();
     wake();

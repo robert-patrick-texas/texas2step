@@ -48,6 +48,9 @@ export class App {
   async start(): Promise<void> {
     mountSizePicker($("#size-picker"));
     mountThemeMenu($("#theme-menu"));
+    for (const event of ["resize", "t2s:size"]) window.addEventListener(event, () => this.fitHeader());
+    void document.fonts?.ready.then(() => this.fitHeader());
+    this.fitHeader();
     document.addEventListener("click", (ev) => {
       const a = (ev.target as Element).closest<HTMLAnchorElement>("a[data-link]");
       if (!a || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;
@@ -175,6 +178,18 @@ export class App {
       void this.refreshFamily();
     });
     root.append(h("label", { class: "picker family-picker", title: "Address family" }, h("span", { class: "picker-glyph", "aria-hidden": "true" }, "IP"), select));
+    this.fitHeader();
+  }
+
+  /**
+   * One row for the header when everything fits once shrunk, else a second row for the
+   * controls. How wide they are depends on the server names, so it's measured, not guessed.
+   */
+  private fitHeader(): void {
+    const bar = document.querySelector<HTMLElement>(".topbar");
+    if (!bar) return;
+    bar.classList.remove("wrapped");
+    bar.classList.toggle("wrapped", bar.scrollWidth > bar.clientWidth + 1);
   }
 
   private renderPicker(): void {
@@ -202,5 +217,6 @@ export class App {
     }
     select.addEventListener("change", () => void this.select(this.locations.find((l) => l.id === select.value) ?? null));
     root.append(h("label", { class: "picker" }, h("span", { class: "picker-status" }), select));
+    this.fitHeader();
   }
 }

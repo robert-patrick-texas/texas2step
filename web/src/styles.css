@@ -390,7 +390,7 @@ button {
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 10px 24px;
   padding: 12px max(16px, calc((100vw - 1240px) / 2));
   backdrop-filter: saturate(1.4) blur(14px);
   background: color-mix(in srgb, var(--page) 72%, transparent);
@@ -2185,9 +2185,11 @@ a.brand-org:hover,
   white-space: nowrap;
 }
 
+/* Sized so a full IPv6 address, 39 characters of about 0.6 em each, fits on one line
+   beside its label; on phones the label goes above it. */
 .diag-ip {
   font-family: var(--mono);
-  font-size: clamp(18px, 2.2vw, 26px);
+  font-size: clamp(16px, calc((100vw - 170px) / 24), 26px);
   font-weight: 650;
   overflow-wrap: anywhere;
 }
@@ -2362,6 +2364,16 @@ a.brand-org:hover,
   .diag-row {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+
+  .diag-addr {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+
+  .diag-ip {
+    font-size: clamp(11px, calc((100vw - 72px) / 24), 18px);
   }
 }
 
@@ -2672,6 +2684,11 @@ a.brand-org:hover,
   .topbar-links {
     display: none;
   }
+}
+
+/* Set by the app when the header can't fit one row: the controls move to a second. */
+.topbar.wrapped {
+  flex-wrap: wrap;
 }
 
 /* Phones have pinch-zoom; the size picker would only crowd the header. */
