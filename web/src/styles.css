@@ -636,11 +636,12 @@ a.brand-org:hover,
   position: relative;
 }
 
-.size-picker {
+.size-picker,
+.family-picker {
   padding: 6px 6px 6px 12px;
 }
 
-.size-glyph {
+.picker-glyph {
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
@@ -1507,7 +1508,7 @@ a.brand-org:hover,
 
 .link {
   display: grid;
-  grid-template-columns: minmax(120px, 200px) 1fr minmax(120px, 200px);
+  grid-template-columns: minmax(120px, 300px) 1fr minmax(120px, 300px);
   align-items: center;
   gap: 16px;
   padding: 18px 22px;
@@ -2474,6 +2475,12 @@ a.brand-org:hover,
   .link-wire {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+
+  /* Half a phone is too narrow for an IPv6 address on one line: wrap it instead. */
+  .node-detail {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .card {

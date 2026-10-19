@@ -20,7 +20,7 @@ file up to date with the new version's template and keeps your values; see
 | `server_id` | `local` | Short identifier stored with results |
 | `server_name` | `texas2step` | Display name |
 | `server_location` | `""` | Free text, e.g. `Dallas, TX` |
-| `server_url_v4` / `server_url_v6` | `""` | IPv4-only / IPv6-only hostnames for this server; enables the address-family switch |
+| `server_url_v4` / `server_url_v6` | `""` | IPv4-only / IPv6-only base URLs for this server; they add the header's IP drop-down. See [IPv4 and IPv6](#ipv4-and-ipv6). |
 | `max_download_bytes` | 1 GiB | Largest single `/down` response |
 | `max_upload_bytes` | 1 GiB | Largest single `/up` body |
 | `max_stream_seconds` | 60 | Cap for `/down?seconds=` |
@@ -154,3 +154,26 @@ same browser and compare them on one chart. The browser reaches each server dire
 so each one needs its UDP range open to clients, as for the packet-loss test. The
 address of a comparison, such as `/monitor?a=dallas&b=houston` (the servers' ids), opens
 it again later.
+
+## IPv4 and IPv6
+
+When a name has both an A and an AAAA record, the browser picks IPv4 or IPv6 by itself,
+and a web page can't tell it which. To let visitors choose, give the server two more
+names: one with only an A record and one with only an AAAA record. Point both straight
+at the server: a name proxied through a CDN, such as Cloudflare's proxied records,
+answers with the CDN's own addresses in both families, and the CDN would sit in the
+middle of every measurement. The site's certificate must cover both names, and nginx
+must answer for them, either by listing them in `server_name` or because the site is
+the default server for port 443. Then set:
+
+```toml
+server_url_v4 = "https://v4.dallas.example.net/texas2step"
+server_url_v6 = "https://v6.dallas.example.net/texas2step"
+```
+
+The header then shows an **IP** drop-down with **Auto**, **IPv4 only** and
+**IPv6 only**, each offered only when its name is set. The choice holds the HTTP tests
+to that name, and holds the UDP probes to the server's addresses of that family.
+**Monitor** shows the family each UDP path uses. A server without these names has no
+drop-down, and the browser picks the family. For the other servers in the picker, set
+`url_v4` and `url_v6` in their `[[locations]]` entries.

@@ -184,14 +184,11 @@ export class TestView implements View {
           s[key] = v;
           this.app.saveSettings();
           for (const other of group.children) other.setAttribute("aria-checked", String(other === b));
-          if (key === "family") void this.app.refreshFamily();
         });
         group.append(b);
       }
       return h("div", { class: "opt" }, h("span", { class: "opt-label", title: hint }, label), group);
     };
-    const loc = this.app.selected;
-    const family = loc && (loc.url_v4 || loc.url_v6);
     return h(
       "details",
       { class: "options" },
@@ -203,7 +200,6 @@ export class TestView implements View {
         seg("seconds", "Duration", [[5, "5 s"], [10, "10 s"], [15, "15 s"], [20, "20 s"]], "Length of each of the download and upload phases."),
         seg("packets", "UDP probes", [[0, "Skip"], [200, "200"], [500, "500"], [1000, "1000"]], "Packets sent in the loss test."),
         seg("intervalMs", "Probe spacing", [[5, "5 ms"], [10, "10 ms"], [20, "20 ms"]], "Time between UDP probes."),
-        family ? seg("family", "Address family", [["auto", "Auto"], ["ipv4", "IPv4"], ["ipv6", "IPv6"]], "Uses this server's IPv4-only or IPv6-only hostname.") : null,
       ),
     );
   }
@@ -211,11 +207,18 @@ export class TestView implements View {
   private describeEndpoints(): void {
     const { info, whoami } = this.app;
     const client = this.result?.client;
+    // The address gets a line of its own, so a full IPv6 address fits.
+    const line = (el: HTMLElement, text: string) => {
+      setText(el, text);
+      el.title = text;
+    };
     setText(this.link.client.title, "You");
-    setText(this.link.client.detail, [client?.ip ?? whoami?.ip, client?.family ?? whoami?.family, client?.protocol ?? whoami?.http_version].filter(Boolean).join(" · ") || "—");
+    line(this.link.client.detail, client?.ip ?? whoami?.ip ?? "—");
+    line(this.link.client.sub, [client?.family ?? whoami?.family, client?.protocol ?? whoami?.http_version].filter(Boolean).join(" · "));
     const server = this.result?.server ?? info?.server;
     setText(this.link.server.title, server?.name ?? "Server");
-    setText(this.link.server.detail, [server?.location, info ? `v${info.version}` : ""].filter(Boolean).join(" · ") || (info ? "" : "unreachable"));
+    line(this.link.server.detail, server?.location || (info ? "" : "unreachable"));
+    line(this.link.server.sub, info ? `v${info.version}` : "");
   }
 
   // ---- Running -------------------------------------------------------------------

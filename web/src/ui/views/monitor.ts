@@ -291,7 +291,8 @@ export class MonitorView implements View {
       const rtc = await RtcProbe.connect(d.ep, d.info.ice_servers);
       rtc.onEcho = record;
       d.probe = { send: (seq) => rtc.send(seq, 64), close: () => rtc.close() };
-      d.transport = "UDP · WebRTC";
+      const family = await rtc.family().catch(() => null);
+      d.transport = ["UDP · WebRTC", family].filter(Boolean).join(" · ");
     } catch {
       const ws = new WsProber();
       if (!(await ws.open(d.ep.wsUrl("/ws")))) {

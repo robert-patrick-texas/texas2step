@@ -125,6 +125,11 @@ Reported:
 * **Out of order**: echoes arriving with a lower sequence number than the previous one.
 * **UDP RTT and jitter**: same definitions as above, over the echoed probes.
 
+When the visitor chooses **IPv4 only** or **IPv6 only**, the client drops the server's
+candidates of the other family from the answer before connecting, so ICE can only form
+a path in the chosen family. The HTTP tests use the server's single-family hostname for
+the same choice (see [IPv4 and IPv6](configuration.md#ipv4-and-ipv6)).
+
 If the UDP path cannot be established (UDP blocked, ICE fails), the client falls back to
 the WebSocket and says so. Over TCP, loss appears as delay rather than drops, so
 fallback results only count probes that time out.

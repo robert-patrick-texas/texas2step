@@ -49,5 +49,5 @@ export function mountSizePicker(root: HTMLElement): void {
     select.append(h("option", { value: String(size), selected: size === current }, `${Math.round(size * 100)}%`));
   }
   select.addEventListener("change", () => apply(parseFloat(select.value)));
-  root.append(h("label", { class: "picker size-picker", title: "Page size" }, h("span", { class: "size-glyph", "aria-hidden": "true" }, "Aa"), select));
+  root.append(h("label", { class: "picker size-picker", title: "Page size" }, h("span", { class: "picker-glyph", "aria-hidden": "true" }, "Aa"), select));
 }

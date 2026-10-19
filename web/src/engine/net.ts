@@ -19,11 +19,21 @@ export function routeOf(pathname: string): string {
   return pathname.startsWith(BASE_PATH) ? pathname.slice(BASE_PATH.length) || "/" : pathname;
 }
 
+/** An address family the visitor can hold a server to, through its single-family hostname. */
+export type Family = "ipv4" | "ipv6";
+
 export class Endpoint {
   readonly base: string;
 
-  /** `base` is a server's base URL such as https://speed.example/texas2step, or "" for this app's own server. */
-  constructor(base: string) {
+  /**
+   * `base` is a server's base URL such as https://speed.example/texas2step, or "" for this
+   * app's own server. `family` is set when `base` is that server's IPv4-only or IPv6-only
+   * hostname, so the UDP probe can be held to the same family.
+   */
+  constructor(
+    base: string,
+    readonly family: Family | null = null,
+  ) {
     this.base = (base || window.location.origin + BASE_PATH).replace(/\/+$/, "");
   }
 

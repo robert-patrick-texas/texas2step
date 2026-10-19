@@ -30,8 +30,8 @@ export class LinkView {
   private raf = 0;
   private visible = true;
   private colors = { dl: "", ul: "", idle: "", muted: "", lane: "" };
-  readonly client: { title: HTMLElement; detail: HTMLElement };
-  readonly server: { title: HTMLElement; detail: HTMLElement };
+  readonly client: { title: HTMLElement; detail: HTMLElement; sub: HTMLElement };
+  readonly server: { title: HTMLElement; detail: HTMLElement; sub: HTMLElement };
   private center: HTMLElement;
 
   constructor() {
@@ -40,8 +40,9 @@ export class LinkView {
     const node = (side: "client" | "server", glyph: SVGElement | HTMLElement) => {
       const title = h("div", { class: "node-title" }, "—");
       const detail = h("div", { class: "node-detail" }, "");
-      const el = h("div", { class: `node node-${side}` }, h("div", { class: "node-icon" }, glyph), title, detail);
-      return { el, title, detail };
+      const sub = h("div", { class: "node-detail" }, "");
+      const el = h("div", { class: `node node-${side}` }, h("div", { class: "node-icon" }, glyph), title, detail, sub);
+      return { el, title, detail, sub };
     };
     const c = node("client", icon("client"));
     const sv = node("server", icon("server"));

@@ -2,7 +2,7 @@
 // WebSocket fallback when UDP is blocked.
 import type { LossResult } from "../types";
 import type { WsProber } from "./latency";
-import { type Endpoint, sleep } from "./net";
+import { type Endpoint, type Family, sleep } from "./net";
 import { summarize } from "./stats";
 
 const HEADER = 12; // u32 sequence + f64 send time
@@ -59,7 +59,9 @@ export class RtcProbe {
         sdp: pc.localDescription!.sdp,
         type: "offer",
       });
-      await pc.setRemoteDescription({ sdp: answer.sdp, type: "answer" });
+      // A single-family hostname covers HTTP; ICE would still pick either family for UDP.
+      const sdp = ep.family ? onlyFamily(answer.sdp!, ep.family) : answer.sdp;
+      await pc.setRemoteDescription({ sdp, type: "answer" });
       const open = await waitFor(probe, "open", timeoutMs, () => probe.readyState === "open");
       if (!open) throw new Error("UDP path did not open (ICE failed or UDP blocked)");
       await waitFor(control, "open", 2000, () => control.readyState === "open");
@@ -72,6 +74,21 @@ export class RtcProbe {
 
   get open(): boolean {
     return this.probe.readyState === "open";
+  }
+
+  /** The address family of the UDP path ICE chose, once the channel is open. */
+  async family(): Promise<"IPv4" | "IPv6" | null> {
+    const stats = await this.pc.getStats();
+    let pair: { remoteCandidateId?: string } | undefined;
+    stats.forEach((s) => {
+      if (s.type === "transport" && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId);
+    });
+    stats.forEach((s) => {
+      if (!pair && s.type === "candidate-pair" && s.nominated && s.state === "succeeded") pair = s;
+    });
+    const remote = pair?.remoteCandidateId ? stats.get(pair.remoteCandidateId) : undefined;
+    const address: string | undefined = remote?.address ?? remote?.ip;
+    return address ? (address.includes(":") ? "IPv6" : "IPv4") : null;
   }
 
   send(seq: number, size: number): void {
@@ -99,6 +116,14 @@ export class RtcProbe {
     this.control.close();
     this.pc.close();
   }
+}
+
+/** The SDP with only the server's candidates of one address family. */
+function onlyFamily(sdp: string, family: Family): string {
+  return sdp
+    .split("\r\n")
+    .filter((line) => !line.startsWith("a=candidate:") || (line.split(" ")[4] ?? "").includes(":") === (family === "ipv6"))
+    .join("\r\n");
 }
 
 export interface LossOptions {

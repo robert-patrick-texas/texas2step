@@ -1,5 +1,5 @@
 // Application shell: routing, theme, server selection and shared settings.
-import { appPath, Endpoint, routeOf } from "../engine/net";
+import { appPath, Endpoint, type Family, routeOf } from "../engine/net";
 import type { Location, ServerInfo, WhoAmI } from "../types";
 import { $, clear, h, save, setText, store } from "./dom";
 import { mountSizePicker } from "./size";
@@ -107,23 +107,27 @@ export class App {
     await this.select(pick);
   }
 
-  /** The base URL for the chosen server and address family. */
-  private baseFor(loc: Location | null): string {
-    if (!loc) return "";
-    if (this.settings.family === "ipv4" && loc.url_v4) return loc.url_v4;
-    if (this.settings.family === "ipv6" && loc.url_v6) return loc.url_v6;
-    return loc.url;
+  /** The address family the chosen setting holds `loc` to: only where it has that hostname. */
+  familyFor(loc: Location | null): Family | null {
+    const f = this.settings.family;
+    if (f === "ipv4" && loc?.url_v4) return "ipv4";
+    if (f === "ipv6" && loc?.url_v6) return "ipv6";
+    return null;
   }
 
   /** An endpoint for any listed server, in the chosen address family. */
   endpointFor(loc: Location): Endpoint {
-    return new Endpoint(this.baseFor(loc));
+    const family = this.familyFor(loc);
+    if (family === "ipv4") return new Endpoint(loc.url_v4, family);
+    if (family === "ipv6") return new Endpoint(loc.url_v6, family);
+    return new Endpoint(loc.url);
   }
 
   async select(loc: Location | null): Promise<void> {
     this.selected = loc;
     if (loc) save("t2s.server", { id: loc.id });
-    this.ep = new Endpoint(this.baseFor(loc));
+    this.ep = loc ? this.endpointFor(loc) : this.origin;
+    this.renderFamily();
     this.info = null;
     this.whoami = null;
     try {
@@ -139,6 +143,34 @@ export class App {
 
   async refreshFamily(): Promise<void> {
     await this.select(this.selected);
+  }
+
+  /**
+   * The address-family drop-down, for a server with an IPv4-only or IPv6-only hostname.
+   * A browser picks the family itself for a name with both, so only those hostnames can
+   * hold a test to one; elsewhere the drop-down is hidden.
+   */
+  private renderFamily(): void {
+    const root = $("#family-picker");
+    clear(root);
+    const loc = this.selected;
+    if (!loc?.url_v4 && !loc?.url_v6) return;
+    const select = h("select", { class: "picker-select", "aria-label": "Address family" });
+    const current = this.familyFor(loc) ?? "auto";
+    const choices: [Settings["family"], string, string][] = [
+      ["auto", "Auto", ""],
+      ["ipv4", "IPv4 only", loc.url_v4],
+      ["ipv6", "IPv6 only", loc.url_v6],
+    ];
+    for (const [value, label, url] of choices) {
+      if (value === "auto" || url) select.append(h("option", { value, selected: value === current }, label));
+    }
+    select.addEventListener("change", () => {
+      this.settings.family = select.value as Settings["family"];
+      this.saveSettings();
+      void this.refreshFamily();
+    });
+    root.append(h("label", { class: "picker family-picker", title: "Address family" }, h("span", { class: "picker-glyph", "aria-hidden": "true" }, "IP"), select));
   }
 
   private renderPicker(): void {
