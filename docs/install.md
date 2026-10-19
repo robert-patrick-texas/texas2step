@@ -339,25 +339,81 @@ To see the ports in use during a test, run `sudo ss -uanp | grep texas2step`.
 
 ### With texas2step update
 
-If `texas2step --help` lists the `update` command, one command upgrades the server:
+If `texas2step --help` lists the `update` command, it upgrades the server in two steps:
+check whether a newer release is out, then install it.
 
 ```bash
-texas2step update --check   # is a newer release out? (no sudo needed)
-sudo texas2step update
+texas2step update --check   # only looks: no sudo, no downloads, no changes
+sudo texas2step update      # downloads, shows the plan, asks, installs
 ```
 
-It takes the steps below for you:
+**Check.** `--check` asks GitHub for the newest release and compares it with the
+installed version. It downloads nothing and changes nothing, so any user can run it:
 
-1. It asks GitHub for the newest release, and downloads its `.deb` and `texas2step-setup`
-   to `/var/cache/texas2step/update/<version>/`. Each must match the SHA-256 that GitHub
+```text
+$ texas2step update --check
+texas2step <installed> is installed; <newest> is available (<date>).
+  Release notes: https://github.com/robert-patrick-texas/texas2step/releases/tag/v<newest>
+To install it: sudo texas2step update
+```
+
+When there is nothing newer, it says `texas2step <installed> is installed: up to date.`
+Its exit status tells scripts, cron jobs and monitoring checks which it was:
+
+| Exit status | Meaning |
+|---|---|
+| 0 | Up to date, or the installed version is newer than the newest release |
+| 100 | A newer release is out |
+| 1 | It couldn't tell, for example GitHub couldn't be reached; the message says why |
+
+**Install.** `sudo texas2step update` takes the steps of an upgrade for you:
+
+1. It downloads the newest release's `.deb` and `texas2step-setup` to
+   `/var/cache/texas2step/update/<version>/`. Each must match the SHA-256 that GitHub
    publishes with the release, or it isn't used.
 2. It runs that release's setup tool in update mode, which plans only the update of what
    is installed: the package, the [settings merge](#with-the-setup-tool-or-by-hand) and
    texas2step's own nginx files. It publishes nothing anew, adds no firewall rule and
-   changes no setting.
+   changes no setting. If the check finds something you must fix first, it stops there.
 3. It shows that plan and asks before it runs the install script. The script reloads
    nginx when the package changes an nginx file that nginx loads, and checks that the new
    version answers, directly and through nginx.
+
+```text
+$ sudo texas2step update
+texas2step <installed> is installed; <newest> is available (<date>).
+  Release notes: https://github.com/robert-patrick-texas/texas2step/releases/tag/v<newest>
+Downloading texas2step-<newest>-1-amd64.deb (39 MB) and texas2step-setup to /var/cache/texas2step/update/<newest>-1/
+Both match the SHA-256 published with the release.
+
+texas2step setup for www.example.net, <date and time>
+...
+Will change
+  - upgrade texas2step <installed>-1 -> <newest>-1; settings are kept
+...
+Wrote texas2step-install.sh for texas2step update to run.
+
+Install texas2step <newest> now? [y/N] y
+texas2step install, <date and time>
+
+== Checking the package
+...
+== Installing texas2step <newest>-1 (was <installed>-1)
+...
+== Restarting texas2step
+== Checking
+texas2step <newest> answers on http://127.0.0.1:8080/api/v1/health
+and through nginx at https://www.example.net/texas2step/
+
+Done. Open https://www.example.net/texas2step/
+```
+
+Answer **n** (or just Enter) and nothing is installed. The downloads, the setup tool's
+report (`texas2step-preflight.txt`), its plan and the install script stay in
+`/var/cache/texas2step/update/<version>/` to read. The next run uses those downloads
+again rather than fetching them anew. Once you answer **y**, the install script writes
+its log, `texas2step-install.log`, there too. A run for another release removes the
+folders of earlier ones, and purging the package removes them all.
 
 The options:
 
@@ -388,12 +444,28 @@ above. Then:
   firewall, it installs nothing and logs a warning. Install that release yourself with
   `sudo texas2step update`.
 
-Check on it:
+It only ever moves to the newest release: it never reinstalls or goes back to an older
+one. Check on it:
 
 ```bash
 systemctl list-timers texas2step-update.timer   # the next and the last run
 journalctl -u texas2step-update                 # what each run did
+journalctl -u texas2step-update -p warning      # only the runs that left a release to you
+systemctl --failed                              # a failed last run shows here
 ```
+
+A run fails, and `journalctl -u texas2step-update` says why, in two kinds of case:
+
+* Before installing: it can't reach GitHub, a download doesn't match its SHA-256, or
+  the setup tool finds something you must fix first. Nothing has changed, and the next
+  day's run tries again.
+* After installing: the new version doesn't answer, directly or through nginx. It is
+  installed, so the next run finds nothing newer; see `journalctl -u texas2step`, or go
+  back with `sudo texas2step update --version <previous> --allow-downgrade`.
+
+A run that leaves a release to you doesn't count as failed: look for its warning. Only
+one update runs at a time, so a `sudo texas2step update` started while the timer's run
+is busy stops with `another texas2step update is running`.
 
 To run it at another time, `sudo systemctl edit texas2step-update.timer` and add:
 
