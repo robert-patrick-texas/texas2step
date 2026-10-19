@@ -950,6 +950,8 @@ def _check_settings(host: Host, opts: Options, p: Plan) -> None:
 def _check_names(host: Host, p: Plan, urls: dict[str, str]) -> None:
     """Each single-family URL's name must resolve in its own family only, to this host."""
     for fam, url in urls.items():
+        if not url:  # not set: nothing to check
+            continue
         parts = urlsplit(url)
         published = urlsplit(p.public).path.rstrip("/")
         if p.public and parts.path.rstrip("/") != published:

@@ -467,6 +467,16 @@ def test_single_family_urls_are_set_and_their_names_checked():
     assert any("has no A record yet" in t for t in levels(p, setup.NOTE))
     assert setup.plan(host(), setup.Options(url_v4="v4.houston.example.net")).blocked
 
+    # The URL's path must match the published one; an unset URL has none to check.
+    p = setup.plan(host(), setup.Options(url_v4="https://v4.houston.example.net/speedtest"))
+    assert any(
+        "v4.houston.example.net/speedtest ends in /speedtest, but texas2step is published at "
+        "/texas2step/" in t
+        for t in levels(p, setup.NOTE)
+    )
+    unset = levels(setup.plan(host(), setup.Options()), setup.NOTE)
+    assert not [t for t in unset if "ends in" in t]
+
 
 # ---- Another path, such as /speedtest ----------------------------------------------------
 
