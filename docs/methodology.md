@@ -171,6 +171,32 @@ loss.
 Throughput is deliberately not compared this way. Two transfers at once would share
 the client's own link, and both would read low.
 
+## Diag
+
+The Diag page tries each way of reaching the server once a second, for as long as the
+page is open: HTTPS, WebSocket and UDP, over IPv4 and IPv6.
+
+* **HTTPS** is a small request to `/api/v1/diag/http` on the server's IPv4-only or
+  IPv6-only address ([IPv4 and IPv6](configuration.md#ipv4-and-ipv6)). The answer gives
+  the client's address and port as the server saw them, the server's own address and
+  port, the TLS version and cipher, the server kernel's TCP round trip for that
+  connection (nginx's `$tcpinfo_rtt`), and the server's clock. The browser reports the
+  HTTP version it used (Resource Timing's `nextHopProtocol`). Browsers keep connections
+  open, so each attempt is a request on an existing connection, not a new one.
+* **WebSocket** opens its own TCP connection by an HTTP/1.1 upgrade and echoes a probe
+  a second. A closed socket is opened again every 2 s.
+* **UDP** is a WebRTC data channel held to one family (the server's candidates of the
+  other family are dropped) that echoes a probe a second. A session that won't open is
+  tried again every 10 s, since opening one takes seconds and uses one of the server's
+  ports. The server reports the client's address and port on the chosen path (`addr` on
+  the control channel), which is how the NAT and egress table compares UDP with TCP.
+
+An attempt not answered within 2 s (1.5 s for WebSocket and UDP) counts as missed. A
+method that has answered before shows a miss as loss (red). One that hasn't answered
+yet stays grey and keeps trying. One the server doesn't offer is grey and isn't tried.
+The clock offset is the server's time minus the browser's at the middle of the round
+trip, ± half the round trip.
+
 ## Known limitations
 
 * The UDP test needs UDP from the client to the server. Set `rtc_port_min` and

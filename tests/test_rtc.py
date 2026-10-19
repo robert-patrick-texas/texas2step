@@ -4,6 +4,8 @@ an exhausted range is refused rather than spilling onto other ports."""
 from __future__ import annotations
 
 import asyncio
+import ipaddress
+import json
 import re
 from collections.abc import AsyncIterator
 from typing import Any
@@ -65,6 +67,45 @@ async def test_sessions_bind_inside_the_range_and_echo(peers):
         assert await asyncio.wait_for(echoed, 5) == b"probe-1"
     finally:
         await echo.stop()
+
+
+async def test_control_channel_reports_both_ends_of_the_udp_path(peers):
+    echo = RtcEcho([], max_sessions=4, timeout=60, port_range=RANGE)
+    echo.start()
+    try:
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        peers.append(pc)
+        pc.createDataChannel("probe", ordered=False, maxRetransmits=0)
+        control = pc.createDataChannel("control")
+        await pc.setLocalDescription(await pc.createOffer())
+        answer = await echo.answer(pc.localDescription.sdp)
+
+        opened = asyncio.Event()
+        replies: asyncio.Queue[Any] = asyncio.Queue()
+        control.on("open", opened.set)
+        control.on("message", lambda m: replies.put_nowait(json.loads(m)))
+        await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
+        await asyncio.wait_for(opened.wait(), 10)
+        control.send(json.dumps({"op": "addr"}))
+        got = await asyncio.wait_for(replies.get(), 5)
+        assert got["op"] == "addr"
+        # The client end as the server sees it, and the server's own socket in the range.
+        ipaddress.ip_address(got["ip"].split("%")[0])
+        ipaddress.ip_address(got["server_ip"].split("%")[0])
+        assert isinstance(got["port"], int) and in_range(got["server_port"])
+    finally:
+        await echo.stop()
+
+
+def test_addresses_are_null_before_a_path_exists():
+    from texas2step.rtc import Session
+
+    assert Session(id="x", pc=object()).addresses() == {
+        "ip": None,
+        "port": None,
+        "server_ip": None,
+        "server_port": None,
+    }
 
 
 async def test_exhausted_range_is_refused(peers):

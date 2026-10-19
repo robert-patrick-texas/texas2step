@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import ipaddress
+import re
+import time
 from typing import Any
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from .. import __version__, rtc
 
@@ -24,6 +27,19 @@ def client_address(request: Request) -> tuple[str, int | None]:
         if real:
             return real.strip(), None
     return host, port
+
+
+def from_trusted_proxy(request: Request) -> bool:
+    """Whether the peer is a proxy whose X-Forwarded-* and similar headers we believe."""
+    return request.client is not None and request.client.host in (
+        request.app.state.settings.trusted_proxies
+    )
+
+
+def http_version(request: Request) -> str:
+    """The HTTP version the client used: the proxy's word for it, else our own."""
+    protocol = request.headers.get("x-client-protocol") if from_trusted_proxy(request) else None
+    return protocol or f"HTTP/{request.scope.get('http_version', '1.1')}"
 
 
 def address_family(ip: str) -> str | None:
@@ -66,20 +82,93 @@ async def info(request: Request) -> dict[str, Any]:
 @router.get("/whoami", summary="The client as this server sees it")
 async def whoami(request: Request) -> dict[str, Any]:
     ip, port = client_address(request)
-    trusted = request.client is not None and request.client.host in (
-        request.app.state.settings.trusted_proxies
-    )
+    trusted = from_trusted_proxy(request)
     scheme = request.headers.get("x-forwarded-proto") if trusted else None
-    protocol = request.headers.get("x-client-protocol") if trusted else None
     return {
         "ip": ip,
         "port": port,
         "family": address_family(ip),
         "scheme": scheme or request.url.scheme,
-        "http_version": protocol or f"HTTP/{request.scope.get('http_version', '1.1')}",
+        "http_version": http_version(request),
         "user_agent": request.headers.get("user-agent"),
         "via_proxy": bool(trusted and request.headers.get("x-forwarded-for")),
     }
+
+
+# What nginx can tell us about the connection, checked before it is believed: a proxy
+# misconfigured to pass a client's own headers through must not put junk on the page.
+_TEXT = re.compile(r"[\x21-\x7e]{1,64}")
+
+
+def _ip(value: str | None) -> str | None:
+    try:
+        addr = ipaddress.ip_address((value or "").strip())
+    except ValueError:
+        return None
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+        addr = addr.ipv4_mapped
+    return str(addr)
+
+
+def _port(value: str | int | None) -> int | None:
+    try:
+        port = int(str(value).strip())
+    except ValueError:
+        return None
+    return port if 1 <= port <= 65535 else None
+
+
+def _text(value: str | None) -> str | None:
+    value = (value or "").strip()
+    return value if _TEXT.fullmatch(value) else None
+
+
+def _ms(value: str | None) -> float | None:
+    """nginx's $tcpinfo_rtt and $tcpinfo_rttvar, in microseconds, as milliseconds."""
+    try:
+        micros = int((value or "").strip())
+    except ValueError:
+        return None
+    return round(micros / 1000, 3) if 0 < micros < 600_000_000 else None
+
+
+@router.get("/diag/http", summary="Both ends of this HTTP connection, for the Diag tab")
+async def diag_http(request: Request) -> JSONResponse:
+    """The client and server addresses of this request's connection, its HTTP version,
+    TLS, and the server kernel's TCP round-trip time, with the server's clock.
+
+    Behind nginx these come from headers the package's snippet sets (X-Client-Port,
+    X-Server-Addr, X-Server-Port, X-TLS-Protocol, X-TLS-Cipher, X-TCP-RTT and
+    X-TCP-RTTVAR), believed only from ``trusted_proxies``. A proxy that doesn't send
+    them leaves those fields null. Without a proxy, the socket's own addresses are used.
+    """
+    h = request.headers
+    trusted = from_trusted_proxy(request)
+    ip, port = client_address(request)
+    if trusted:
+        port = _port(h.get("x-client-port")) or port
+        server_ip, server_port = _ip(h.get("x-server-addr")), _port(h.get("x-server-port"))
+        protocol, cipher = _text(h.get("x-tls-protocol")), _text(h.get("x-tls-cipher"))
+        tls = {"protocol": protocol, "cipher": cipher} if protocol and cipher else None
+        rtt, rttvar = _ms(h.get("x-tcp-rtt")), _ms(h.get("x-tcp-rttvar"))
+    else:
+        local = request.scope.get("server") or (None, None)
+        server_ip, server_port = _ip(local[0]), _port(local[1])
+        tls, rtt, rttvar = None, None, None
+    body = {
+        "client": {"ip": ip, "port": port, "family": address_family(ip)},
+        "server": {
+            "ip": server_ip,
+            "port": server_port,
+            "family": address_family(server_ip) if server_ip else None,
+        },
+        "http_version": http_version(request),
+        "tls": tls,
+        "tcp_rtt_ms": rtt,
+        "tcp_rttvar_ms": rttvar,
+        "time_ms": time.time() * 1000,
+    }
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/locations", summary="Servers offered in the location picker")

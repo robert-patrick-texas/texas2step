@@ -93,6 +93,17 @@ export interface ServerInfo {
   defaults: { streams: number; seconds: number; packets: number };
 }
 
+/** /api/v1/diag/http: what the server saw of one HTTPS request, and its clock. */
+export interface DiagHttp {
+  client: { ip: string; port: number | null; family: "IPv4" | "IPv6" | null };
+  server: { ip: string | null; port: number | null; family: "IPv4" | "IPv6" | null };
+  http_version: string | null;
+  tls: { protocol: string; cipher: string } | null;
+  tcp_rtt_ms: number | null;
+  tcp_rttvar_ms: number | null;
+  time_ms: number;
+}
+
 export interface WhoAmI {
   ip: string;
   port: number | null;

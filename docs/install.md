@@ -198,6 +198,11 @@ The snippet does the following:
   caching for `\.(js|css)$`, can't capture texas2step's URLs.
 * Sends `X-Forwarded-For $remote_addr`, so a client can't spoof the address shown in
   its results.
+* Tells texas2step about each connection for the Diag tab: the client's port, the
+  server address and port it reached, TLS version and cipher, and the kernel's TCP
+  round-trip time (`/api/v1/diag/http` in [API](api.md#discovery)). The setup tool
+  writes a snippet it generated again from the new package. A copy you made by hand
+  needs these lines added; without them, Diag shows those fields as unknown.
 
 If your site already uses `/speedtest`, leave out the second include. To give
 texas2step its own hostname instead, such as `speed.example.net`, include

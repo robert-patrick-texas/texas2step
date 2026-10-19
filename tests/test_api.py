@@ -1,4 +1,5 @@
 import re
+import time
 
 from fastapi.testclient import TestClient
 
@@ -85,6 +86,82 @@ def test_forwarded_for_only_from_trusted_proxy(client, settings):
     assert me["via_proxy"] is True
 
 
+def test_diag_http_direct(client):
+    r = client.get("/api/v1/diag/http")
+    assert r.headers["cache-control"] == "no-store"
+    d = r.json()
+    assert d["client"] == {"ip": "testclient", "port": 50000, "family": None}
+    # Without a proxy, the socket's own end: TestClient's is named, not numbered.
+    assert d["server"] == {"ip": None, "port": 80, "family": None}
+    assert d["http_version"] == "HTTP/1.1"
+    assert d["tls"] is None and d["tcp_rtt_ms"] is None and d["tcp_rttvar_ms"] is None
+    assert abs(d["time_ms"] - time.time() * 1000) < 5000
+
+
+NGINX_SAYS = {
+    "x-forwarded-for": "2001:db8::7",
+    "x-client-protocol": "HTTP/2.0",
+    "x-client-port": "51234",
+    "x-server-addr": "2001:db8::1",
+    "x-server-port": "443",
+    "x-tls-protocol": "TLSv1.3",
+    "x-tls-cipher": "TLS_AES_256_GCM_SHA384",
+    "x-tcp-rtt": "1234",
+    "x-tcp-rttvar": "567",
+}
+
+
+def test_diag_http_through_a_trusted_proxy(client, settings):
+    settings.trusted_proxies = ["testclient"]
+    d = client.get("/api/v1/diag/http", headers=NGINX_SAYS).json()
+    assert d["client"] == {"ip": "2001:db8::7", "port": 51234, "family": "IPv6"}
+    assert d["server"] == {"ip": "2001:db8::1", "port": 443, "family": "IPv6"}
+    assert d["http_version"] == "HTTP/2.0"
+    assert d["tls"] == {"protocol": "TLSv1.3", "cipher": "TLS_AES_256_GCM_SHA384"}
+    assert (d["tcp_rtt_ms"], d["tcp_rttvar_ms"]) == (1.234, 0.567)
+    # nginx sends IPv4 listeners' addresses plainly; a mapped one is unwrapped.
+    d = client.get("/api/v1/diag/http", headers={"x-server-addr": "::ffff:192.0.2.1"}).json()
+    assert d["server"]["ip"] == "192.0.2.1" and d["server"]["family"] == "IPv4"
+
+
+def test_diag_http_ignores_untrusted_and_junk_headers(client, settings):
+    d = client.get("/api/v1/diag/http", headers=NGINX_SAYS).json()
+    assert d["client"]["ip"] == "testclient" and d["client"]["port"] == 50000
+    assert d["server"] == {"ip": None, "port": 80, "family": None}
+    assert d["tls"] is None and d["tcp_rtt_ms"] is None and d["http_version"] == "HTTP/1.1"
+
+    settings.trusted_proxies = ["testclient"]
+    junk = {
+        "x-forwarded-for": "192.0.2.9",
+        "x-client-port": "99999",
+        "x-server-addr": "not-an-ip",
+        "x-server-port": "0",
+        "x-tls-protocol": "TLSv1.3",
+        "x-tls-cipher": "<script>alert(1)</script> " * 4,
+        "x-tcp-rtt": "0",
+        "x-tcp-rttvar": "lots",
+    }
+    d = client.get("/api/v1/diag/http", headers=junk).json()
+    assert d["client"] == {"ip": "192.0.2.9", "port": None, "family": "IPv4"}
+    assert d["server"] == {"ip": None, "port": None, "family": None}
+    assert d["tls"] is None and d["tcp_rtt_ms"] is None and d["tcp_rttvar_ms"] is None
+
+
+def test_diag_page_can_be_hidden(tmp_path):
+    from texas2step.page import Shell
+
+    template = (
+        '<html lang="en"><base href="/" /><nav>'
+        '<a href="monitor" data-link data-page="monitor">Monitor</a>'
+        '<a href="diag" data-link data-page="diag">Diag</a></nav></html>'
+    )
+    settings = Settings(results_path=str(tmp_path / "r.db"), page_diag=False)
+    page = Shell(settings, None).render(template, "", "0")
+    assert 'data-page="diag"' not in page and 'data-page="monitor"' in page
+    assert 'data-pages="test monitor history api"' in page
+    assert 'data-page="diag"' in Shell(Settings(), None).render(template, "", "0")
+
+
 def test_cors_preflight_for_upload(client):
     r = client.options(
         "/api/v1/up",
@@ -146,7 +223,7 @@ def test_rtc_offer_rejects_garbage(client):
 
 
 def test_spa_routes(client):
-    for path in ("/", "/monitor", "/history", "/api", "/r/abc123"):
+    for path in ("/", "/monitor", "/diag", "/history", "/api", "/r/abc123"):
         r = client.get(path)
         assert r.status_code == 200, path
         assert "text/html" in r.headers["content-type"]
@@ -265,7 +342,7 @@ def test_hidden_pages_lose_their_tabs(tmp_path):
     settings = Settings(results_path=str(tmp_path / "r.db"), page_test=False, page_api=False)
     with TestClient(create_app(settings)) as c:
         page = c.get("/history").text
-    assert '<html lang="en" data-pages="monitor history">' in page
+    assert '<html lang="en" data-pages="monitor diag history">' in page
     assert 'data-page="monitor"' in page and 'data-page="history"' in page
     assert 'data-page="test"' not in page and 'data-page="api"' not in page
 

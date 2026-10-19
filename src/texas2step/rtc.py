@@ -175,6 +175,21 @@ class Session:
     def counters(self) -> dict[str, int]:
         return {"rx": self.rx, "tx": self.tx, "rx_bytes": self.rx_bytes}
 
+    def addresses(self) -> dict[str, Any]:
+        """Both ends of the UDP path ICE chose: the client as this server sees it (after
+        any NAT), and this server's own address. Nulls until the path is up."""
+        found: dict[str, Any] = {"ip": None, "port": None, "server_ip": None, "server_port": None}
+        # aiortc has no public accessor for the selected pair; aioice keeps the nominated
+        # pair per component. Guarded, so a change in either library gives nulls, not errors.
+        try:
+            pair = self.pc.sctp.transport.transport._connection._nominated.get(1)
+            if pair is not None:
+                found["ip"], found["port"] = pair.remote_addr
+                found["server_ip"], found["server_port"] = pair.local_addr
+        except Exception:
+            pass
+        return found
+
 
 class RtcEcho:
     def __init__(
@@ -246,6 +261,8 @@ class RtcEcho:
                     op = request.get("op")
                     if op == "stats":
                         channel.send(json.dumps({"op": "stats", **session.counters()}))
+                    elif op == "addr":
+                        channel.send(json.dumps({"op": "addr", **session.addresses()}))
                     elif op == "reset":
                         session.rx = session.tx = session.rx_bytes = 0
                         channel.send(json.dumps({"op": "reset"}))

@@ -21,9 +21,22 @@ function waitFor(target: EventTarget, event: string, timeoutMs: number, ok: () =
   });
 }
 
+/** The server offers no address in the family the endpoint asks for, so UDP can't be tried. */
+export class NotOffered extends Error {}
+
+/** How the server sees the client on the UDP path, and its own end of it. */
+export interface UdpAddress {
+  ip: string | null;
+  port: number | null;
+  server_ip: string | null;
+  server_port: number | null;
+}
+
+type ControlReply = Record<string, unknown>;
+
 export class RtcProbe {
   onEcho: ((seq: number, rtt: number) => void) | null = null;
-  private controlWaiters: ((msg: Record<string, number>) => void)[] = [];
+  private controlWaiters: { op: string; done: (msg: ControlReply) => void }[] = [];
 
   private constructor(
     private readonly pc: RTCPeerConnection,
@@ -39,8 +52,10 @@ export class RtcProbe {
     };
     control.onmessage = (ev) => {
       try {
-        const msg = JSON.parse(String(ev.data)) as Record<string, number>;
-        this.controlWaiters.shift()?.(msg);
+        const msg = JSON.parse(String(ev.data)) as ControlReply;
+        // Each reply names its request ("op"), so a late one can't answer another request.
+        const at = this.controlWaiters.findIndex((w) => w.op === msg.op);
+        if (at >= 0) this.controlWaiters.splice(at, 1)[0]!.done(msg);
       } catch {
         /* ignore */
       }
@@ -61,6 +76,9 @@ export class RtcProbe {
       });
       // A single-family hostname covers HTTP; ICE would still pick either family for UDP.
       const sdp = ep.family ? onlyFamily(answer.sdp!, ep.family) : answer.sdp;
+      if (ep.family && !/^a=candidate:/m.test(sdp ?? "")) {
+        throw new NotOffered(`the server offers no ${ep.family === "ipv6" ? "IPv6" : "IPv4"} address for UDP`);
+      }
       await pc.setRemoteDescription({ sdp, type: "answer" });
       const open = await waitFor(probe, "open", timeoutMs, () => probe.readyState === "open");
       if (!open) throw new Error("UDP path did not open (ICE failed or UDP blocked)");
@@ -78,6 +96,11 @@ export class RtcProbe {
 
   /** The address family of the UDP path ICE chose, once the channel is open. */
   async family(): Promise<"IPv4" | "IPv6" | null> {
+    return (await this.path())?.family ?? null;
+  }
+
+  /** The server's end of the UDP path ICE chose: its address and port. */
+  async path(): Promise<{ address: string; port: number | null; family: "IPv4" | "IPv6" } | null> {
     const stats = await this.pc.getStats();
     let pair: { remoteCandidateId?: string } | undefined;
     stats.forEach((s) => {
@@ -88,7 +111,8 @@ export class RtcProbe {
     });
     const remote = pair?.remoteCandidateId ? stats.get(pair.remoteCandidateId) : undefined;
     const address: string | undefined = remote?.address ?? remote?.ip;
-    return address ? (address.includes(":") ? "IPv6" : "IPv4") : null;
+    if (!address) return null;
+    return { address, port: typeof remote?.port === "number" ? remote.port : null, family: address.includes(":") ? "IPv6" : "IPv4" };
   }
 
   send(seq: number, size: number): void {
@@ -100,14 +124,37 @@ export class RtcProbe {
   }
 
   async counters(timeoutMs = 2000): Promise<{ rx: number; tx: number } | null> {
-    if (this.control.readyState !== "open") return null;
+    const msg = await this.ask("stats", timeoutMs);
+    return msg ? { rx: Number(msg.rx ?? 0), tx: Number(msg.tx ?? 0) } : null;
+  }
+
+  /** The client's address and port as the server sees them on this UDP path (after NAT). */
+  async address(timeoutMs = 2000): Promise<UdpAddress | null> {
+    const msg = await this.ask("addr", timeoutMs);
+    if (!msg) return null;
+    const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+    const num = (v: unknown) => (typeof v === "number" ? v : null);
+    return { ip: str(msg.ip), port: num(msg.port), server_ip: str(msg.server_ip), server_port: num(msg.server_port) };
+  }
+
+  /** One request on the control channel; replies come back in order. */
+  private ask(op: string, timeoutMs: number): Promise<ControlReply | null> {
+    if (this.control.readyState !== "open") return Promise.resolve(null);
     return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(null), timeoutMs);
-      this.controlWaiters.push((msg) => {
-        clearTimeout(timer);
-        resolve({ rx: msg.rx ?? 0, tx: msg.tx ?? 0 });
-      });
-      this.control.send(JSON.stringify({ op: "stats" }));
+      const waiter = {
+        op,
+        done: (msg: ControlReply) => {
+          clearTimeout(timer);
+          resolve(msg);
+        },
+      };
+      // An older server doesn't know every op and never replies: give up, and forget it.
+      const timer = setTimeout(() => {
+        this.controlWaiters = this.controlWaiters.filter((w) => w !== waiter);
+        resolve(null);
+      }, timeoutMs);
+      this.controlWaiters.push(waiter);
+      this.control.send(JSON.stringify({ op }));
     });
   }
 

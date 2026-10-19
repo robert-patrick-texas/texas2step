@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 ENV_PREFIX = "TEXAS2STEP_"
-PAGES = ("test", "monitor", "history", "api")  # the web UI's tabs, in order
+PAGES = ("test", "monitor", "diag", "history", "api")  # the web UI's tabs, in order
 THEMES = ("system", "light", "dark", "america", "energy", "federal", "military", "texas")
 # Branding URLs end up in href attributes, so only these schemes are accepted.
 LINK_SCHEMES = ("https://", "http://", "mailto:", "tel:")
@@ -87,6 +87,7 @@ class Settings:
     # results_enabled and measure_enabled turn parts of it off.
     page_test: bool = True
     page_monitor: bool = True
+    page_diag: bool = True
     page_history: bool = True
     page_api: bool = True
 
@@ -118,7 +119,9 @@ class Settings:
                 f"rtc_port_min/rtc_port_max: need 1 <= min <= max <= 65535, or both 0; got {ports}"
             )
         if not self.pages:
-            raise ValueError("page_test, page_monitor, page_history, page_api: keep one shown")
+            raise ValueError(
+                "page_test, page_monitor, page_diag, page_history, page_api: keep one shown"
+            )
         if self.default_theme not in THEMES:
             raise ValueError(f"default_theme: expected one of {', '.join(THEMES)}")
         if not self.brand_name.strip():

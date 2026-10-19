@@ -44,6 +44,10 @@ sending the offer. The offer must include data channels:
   verbatim. texas2step clients send `u32 sequence (LE) | f64 send time ms (LE) | padding`.
 * `control` (reliable, optional): send `{"op":"stats"}` to receive
   `{"op":"stats","rx":…,"tx":…,"rx_bytes":…}`, or `{"op":"reset"}` to zero the counters.
+  `{"op":"addr"}` returns both ends of the UDP path ICE chose:
+  `{"op":"addr","ip":"192.0.2.7","port":50123,"server_ip":"192.0.2.1","server_port":61042}`.
+  `ip` and `port` are the client as the server sees it, after any NAT. All four are
+  `null` until the path is up.
 
 Sessions close when the peer disconnects or after `rtc_session_timeout` seconds idle.
 The server answers `503` when it already holds `max_rtc_sessions` sessions, or when
@@ -55,8 +59,29 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 |---|---|---|
 | GET | `/api/v1/info` | name, version, server identity, capabilities, limits, ICE servers, UI defaults |
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
+| GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |
 | GET | `/api/v1/health` | `{"status": "ok", "version": …}` |
+
+`GET /api/v1/diag/http` answers once per request, uncached, for the Diag tab:
+
+```json
+{
+  "client": {"ip": "2001:db8::7", "port": 51234, "family": "IPv6"},
+  "server": {"ip": "2001:db8::1", "port": 443, "family": "IPv6"},
+  "http_version": "HTTP/2.0",
+  "tls": {"protocol": "TLSv1.3", "cipher": "TLS_AES_256_GCM_SHA384"},
+  "tcp_rtt_ms": 1.234,
+  "tcp_rttvar_ms": 0.567,
+  "time_ms": 1792385060799.1
+}
+```
+
+Behind nginx, the client port, server address and port, TLS and the kernel's TCP
+round-trip time (`$tcpinfo_rtt`) come from headers the package's snippet sets. They're
+believed only from `trusted_proxies`, and a proxy that doesn't send them leaves those
+fields `null`. Without a proxy, `server` is the socket's own address, and `tls` and the
+TCP times are `null`. `time_ms` is the server's clock, in milliseconds since the epoch.
 
 ## Server-side measurements
 

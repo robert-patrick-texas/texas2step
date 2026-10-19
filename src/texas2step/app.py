@@ -25,7 +25,7 @@ from .store import ResultStore
 log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
-SPA_ROUTES = ("/", "/monitor", "/history", "/api", "/r/{rid}")
+SPA_ROUTES = ("/", "/monitor", "/diag", "/history", "/api", "/r/{rid}")
 PREFIX = re.compile(r"(?:/(?!\.\.?(?:/|$))[A-Za-z0-9._~-]+)+")  # no "." or ".." segments
 
 

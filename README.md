@@ -30,10 +30,13 @@ Details and definitions: [docs/methodology.md](docs/methodology.md).
 
 ![Results](docs/images/results-light.jpg)
 
-The UI has four views: **Test** (gauge, live link animation, charts, exportable and
+The UI has five views: **Test** (gauge, live link animation, charts, exportable and
 shareable results), **Monitor** (continuous UDP probing with a scrolling RTT and loss
-trace, to one server or to two at once for a side-by-side comparison), **History** (saved runs and trend), and **API** (copy-ready examples). A site can
-hide any of them (`page_test`, `page_monitor`, `page_history`, `page_api`). Every
+trace, to one server or to two at once for a side-by-side comparison), **Diag** (HTTPS,
+WebSocket and UDP over IPv4 and IPv6, tried once a second, with your addresses, NAT,
+TLS and an event log), **History** (saved runs and trend), and **API** (copy-ready
+examples). A site can hide any of them (`page_test`, `page_monitor`, `page_diag`,
+`page_history`, `page_api`). Every
 chart has a hover readout and a table equivalent.
 
 Visitors pick a theme from the header: Light, Dark, America, Energy, Federal, Military or

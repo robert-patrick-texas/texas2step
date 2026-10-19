@@ -36,6 +36,7 @@ results_path = "/var/lib/texas2step/results.db"
 # --- Pages of the web UI: hide any, but not all (the API behind them stays) ----------------
 # page_test = true                      # the Test tab
 # page_monitor = true                   # the Monitor tab
+# page_diag = true                      # the Diag tab
 # page_history = true                   # the History tab
 # page_api = true                       # the API tab
 
