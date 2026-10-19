@@ -56,6 +56,7 @@ results_path = "/var/lib/texas2step/results.db"
 # brand_logo = ""                       # e.g. "/etc/texas2step/logo.svg" (SVG, PNG, JPEG, WebP)
 # brand_notice = ""                     # a line across the top of every page
 # default_theme = "system"              # system, light, dark, america, energy, federal, military or texas
+# brand_credit = "link"                 # footer's "texas2step <version>": link, text or none
 # Header and footer links: see [[brand_links]] at the end of this file.
 
 # --- Other texas2step servers in the location picker ---------------------------------------

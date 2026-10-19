@@ -6,7 +6,7 @@ fills in what only it knows:
 - the path prefix it is published under (``<base href>``),
 - the version (read by the UI from a meta tag),
 - the site's default theme, and which pages it shows,
-- the branding: name, logo, organization, links and notice.
+- the branding: name, logo, organization, links, notice and the footer's credit.
 
 Branding is written into the page itself rather than added by script, so a renamed site
 never flashes the default name. Every value is HTML-escaped. Nothing from the request
@@ -78,6 +78,16 @@ class Shell:
             for hidden in set(PAGES) - set(s.pages):
                 page = re.sub(rf'\s*<a [^>]*data-page="{hidden}"[^>]*>[^<]*</a>', "", page, count=1)
         page = page.replace('<html lang="en">', f"<html {' '.join(root)}>", 1)
+        # The footer's "texas2step <version>": a link to the project, plain text, or gone.
+        if s.brand_credit == "none":
+            page = _fill(page, "credit", "")
+        elif s.brand_credit == "text":
+            page = re.sub(
+                r'<a id="footer-version"[^>]*>([^<]*)</a>',
+                r'<span id="footer-version">\1</span>',
+                page,
+                count=1,
+            )
         if s.brand_name != DEFAULT_NAME:
             name = escape(s.brand_name)
             page = page.replace("<title>texas2step</title>", f"<title>{name}</title>", 1)

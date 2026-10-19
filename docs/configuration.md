@@ -44,6 +44,7 @@ file up to date with the new version's template and keeps your values; see
 | `brand_logo` | `""` | Path to an SVG, PNG, JPEG or WebP file shown in place of the star |
 | `brand_notice` | `""` | A line of text across the top of every page |
 | `brand_links` | `[]` | Links in the header and footer, as `[[brand_links]]` tables (TOML only) |
+| `brand_credit` | `link` | The footer's "texas2step &lt;version&gt;": `link` to the project's site, plain `text`, or `none` to leave the project's name and version out of the footer |
 | `default_theme` | `system` | `system`, `light`, `dark`, `america`, `energy`, `federal`, `military` or `texas` |
 
 ## Changing settings from the command line
@@ -105,7 +106,11 @@ url = "mailto:noc@acme.example"
 * **Where it shows.** The name and logo lead the header. The organization sits beside them
   and opens its website in a new tab. `brand_links` appear in the header on wide screens
   and in the footer on every screen. The notice runs across the top of every page.
-  Once the site is renamed, the footer reads "Powered by texas2step".
+  Once the site is renamed, the footer reads "Powered by texas2step". The footer's
+  "texas2step &lt;version&gt;" links to the project's site; `brand_credit = "text"` keeps the
+  words without the link, and `brand_credit = "none"` leaves the project's name, version
+  and "Powered by" out of the footer, for sites that carry only their own branding. The
+  version is still at `/api/v1/health`.
 * **Logo.** SVG, PNG, JPEG, WebP or GIF, about 30 px tall on screen; wide logos keep their
   shape, up to 180 px wide. The `texas2step` service user must be able to read the file
   (`/etc/texas2step/` is a good place). If the file is missing or unreadable, the server

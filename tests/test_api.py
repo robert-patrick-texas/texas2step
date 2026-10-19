@@ -338,6 +338,21 @@ def test_default_page_is_unbranded(client):
     assert 'id="footer-version" href="https://robert-patrick-texas.github.io/texas2step/"' in page
 
 
+def test_brand_credit_is_a_link_text_or_nothing(tmp_path):
+    def page(**kw):
+        with TestClient(create_app(Settings(results_path=str(tmp_path / "r.db"), **kw))) as c:
+            return c.get("/").text
+
+    project = "https://robert-patrick-texas.github.io/texas2step/"
+    assert f'<a id="footer-version" href="{project}"' in page()
+    text = page(brand_credit="text", brand_name="NetCheck")
+    assert '<span id="footer-version">texas2step</span>' in text
+    assert project not in text and "Powered by" in text
+    none = page(brand_credit="none", brand_name="NetCheck")
+    assert 'id="footer-version"' not in none and "Powered by" not in none and project not in none
+    assert "Measurements run in your browser" in none  # the rest of the footer stays
+
+
 def test_hidden_pages_lose_their_tabs(tmp_path):
     settings = Settings(results_path=str(tmp_path / "r.db"), page_test=False, page_api=False)
     with TestClient(create_app(settings)) as c:

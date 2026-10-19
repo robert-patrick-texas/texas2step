@@ -142,7 +142,8 @@ export class App {
     } catch (err) {
       console.warn("server unreachable", err);
     }
-    setText($("#footer-version"), this.info ? `texas2step ${this.info.version}` : "texas2step");
+    // A site with brand_credit = "none" has no credit in its footer.
+    setText(document.querySelector("#footer-version"), this.info ? `texas2step ${this.info.version}` : "texas2step");
     const picker = document.querySelector("#server-picker .picker-status");
     picker?.classList.toggle("down", !this.info);
     for (const fn of this.listeners) fn();

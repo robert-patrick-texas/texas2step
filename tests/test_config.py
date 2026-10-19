@@ -99,6 +99,8 @@ def test_branding_rejects_unsafe_or_unknown_values(tmp_path):
         Settings(brand_links=[Link("Help", "javascript:alert(1)")])
     with pytest.raises(ValueError, match="default_theme"):
         Settings(default_theme="neon")
+    with pytest.raises(ValueError, match="brand_credit"):
+        Settings(brand_credit="hidden")
     with pytest.raises(ValueError, match="keep one shown"):
         Settings(
             page_test=False,

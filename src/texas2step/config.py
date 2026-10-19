@@ -24,6 +24,7 @@ PAGES = ("test", "monitor", "diag", "history", "api")  # the web UI's tabs, in o
 THEMES = ("system", "light", "dark", "america", "energy", "federal", "military", "texas")
 # Branding URLs end up in href attributes, so only these schemes are accepted.
 LINK_SCHEMES = ("https://", "http://", "mailto:", "tel:")
+CREDITS = ("link", "text", "none")  # brand_credit
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,8 @@ class Settings:
     brand_notice: str = ""  # a line across the top of every page, e.g. an acceptable-use notice
     brand_links: list[Link] = field(default_factory=list)
     default_theme: str = "system"  # one of THEMES; visitors can still pick another
+    # The footer's "texas2step <version>": linked to the project's site, plain text, or none.
+    brand_credit: str = "link"
 
     def __post_init__(self) -> None:
         ports = (self.rtc_port_min, self.rtc_port_max)
@@ -124,6 +127,8 @@ class Settings:
             )
         if self.default_theme not in THEMES:
             raise ValueError(f"default_theme: expected one of {', '.join(THEMES)}")
+        if self.brand_credit not in CREDITS:
+            raise ValueError(f"brand_credit: expected one of {', '.join(CREDITS)}")
         if not self.brand_name.strip():
             raise ValueError("brand_name: must not be empty")
         urls = [("brand_url", self.brand_url)] if self.brand_url else []
