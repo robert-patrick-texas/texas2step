@@ -38,6 +38,7 @@ abstract class Method {
   lostRun = 0;
   downSince = 0;
   stopped = false;
+  private timer = 0;
   readonly lane = new Lane();
   readonly row: { root: HTMLElement; badge: HTMLElement; figs: HTMLElement; detail: HTMLElement; port: HTMLElement; timeline: HTMLCanvasElement; width: number };
 
@@ -75,11 +76,26 @@ abstract class Method {
     return `${this.fam === "Auto" ? "This address" : this.fam} ${KINDS[this.kind]}`;
   }
 
-  /** One attempt; called once a second unless the method isn't offered. */
+  /** One attempt; made about once a second unless the method isn't offered. */
   abstract tick(): void;
+
+  /**
+   * Attempt about once a second, starting `phase` ms from now. Each wait is 850 to 1150 ms,
+   * so the methods drift apart: their packets leave at different moments, on the wire as
+   * on screen, instead of all at once.
+   */
+  start(phase: number): void {
+    const step = () => {
+      if (this.stopped) return;
+      if (this.tone !== "off") this.tick();
+      this.timer = window.setTimeout(step, 850 + Math.random() * 300);
+    };
+    this.timer = window.setTimeout(step, phase);
+  }
 
   stop(): void {
     this.stopped = true;
+    clearTimeout(this.timer);
     this.lane.dispose();
   }
 
@@ -336,13 +352,13 @@ export class DiagView implements View {
       server: h("div", { class: "diag-server" }),
       clock: h("div", { class: "diag-clock" }),
       rows: h("div", { class: "diag-rows" }),
-      egress: h("div", { class: "table-wrap" }),
+      egress: h("div", { class: "egress" }),
       log: h("ol", { class: "diag-log" }),
     };
     const card = (title: string, note: string, ...body: (HTMLElement | null)[]) =>
-      h("section", { class: "card diag-card" }, h("header", { class: "card-head head-inline" }, h("h2", {}, title), note ? h("p", {}, note) : null), ...body);
+      h("section", { class: "card diag-card" }, h("header", { class: "card-head head-inline" }, h("h2", {}, title), note ? h("p", { class: "wide" }, note) : null), ...body);
     root.append(
-      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "Diag"), h("p", { class: "lede" }, "Every way this browser can reach the server, tried once a second for as long as this page is open: HTTPS, WebSocket and UDP, over IPv4 and IPv6."))),
+      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "Diag"), h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second for as long as this page is open: HTTPS, WebSocket and UDP, over IPv4 and IPv6."))),
       h("section", { class: "card diag-card diag-addresses" }, this.els.you, this.els.server, this.els.clock),
       card(
         "Connection methods",
@@ -369,7 +385,7 @@ export class DiagView implements View {
     this.off = this.app.onServer(() => this.restart());
     document.addEventListener("visibilitychange", this.onVisibility);
     this.restart();
-    this.timer = window.setInterval(() => this.tick(), 1000);
+    this.timer = window.setInterval(() => this.render(), 1000);
   }
 
   unmount(): void {
@@ -424,12 +440,10 @@ export class DiagView implements View {
       // Without single-family names, HTTP goes wherever the browser takes this address.
       this.methods.push(new HttpsMethod("Auto", this, main), ws("Auto", main), udp("IPv4"), udp("IPv6"));
     }
-    for (const m of this.methods) this.els.rows.append(m.row.root);
-    this.render();
-  }
-
-  private tick(): void {
-    for (const m of this.methods) if (m.tone !== "off") m.tick();
+    for (const [i, m] of this.methods.entries()) {
+      this.els.rows.append(m.row.root);
+      m.start((i * 1000) / this.methods.length);
+    }
     this.render();
   }
 
@@ -494,7 +508,7 @@ export class DiagView implements View {
   }
 
   private renderEgress(): void {
-    const body = h("tbody", {});
+    clear(this.els.egress);
     for (const fam of ["IPv4", "IPv6"] as const) {
       const tcp = this.https[fam]?.client;
       const udp = this.udp[fam]?.seen;
@@ -504,10 +518,15 @@ export class DiagView implements View {
         else if (tcp.port && udp.port && tcp.port !== udp.port) verdict = "Same address, other port";
         else verdict = "Same address";
       }
-      body.append(h("tr", {}, h("th", {}, fam), h("td", { class: "mono" }, hostPort(tcp?.ip, tcp?.port)), h("td", { class: "mono" }, hostPort(udp?.ip, udp?.port)), h("td", {}, verdict)));
+      this.els.egress.append(
+        h(
+          "div",
+          { class: "egress-fam" },
+          h("h3", {}, fam),
+          h("dl", {}, h("dt", {}, "Over HTTPS (TCP)"), h("dd", { class: "mono" }, hostPort(tcp?.ip, tcp?.port)), h("dt", {}, "Over UDP"), h("dd", { class: "mono" }, hostPort(udp?.ip, udp?.port)), h("dt", {}, "Compared"), h("dd", {}, verdict)),
+        ),
+      );
     }
-    clear(this.els.egress);
-    this.els.egress.append(h("table", { class: "table data" }, h("thead", {}, h("tr", {}, h("th", {}), h("th", {}, "Over HTTPS (TCP)"), h("th", {}, "Over UDP"), h("th", {}))), body));
   }
 
   private renderLog(): void {

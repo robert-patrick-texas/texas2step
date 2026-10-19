@@ -14,8 +14,8 @@ export interface Sample {
   up: boolean; // the method had answered before this sample
 }
 
-const TRAVEL = 450; // ms each way on screen; real round trips are far too quick to see
-const FADE = 700; // ms a lost ping's mark stays
+const TRAVEL = 900; // ms each way on screen; real round trips are far too quick to see
+const FADE = 1200; // ms a lost ping's mark stays
 const H = 24;
 
 const lanes = new Set<Lane>();
