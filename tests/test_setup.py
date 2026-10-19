@@ -401,11 +401,11 @@ def test_peers():
     )
     down = setup.Peer("https://down.example.net/texas2step", error="timed out")
     listed = setup.Peer(
-        "https://aus.example.net/texas2step", {"server": {"id": "aus1", "name": "Austin"}}
+        "https://austin.example.net/texas2step", {"server": {"id": "austin", "name": "Austin"}}
     )
     config = (
         TEMPLATE
-        + '\n[[locations]]\nid = "aus1"\nname = "Austin"\nurl = "https://aus.example.net/texas2step"\n'
+        + '\n[[locations]]\nid = "austin"\nname = "Austin"\nurl = "https://austin.example.net/texas2step"\n'
     )
     h = host(peers=[reachable, me, down, listed], config=config)
     p = setup.plan(h, setup.Options(id="houston"))
@@ -420,6 +420,50 @@ def test_peers():
     )
     p = setup.plan(host(peers=[plain]), setup.Options(id="houston"))
     assert any("browsers on the HTTPS page will block it" in t for t in levels(p, setup.NOTE))
+
+
+def test_peers_bring_their_single_family_urls():
+    v4 = "https://v4.dallas.example.net/texas2step"
+    v6 = "https://v6.dallas.example.net/texas2step"
+    peer = setup.Peer(
+        "https://dallas.example.net/texas2step",
+        {"server": {"id": "dallas", "name": "dallas.example.net", "location": "Dallas, TX"}},
+        own={"id": "dallas", "url": "", "url_v4": v4, "url_v6": v6},
+    )
+    h = host(peers=[peer])
+    p = setup.plan(h, setup.Options(id="houston"))
+    assert (p.peers[0]["url_v4"], p.peers[0]["url_v6"]) == (v4, v6)
+    assert any("with its IPv4-only and IPv6-only URLs" in t for t in levels(p, setup.CHANGE))
+    script = setup.install_script(h, p, setup.Options(id="houston"))
+    assert f"--url-v4 {v4} --url-v6 {v6} --write" in script
+
+
+def test_single_family_urls_are_set_and_their_names_checked():
+    v4 = "https://v4.houston.example.net/texas2step"
+    v6 = "https://v6.houston.example.net/texas2step"
+    names = {
+        "v4.houston.example.net": (["192.0.2.10"], []),
+        "v6.houston.example.net": (["192.0.2.10"], ["2001:db8::10"]),  # a stray A record
+    }
+    h = host(names=names, local_addrs={"192.0.2.10", "2001:db8::10"})
+    opts = setup.Options(id="houston", url_v4=v4 + "/", url_v6=v6)
+    p = setup.plan(h, opts)
+    assert f'server_url_v4="{v4}"' in p.settings and f'server_url_v6="{v6}"' in p.settings
+    assert any("v4.houston.example.net has only A records" in t for t in levels(p, setup.OK))
+    assert any("v6.houston.example.net also has A records" in t for t in levels(p, setup.NOTE))
+    # nginx is asked for each name after the install, as a warning only.
+    script = setup.install_script(h, p, opts)
+    assert "--resolve v4.houston.example.net:443:127.0.0.1" in script
+    assert f"and as {v4}" in script and "warning: nginx does not answer for" in script
+
+    # A name that points elsewhere (a CDN proxy?), one with no records yet, and not a URL.
+    elsewhere = host(names={"v4.houston.example.net": (["203.0.113.5"], [])})
+    elsewhere.local_addrs = {"192.0.2.10"}
+    p = setup.plan(elsewhere, setup.Options(url_v4=v4))
+    assert any("isn't one of this host's addresses" in t for t in levels(p, setup.NOTE))
+    p = setup.plan(host(), setup.Options(url_v4=v4))
+    assert any("has no A record yet" in t for t in levels(p, setup.NOTE))
+    assert setup.plan(host(), setup.Options(url_v4="v4.houston.example.net")).blocked
 
 
 def test_the_checksum_stamp(monkeypatch):

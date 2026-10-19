@@ -66,18 +66,18 @@ sudo systemctl restart texas2step
   would refuse, are rejected before anything is written. Edit `[[locations]]` and
   `[[brand_links]]` in the file, or use `add-location`.
 * **`config add-location URL`** lists another texas2step server in the location picker.
-  It asks that server for its id, name and location (`/api/v1/info`), using the
-  system's trusted certificates. Give `--id`, `--name` and `--location` to set them
-  yourself, or when the server can't be reached; `--url-v4` and `--url-v6` add the
-  single-family addresses. A server that is already listed, by id or by URL, is left
+  It asks that server for its id, name and location (`/api/v1/info`), and for its
+  IPv4-only and IPv6-only URLs (its own entry in `/api/v1/locations`), using the
+  system's trusted certificates. Give `--id`, `--name`, `--location`, `--url-v4` and
+  `--url-v6` to set them yourself, or when the server can't be reached. A server that is already listed, by id or by URL, is left
   as it is.
 * **`config merge`** brings the whole file up to date after an upgrade; see
   [Upgrade](install.md#upgrade).
 
 `--config FILE` works on another file instead. The
 [setup tool](install.md#install-or-upgrade-with-the-setup-tool) uses `config set` and
-`add-location` to apply its `--id`, `--name`, `--location`, `--udp-ports` and `--peer`
-options.
+`add-location` to apply its `--id`, `--name`, `--location`, `--url-v4`, `--url-v6`,
+`--udp-ports` and `--peer` options.
 
 ## Branding and themes
 
@@ -175,5 +175,8 @@ The header then shows an **IP** drop-down with **Auto**, **IPv4 only** and
 **IPv6 only**, each offered only when its name is set. The choice holds the HTTP tests
 to that name, and holds the UDP probes to the server's addresses of that family.
 **Monitor** shows the family each UDP path uses. A server without these names has no
-drop-down, and the browser picks the family. For the other servers in the picker, set
-`url_v4` and `url_v6` in their `[[locations]]` entries.
+drop-down, and the browser picks the family. The setup tool's `--url-v4` and `--url-v6`
+set these and check each name's DNS records. For the other servers in the picker, the
+`url_v4` and `url_v6` of their `[[locations]]` entries do the same;
+`texas2step config add-location` and the setup tool's `--peer` fill them in from the
+other server.

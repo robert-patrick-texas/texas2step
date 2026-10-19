@@ -265,17 +265,28 @@ def cmd_config_set(args: argparse.Namespace) -> None:
     _apply_edit(args, lambda text: config_edit.set_values(text, values), again)
 
 
-def _fetch_info(url: str) -> dict[str, Any]:
-    """What a texas2step server at ``url`` says about itself (/api/v1/info)."""
+def _fetch_peer(url: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """What a texas2step server at ``url`` says about itself: the ``server`` part of
+    /api/v1/info, and its own entry in /api/v1/locations, which carries its IPv4-only
+    and IPv6-only URLs ({} from a server that doesn't list them)."""
     import ssl
 
     # The system's trust store, so servers with certificates from an internal CA (added
     # with update-ca-certificates) are trusted, as browsers on managed machines trust them.
     verify = ssl.create_default_context()
+    base = f"{engine._base(url)}{engine.API}"
     with httpx.Client(timeout=5, follow_redirects=True, verify=verify) as client:
-        r = client.get(f"{engine._base(url)}{engine.API}/info")
+        r = client.get(f"{base}/info")
         r.raise_for_status()
-        return r.json()
+        server = r.json().get("server") or {}
+        try:
+            r = client.get(f"{base}/locations")
+            r.raise_for_status()
+            listed = r.json().get("locations") or []
+        except (httpx.HTTPError, ValueError):
+            listed = []
+    own = next((loc for loc in listed if loc.get("id") == server.get("id")), {})
+    return server, own
 
 
 def cmd_config_add_location(args: argparse.Namespace) -> None:
@@ -291,17 +302,24 @@ def cmd_config_add_location(args: argparse.Namespace) -> None:
         "url_v4": args.url_v4,
         "url_v6": args.url_v6,
     }
-    if not (args.id and args.name):
+    if not all(location.values()):
         try:
-            server = _fetch_info(args.url).get("server") or {}
+            server, own = _fetch_peer(args.url)
         except (httpx.HTTPError, ValueError) as exc:
-            sys.exit(
-                f"texas2step: can't ask {args.url} who it is ({type(exc).__name__}: {exc}).\n"
-                "Check the URL, or give --id and --name (and --location) yourself."
-            )
-        location["id"] = args.id or server.get("id")
-        location["name"] = args.name or server.get("name")
-        location["location"] = args.location or server.get("location")
+            if not (args.id and args.name):
+                sys.exit(
+                    f"texas2step: can't ask {args.url} who it is ({type(exc).__name__}: {exc}).\n"
+                    "Check the URL, or give --id and --name (and --location) yourself."
+                )
+            server, own = {}, {}
+            print(f"Couldn't reach {args.url}; adding it with what was given.")
+        for key in ("id", "name", "location"):
+            location[key] = location[key] or server.get(key) or ""
+        # Its single-family URLs, so the IP drop-down works for it here too.
+        for key in ("url_v4", "url_v6"):
+            found = str(own.get(key) or "")
+            if not location[key] and found.startswith(("https://", "http://")):
+                location[key] = found
     again = shlex.join(
         ["texas2step", "config", "add-location", args.url]
         + [f"--{k.replace('_', '-')}={v}" for k, v in location.items() if v and k != "url"]

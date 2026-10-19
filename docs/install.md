@@ -78,6 +78,7 @@ Options:
 | `--speedtest` | Also add the `/speedtest` redirect |
 | `--no-nginx` | Install the service only, and publish it yourself |
 | `--udp-ports MIN-MAX` | The probe's UDP range, e.g. `61000-61999` |
+| `--url-v4 URL`, `--url-v6 URL` | This server's IPv4-only and IPv6-only base URLs, for the header's IP drop-down; see [IPv4 and IPv6](configuration.md#ipv4-and-ipv6). The check looks up each name: it should have only an A record (or only AAAA), pointing at this server. After the install, the script checks that nginx answers for each name. |
 | `--no-firewall` | Leave the firewall alone; the report lists the rule to add |
 | `--allow-downgrade` | Allow installing an older version than the one installed |
 | `--deb FILE` | A package other than the one next to the tool. Its checksum must still match. |
@@ -93,8 +94,16 @@ or a network firewall in front of it, so open the range there as well.
 ### Two servers
 
 To offer two servers to each other, for example for two-destination monitoring, install
-the second server with `--peer` pointing at the first. Then add the second server to
-the first, on the first server:
+the second server with `--peer` pointing at the first:
+
+```bash
+sudo ./texas2step-setup --id houston --name houston.example.net --location "Houston, TX" \
+    --url-v4 https://v4.houston.example.net/texas2step \
+    --url-v6 https://v6.houston.example.net/texas2step \
+    --peer https://dallas.example.net/texas2step
+```
+
+Then add the second server to the first, on the first server:
 
 ```bash
 sudo texas2step config add-location https://houston.example.net/texas2step          # preview
@@ -102,10 +111,12 @@ sudo texas2step config add-location https://houston.example.net/texas2step --wri
 sudo systemctl restart texas2step
 ```
 
-`add-location` asks the other server for its id, name and location. It uses the
-system's trusted certificates, so a certificate from your own CA works once the CA is
-installed with `update-ca-certificates`. If the server can't be reached yet, give
-`--id`, `--name` and `--location` yourself.
+`--peer` and `add-location` ask the other server for its id, name and location, and
+for its IPv4-only and IPv6-only URLs if it has them, so the IP drop-down works for it
+too. They use the system's trusted certificates, so a certificate from your own CA
+works once the CA is installed with `update-ca-certificates`. If the server can't be
+reached yet, give `--id`, `--name` and `--location` (and `--url-v4`, `--url-v6`)
+yourself.
 
 ## 1. Install the package
 

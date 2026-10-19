@@ -39,6 +39,7 @@ import urllib.request
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 # Written in by packaging/build-deb.sh: the package this script was built with.
 DEB_NAME = "@DEB_NAME@"
@@ -358,6 +359,7 @@ class Dep:
 class Peer:
     url: str
     info: dict | None = None
+    own: dict = field(default_factory=dict)  # its own /api/v1/locations entry
     error: str = ""
 
 
@@ -401,6 +403,9 @@ class Host:
     docker: bool = False
     ephemeral: tuple[int, int] = (32768, 60999)
     peers: list[Peer] = field(default_factory=list)
+    # The single-family hostnames' DNS answers: name -> (A records, AAAA records).
+    names: dict[str, tuple[list[str], list[str]]] = field(default_factory=dict)
+    local_addrs: set[str] = field(default_factory=set)  # this host's own addresses
 
 
 def nginx_error(stderr: str) -> str:
@@ -460,6 +465,8 @@ class Options:
     location: str = ""
     peers: list[str] = field(default_factory=list)
     udp_ports: tuple[int, int] | None = None
+    url_v4: str = ""
+    url_v6: str = ""
     no_firewall: bool = False
     allow_downgrade: bool = False
 
@@ -483,6 +490,8 @@ class Plan:
     nginx: NginxEdit | None = None
     public: str = ""  # https://host/texas2step/ once published
     resolve: str = ""  # host:port for curl --resolve
+    addr: str = "127.0.0.1"  # where nginx answers locally
+    family_urls: list[str] = field(default_factory=list)  # server_url_v4/_v6 once installed
     firewall: list[list[str]] = field(default_factory=list)  # commands
     listen: tuple[str, str] = ("127.0.0.1", "8080")
     udp: tuple[int, int] = DEFAULT_PORTS  # the probe's UDP range once installed
@@ -722,6 +731,7 @@ def _public(p: Plan, s: Server, path: str) -> None:
     port = "" if s.port == (443 if s.https else 80) else f":{s.port}"
     p.public = f"{scheme}://{host}{port}{path.rstrip('/')}/"
     p.resolve = f"{host}:{s.port}:{s.addr}"
+    p.addr = s.addr
 
 
 def _check_settings(host: Host, opts: Options, p: Plan) -> None:
@@ -754,14 +764,20 @@ def _check_settings(host: Host, opts: Options, p: Plan) -> None:
         "server_location": "",
         "rtc_port_min": 0,
         "rtc_port_max": 0,
+        "server_url_v4": "",
+        "server_url_v6": "",
     }
     wanted: dict[str, object] = {}
     for key, value in (
         ("server_id", opts.id),
         ("server_name", opts.name),
         ("server_location", opts.location),
+        ("server_url_v4", opts.url_v4.rstrip("/")),
+        ("server_url_v6", opts.url_v6.rstrip("/")),
     ):
-        if value:
+        if key.startswith("server_url") and value and not value.startswith(("https://", "http://")):
+            p.add(FIX, f"--{key[7:].replace('_', '-')} {value}: expected an https:// URL")
+        elif value:
             wanted[key] = value
     pinned = (current.get("rtc_port_min", 0), current.get("rtc_port_max", 0))
     lo, hi = p.udp = opts.udp_ports or (pinned if pinned != (0, 0) else DEFAULT_PORTS)
@@ -794,6 +810,13 @@ def _check_settings(host: Host, opts: Options, p: Plan) -> None:
             f"sessions can use up to {workers * sessions}",
         )
 
+    urls = {
+        f: str(wanted.get(f"server_url_{f}", current.get(f"server_url_{f}", "")))
+        for f in ("v4", "v6")
+    }
+    p.family_urls = [u for u in urls.values() if u]
+    _check_names(host, p, urls)
+
     me = str(wanted.get("server_id", current.get("server_id", "local")))
     listed = current.get("locations", [])
     for peer in host.peers:
@@ -824,14 +847,53 @@ def _check_settings(host: Host, opts: Options, p: Plan) -> None:
             "name": info.get("name", ""),
             "location": info.get("location", ""),
         }
+        # Its single-family URLs, so the IP drop-down works for it on this server's page.
+        for key in ("url_v4", "url_v6"):
+            found = str(peer.own.get(key) or "")
+            if found.startswith(("https://", "http://")):
+                entry[key] = found
         p.peers.append(entry)
-        p.add(CHANGE, f"list {entry['name']} ({entry['id']}, {url}) in the location picker")
+        both = (
+            " with its IPv4-only and IPv6-only URLs"
+            if "url_v4" in entry and "url_v6" in entry
+            else ""
+        )
+        p.add(CHANGE, f"list {entry['name']} ({entry['id']}, {url}) in the location picker{both}")
         if url.startswith("http://") and p.public.startswith("https://"):
             p.add(
                 NOTE,
                 f"peer {url} is plain HTTP; browsers on the HTTPS page will block it. "
                 "Use its https:// address",
             )
+
+
+def _check_names(host: Host, p: Plan, urls: dict[str, str]) -> None:
+    """Each single-family URL's name must resolve in its own family only, to this host."""
+    for fam, url in urls.items():
+        name = urlsplit(url).hostname or ""
+        if not name or re.fullmatch(r"[\d.]+|[0-9a-fA-F:]+", name):
+            continue
+        a, aaaa = host.names.get(name, ([], []))
+        want, other = (a, aaaa) if fam == "v4" else (aaaa, a)
+        rec, other_rec = ("A", "AAAA") if fam == "v4" else ("AAAA", "A")
+        label = f"IP{fam} only"
+        if not want:
+            p.add(NOTE, f"{name} has no {rec} record yet, so {label} won't connect until it does")
+        elif other:
+            p.add(
+                NOTE,
+                f"{name} also has {other_rec} records ({', '.join(other)}), so browsers can "
+                f"reach it over either family. Give it only an {rec} record, pointing straight "
+                "at this server (DNS only, not through a CDN proxy)",
+            )
+        elif host.local_addrs and not set(want) & host.local_addrs:
+            p.add(
+                NOTE,
+                f"{name} points at {', '.join(want)}, which isn't one of this host's addresses: "
+                "fine behind NAT, but a CDN proxy would sit in the middle of every measurement",
+            )
+        else:
+            p.add(OK, f"{name} has only {rec} records, for this host ({', '.join(want)})")
 
 
 def _check_firewall(host: Host, opts: Options, p: Plan) -> None:
@@ -1005,6 +1067,9 @@ def install_script(host: Host, p: Plan, opts: Options) -> str:
             ]
             if peer.get("location"):
                 args += ["--location", peer["location"]]
+            for key in ("url_v4", "url_v6"):
+                if peer.get(key):
+                    args += [f"--{key.replace('_', '-')}", peer[key]]
             out.append(shlex.join([*args, "--write"]))
     out += ["", 'step "Restarting texas2step"', "systemctl restart texas2step"]
 
@@ -1068,6 +1133,24 @@ def install_script(host: Host, p: Plan, opts: Options) -> str:
             f"    echo {q(failed)} >&2",
             "    exit 1",
             "fi",
+        ]
+        # The single-family names: nginx must answer for them too. Only a warning, since
+        # their DNS records may come later.
+        for family_url in p.family_urls:
+            parts = urlsplit(family_url)
+            port = parts.port or (443 if parts.scheme == "https" else 80)
+            resolve = f"{parts.hostname}:{port}:{p.addr}"
+            warn = f"warning: nginx does not answer for {family_url} yet; check its certificate "
+            warn += "and server_name"
+            health = family_url + "/api/v1/health"
+            out += [
+                f"if curl -fsSk --resolve {q(resolve)} {q(health)} >/dev/null; then",
+                f"    echo {q('and as ' + family_url)}",
+                "else",
+                f"    echo {q(warn)} >&2",
+                "fi",
+            ]
+        out += [
             "",
             f"echo; echo {q('Done. Open ' + p.public)}",
         ]
@@ -1212,7 +1295,31 @@ def gather(opts: Options, deb_path: str) -> Host:
 
     for url in opts.peers:
         h.peers.append(fetch_peer(url))
+
+    current = toml_settings(h.config)
+    for fam, given in (("v4", opts.url_v4), ("v6", opts.url_v6)):
+        name = urlsplit(given or str(current.get(f"server_url_{fam}", ""))).hostname
+        if name:
+            h.names[name] = resolve_name(name)
+    rc, out, _ = run("ip", "-j", "addr", "show")
+    if rc == 0:
+        try:
+            for link in json.loads(out):
+                h.local_addrs |= {a["local"] for a in link.get("addr_info", []) if a.get("local")}
+        except (ValueError, TypeError, KeyError):
+            pass
     return h
+
+
+def resolve_name(name: str) -> tuple[list[str], list[str]]:
+    """A and AAAA records for ``name``, as this host's resolver sees them."""
+    try:
+        infos = socket.getaddrinfo(name, None, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return [], []
+    a = sorted({str(i[4][0]) for i in infos if i[0] == socket.AF_INET})
+    aaaa = sorted({str(i[4][0]) for i in infos if i[0] == socket.AF_INET6})
+    return a, aaaa
 
 
 def packaged_md5(deb_path: str, path: str) -> str:
@@ -1268,6 +1375,16 @@ def fetch_peer(url: str) -> Peer:
         )
         with urllib.request.urlopen(req, timeout=8, context=ssl.create_default_context()) as r:
             peer.info = json.load(r)
+        me = (peer.info or {}).get("server", {}).get("id")
+        req = urllib.request.Request(
+            url.rstrip("/") + "/api/v1/locations", headers={"User-Agent": "texas2step-setup"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=8, context=ssl.create_default_context()) as r:
+                listed = json.load(r).get("locations") or []
+            peer.own = next((loc for loc in listed if loc.get("id") == me), {})
+        except (urllib.error.URLError, OSError, ValueError):
+            pass  # an older server, or no list: the URLs can be added later
     except (urllib.error.URLError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
         peer.error = str(reason)
@@ -1307,6 +1424,18 @@ def main(argv: list[str] | None = None) -> int:
         metavar="MIN-MAX",
         help="UDP range for the probe (default: the configured one, else 61000-61999)",
     )
+    ap.add_argument(
+        "--url-v4",
+        default="",
+        metavar="URL",
+        help="this server's IPv4-only base URL, e.g. https://v4.houston.example.net/texas2step",
+    )
+    ap.add_argument(
+        "--url-v6",
+        default="",
+        metavar="URL",
+        help="this server's IPv6-only base URL, e.g. https://v6.houston.example.net/texas2step",
+    )
     ap.add_argument("--no-firewall", action="store_true", help="don't change the firewall")
     ap.add_argument("--allow-downgrade", action="store_true", help="install an older version")
     ap.add_argument("--out", default=".", help="where to write the report and script")
@@ -1334,6 +1463,8 @@ def main(argv: list[str] | None = None) -> int:
         location=args.location,
         peers=args.peer,
         udp_ports=args.udp_ports,
+        url_v4=args.url_v4,
+        url_v6=args.url_v6,
         no_firewall=args.no_firewall,
         allow_downgrade=args.allow_downgrade,
     )
