@@ -118,15 +118,25 @@ def _run(coro: Coroutine[Any, Any, Any]) -> Any:
 def cmd_serve(args: argparse.Namespace) -> None:
     import uvicorn
 
+    from . import logs
+    from .config import load_settings
+
     if args.config:
         os.environ["TEXAS2STEP_CONFIG"] = os.path.abspath(args.config)
+    # Each worker loads the settings again; this read is for logging, set up before them.
+    try:
+        debug = load_settings().debug
+    except (OSError, ValueError) as exc:
+        sys.exit(f"texas2step: {exc}")
     uvicorn.run(
         "texas2step.app:create_app",
         factory=True,
         host=args.host,
         port=args.port,
         workers=args.workers,
+        log_config=logs.config(debug),
         log_level=args.log_level,
+        access_log=False,  # app.RequestLog writes each request, with the client's address
         proxy_headers=False,  # client addresses are resolved by texas2step's trusted_proxies
         ws_max_size=1 << 20,
     )

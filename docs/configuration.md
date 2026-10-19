@@ -38,6 +38,7 @@ file up to date with the new version's template and keeps your values; see
 | `default_streams` / `default_seconds` / `default_packets` | 4 / 10 / 500 | Defaults advertised by `/api/v1/info` |
 | `cors_origins` | `["*"]` | Origins allowed to call the API from a browser |
 | `trusted_proxies` | `["127.0.0.1", "::1"]` | Peers whose `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Prefix` and `X-Client-Protocol` are believed |
+| `debug` | `false` | Also log every request and the UDP probe's WebRTC detail; see [Logging](#logging) |
 | `brand_name` | `texas2step` | Name in the header and the browser tab |
 | `brand_organization` | `""` | Organization shown beside the name and in the footer |
 | `brand_url` | `""` | The organization's website; the organization name links to it |
@@ -186,3 +187,44 @@ set these and check each name's DNS records. For the other servers in the picker
 `url_v4` and `url_v6` of their `[[locations]]` entries do the same;
 `texas2step config add-location` and the setup tool's `--peer` fill them in from the
 other server.
+
+## Logging
+
+The service logs to the journal (`journalctl -u texas2step -f`), and by default only what
+needs attention:
+
+* start, stop and worker messages;
+* warnings and errors from texas2step and from the WebRTC libraries behind the UDP probe;
+* a line for each request that failed (status 400 or above), such as an upload over
+  `max_upload_bytes`:
+
+```text
+WARNING:  203.0.113.7 - "POST /api/v1/up HTTP/2.0" 413
+```
+
+The address is the client's, as `/api/v1/whoami` reports it: behind nginx, it comes from
+`X-Forwarded-For` (see `trusted_proxies`), and the HTTP version is the one the client
+used with nginx. Successful requests aren't logged, because nginx's access log already
+has each of them. The package's nginx snippet leaves out one request even there: an open
+**Diag** tab asks for `/api/v1/diag/http` once a second.
+
+To troubleshoot, turn on `debug` and restart:
+
+```bash
+sudo texas2step config set debug=true --write
+sudo systemctl restart texas2step
+journalctl -u texas2step -f
+```
+
+With `debug = true`, the journal also gets:
+
+* a line for every request and WebSocket, successful ones included;
+* texas2step's own detail, such as addresses the UDP probe couldn't bind and idle probe
+  sessions it closed;
+* the UDP probe's connection steps: ICE candidate checks and the DTLS, SCTP and data
+  channel state changes. Look here when the packet-loss tile ends in **TCP** rather than
+  **UDP**. The libraries' per-packet STUN and SCTP messages stay out even now.
+
+That is several lines a second while a **Diag** tab is open, so set `debug=false` and
+restart again when you're done. `TEXAS2STEP_DEBUG=1` in `/etc/default/texas2step` does the
+same without touching the settings file.

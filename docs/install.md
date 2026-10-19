@@ -203,6 +203,8 @@ The snippet does the following:
   round-trip time (`/api/v1/diag/http` in [API](api.md#discovery)). The setup tool
   writes a snippet it generated again from the new package. A copy you made by hand
   needs these lines added; without them, Diag shows those fields as unknown.
+* Leaves that request out of nginx's access log: an open Diag tab sends it once a
+  second. Every other request is logged as usual.
 
 If your site already uses `/speedtest`, leave out the second include. To give
 texas2step its own hostname instead, such as `speed.example.net`, include
@@ -220,7 +222,7 @@ sed 's# /texas2step# /speedtest#g' /etc/nginx/snippets/texas2step.conf \
     | sudo tee /etc/nginx/snippets/texas2step-at-speedtest.conf >/dev/null
 ```
 
-Matching on the space changes the paths (both `location` lines, the redirect and
+Matching on the space changes the paths (the `location` lines, the redirect and
 `X-Forwarded-Prefix`), but not `proxy_pass http://texas2step/`, where `texas2step` is
 the upstream's name. A copy made by hand doesn't follow the package, so after an upgrade
 compare it with the package's snippet. The setup tool leaves a copy it didn't write
@@ -330,7 +332,8 @@ To see the ports in use during a test, run `sudo ss -uanp | grep texas2step`.
   [Firewall and UDP](#4-firewall-and-udp).
 * From another machine that has texas2step installed:
   `texas2step run https://www.example.net/texas2step`.
-* Logs: `journalctl -u texas2step -f`.
+* Logs: `journalctl -u texas2step -f`. They stay quiet unless something fails; see
+  [Logging](configuration.md#logging) for the `debug` setting.
 
 ## Upgrade
 
@@ -341,6 +344,11 @@ and the script does the merge for you.
 
 By hand: run the commands from [step 1](#1-install-the-package) again. They fetch the
 newest release. The service restarts with your settings, and saved results are kept.
+
+nginx reads a new version of the package's snippets in `/etc/nginx/snippets/` when it
+next reloads: `sudo nginx -t && sudo systemctl reload nginx`. A snippet the setup tool
+made for another path, such as `texas2step-at-speedtest.conf`, is rewritten and reloaded
+by its install script.
 
 When a new version's settings template differs from your edited
 `/etc/texas2step/config.toml`, apt asks what to do with it. Keep yours (**N**, the

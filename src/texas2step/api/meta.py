@@ -9,13 +9,14 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from starlette.requests import HTTPConnection
 
 from .. import __version__, rtc
 
 router = APIRouter(prefix="/api/v1", tags=["meta"])
 
 
-def client_address(request: Request) -> tuple[str, int | None]:
+def client_address(request: HTTPConnection) -> tuple[str, int | None]:
     """The client's address, honouring X-Forwarded-For only from trusted proxies."""
     settings = request.app.state.settings
     host, port = (request.client.host, request.client.port) if request.client else ("unknown", None)
@@ -29,14 +30,14 @@ def client_address(request: Request) -> tuple[str, int | None]:
     return host, port
 
 
-def from_trusted_proxy(request: Request) -> bool:
+def from_trusted_proxy(request: HTTPConnection) -> bool:
     """Whether the peer is a proxy whose X-Forwarded-* and similar headers we believe."""
     return request.client is not None and request.client.host in (
         request.app.state.settings.trusted_proxies
     )
 
 
-def http_version(request: Request) -> str:
+def http_version(request: HTTPConnection) -> str:
     """The HTTP version the client used: the proxy's word for it, else our own."""
     protocol = request.headers.get("x-client-protocol") if from_trusted_proxy(request) else None
     return protocol or f"HTTP/{request.scope.get('http_version', '1.1')}"

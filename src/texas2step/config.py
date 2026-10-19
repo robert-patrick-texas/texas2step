@@ -101,6 +101,10 @@ class Settings:
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
     trusted_proxies: list[str] = field(default_factory=lambda: ["127.0.0.1", "::1"])
 
+    # Logging: off, only warnings and failed requests are logged; on, every request and
+    # the WebRTC libraries' detail as well. Read by `texas2step serve` at start.
+    debug: bool = False
+
     # Other servers offered in the location picker (this server is always first).
     locations: list[Location] = field(default_factory=list)
 

@@ -14,19 +14,26 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__, page
 from .api import routers
+from .api.meta import client_address, http_version
 from .config import Settings, load_settings
 from .rtc import RtcEcho
 from .store import ResultStore
 
 log = logging.getLogger(__name__)
+access = logging.getLogger("texas2step.access")
 
 STATIC = Path(__file__).parent / "static"
 SPA_ROUTES = ("/", "/monitor", "/diag", "/history", "/api", "/r/{rid}")
 PREFIX = re.compile(r"(?:/(?!\.\.?(?:/|$))[A-Za-z0-9._~-]+)+")  # no "." or ".." segments
+# The first message of a response, which settles its status for RequestLog. A WebSocket
+# closed before it was accepted gets a 403 from uvicorn.
+RESPONSE_STARTS = ("http.response.start", "websocket.http.response.start")
+WEBSOCKET_STATUS = {"websocket.accept": 101, "websocket.close": 403}
 
 
 class TimingAllowOrigin:
@@ -89,6 +96,58 @@ class ForwardedPrefix:
         return ""
 
 
+class RequestLog:
+    """Logs one line per request, with the client's address as /api/v1/whoami sees it.
+
+    Behind nginx, uvicorn's own line (turned off by ``texas2step serve``) would show
+    127.0.0.1 for everyone. Failures log as warnings; successes as info, which only
+    ``debug = true`` writes (see logs.py). Raw ASGI, like TimingAllowOrigin.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        logged = False
+
+        async def wrapped(message: Message) -> None:
+            nonlocal logged
+            kind = message["type"]
+            if not logged and (kind in RESPONSE_STARTS or kind in WEBSOCKET_STATUS):
+                logged = True
+                self._line(scope, message.get("status") or WEBSOCKET_STATUS[kind])
+            await send(message)
+
+        try:
+            await self.app(scope, receive, wrapped)
+        except Exception:
+            if not logged:  # Starlette answers 500 and uvicorn logs the traceback
+                self._line(scope, 500)
+            raise
+
+    @staticmethod
+    def _line(scope: Scope, status: int) -> None:
+        # 499: the browser cancelled an upload when a timed test ended, as it should.
+        level = logging.WARNING if status >= 400 and status != 499 else logging.INFO
+        if not access.isEnabledFor(level):
+            return
+        conn = HTTPConnection(scope)
+        ip, _ = client_address(conn)
+        # The raw bytes, escaped: a decoded path could hold a newline and fake a line.
+        target = scope.get("raw_path") or scope["path"].encode()
+        if scope.get("query_string"):
+            target += b"?" + scope["query_string"]
+        target = target.decode("ascii", "backslashreplace")
+        if scope["type"] == "websocket":
+            request = f"WebSocket {target}"
+        else:
+            request = f"{scope['method']} {target} {http_version(conn)}"
+        access.log(level, '%s - "%s" %d', ip, request, status)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
 
@@ -131,6 +190,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.add_middleware(TimingAllowOrigin)
     app.add_middleware(ForwardedPrefix, settings=settings)
+    app.add_middleware(RequestLog)  # outermost: sees the request as it arrived
 
     for router in routers:
         app.include_router(router)

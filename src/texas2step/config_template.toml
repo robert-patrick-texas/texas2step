@@ -49,6 +49,9 @@ results_path = "/var/lib/texas2step/results.db"
 # cors_origins = ["*"]
 # trusted_proxies = ["127.0.0.1", "::1"]  # peers whose X-Forwarded-* headers are believed
 
+# --- Logging (journalctl -u texas2step) ----------------------------------------------------
+# debug = false                         # true = also every request and WebRTC detail; very verbose
+
 # --- Branding and themes -------------------------------------------------------------------
 # brand_name = "texas2step"             # header and browser tab
 # brand_organization = ""               # shown beside the name and in the footer

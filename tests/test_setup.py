@@ -480,6 +480,8 @@ def test_the_packaged_snippet_moved_to_another_path():
         "location ^~ /speedtest/ {",
         "X-Forwarded-Prefix /speedtest;",
         "proxy_pass         http://texas2step/;",  # the upstream's name, not a path
+        "location = /speedtest/api/v1/diag/http {",  # left out of nginx's access log
+        "proxy_pass http://texas2step/api/v1/diag/http;",
     ):
         assert line in text
     assert "location ^~ /texas2step/" not in text

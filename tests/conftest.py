@@ -36,6 +36,11 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+@pytest.fixture
+def free_port() -> int:
+    return _free_port()
+
+
 @pytest.fixture(scope="session")
 def live_server(tmp_path_factory) -> Iterator[str]:
     """A real uvicorn server on loopback, for engine and WebRTC round trips."""
