@@ -252,8 +252,22 @@ def test_default_page_is_unbranded(client):
         "brand-org",
         "topbar-links",
         "Powered by",
+        "data-pages",
+        'href="api/docs"',  # the explorer is on the API tab, not in the footer
     ):
         assert absent not in page, absent
+    for tab in ("test", "monitor", "history", "api"):
+        assert f'data-page="{tab}"' in page
+    assert 'id="footer-version" href="https://robert-patrick-texas.github.io/texas2step/"' in page
+
+
+def test_hidden_pages_lose_their_tabs(tmp_path):
+    settings = Settings(results_path=str(tmp_path / "r.db"), page_test=False, page_api=False)
+    with TestClient(create_app(settings)) as c:
+        page = c.get("/history").text
+    assert '<html lang="en" data-pages="monitor history">' in page
+    assert 'data-page="monitor"' in page and 'data-page="history"' in page
+    assert 'data-page="test"' not in page and 'data-page="api"' not in page
 
 
 def test_branding_is_written_into_the_page(tmp_path):

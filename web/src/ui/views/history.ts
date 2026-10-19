@@ -29,7 +29,8 @@ export class HistoryView implements View {
     }
     clear(body);
     if (!results.length) {
-      body.append(h("div", { class: "card empty-card" }, h("p", {}, "No saved tests yet."), h("a", { href: "/", "data-link": true, class: "btn primary" }, "Run the first one")));
+      const run = this.app.pages.has("test") ? h("a", { href: "/", "data-link": true, class: "btn primary" }, "Run the first one") : null;
+      body.append(h("div", { class: "card empty-card" }, h("p", {}, "No saved tests yet."), run));
       return;
     }
     if (results.length > 1) body.append(this.trend([...results].reverse()));
@@ -37,7 +38,8 @@ export class HistoryView implements View {
       h(
         "tr",
         {},
-        h("td", {}, h("a", { href: appPath(`/r/${r.id}`), "data-link": true }, when(r.created_at))),
+        // A saved result opens on the Test page, when this site shows it.
+        h("td", {}, this.app.pages.has("test") ? h("a", { href: appPath(`/r/${r.id}`), "data-link": true }, when(r.created_at)) : when(r.created_at)),
         h("td", {}, r.server_id ?? "—"),
         h("td", { class: "mono" }, r.client_ip ?? "—"),
         h("td", { class: "num" }, text(rate(r.download_mbps))),

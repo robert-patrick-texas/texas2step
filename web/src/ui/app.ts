@@ -28,6 +28,10 @@ export class App {
   locations: Location[] = [];
   selected: Location | null = null;
   settings: Settings;
+  /** The pages this site shows: all of them unless the server lists fewer. */
+  readonly pages = new Set((document.documentElement.dataset.pages ?? "test monitor history api").split(" "));
+  /** Where an address with no page of its own lands: the first page shown. */
+  readonly home = this.pages.has("test") ? "/" : `/${[...this.pages][0]}`;
   private listeners = new Set<ServerListener>();
   private current: View | null = null;
   private routes: [RegExp, () => View][] = [];
@@ -81,7 +85,7 @@ export class App {
       this.current.mount(root, match.groups ?? {});
       return;
     }
-    this.navigate("/", true);
+    this.navigate(this.home, true);
   }
 
   saveSettings(): void {

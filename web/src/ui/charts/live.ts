@@ -65,10 +65,11 @@ export class LiveChart {
     this.m.top = 4 + 10 * list.length;
     this.m.right = list.length > 1 ? 24 : 12; // room to name each row of lost-probe ticks
     clear(this.stripBox);
+    // One label for every strip; with two servers, each strip names its own at its left edge.
+    this.stripBox.append(h("div", { class: "strip-label" }, "Loss per second"));
     this.strips = this.series.map((s) => {
       const strip = h("canvas", { class: "loss-strip", role: "img", "aria-label": s.label ? `Packet loss per second, ${s.label}` : "Packet loss per second" });
-      const key = s.label ? h("span", { class: "legend-key dot", style: `--key:var(${s.token})` }) : null;
-      this.stripBox.append(h("div", { class: "strip-label" }, key, s.label ? `Loss per second · ${s.label}` : "Loss per second"), strip);
+      this.stripBox.append(strip);
       return strip;
     });
     this.draw();
@@ -120,9 +121,9 @@ export class LiveChart {
   private plotHeight(): number {
     const box = this.canvas.getBoundingClientRect();
     const k = box.width ? this.width / box.width : 1; // layout pixels per screen pixel
-    const below = 52 + 44 * this.series.length; // the loss strips, their labels and the card's padding
+    const below = 74 + 22 * this.series.length; // the loss strips, their label and the card's padding
     const room = (window.innerHeight - box.top - window.scrollY) * k - below;
-    return Math.round(Math.min(340, Math.max(170, room)));
+    return Math.round(Math.min(340, Math.max(this.series.length > 1 ? 140 : 170, room)));
   }
 
   private draw(): void {
@@ -225,10 +226,10 @@ export class LiveChart {
       ctx.stroke();
     }
 
-    for (const [i, strip] of this.strips.entries()) this.drawStrip(strip, data[i] ?? [], from, ink);
+    for (const [i, strip] of this.strips.entries()) this.drawStrip(strip, data[i] ?? [], from, ink, this.series[i]!);
   }
 
-  private drawStrip(strip: HTMLCanvasElement, data: LiveSample[], from: number, ink: Record<string, string>): void {
+  private drawStrip(strip: HTMLCanvasElement, data: LiveSample[], from: number, ink: Record<string, string>, series: LiveSeries): void {
     const W = this.width;
     const H = 18;
     const ctx = this.setup(strip, H);
@@ -243,10 +244,19 @@ export class LiveChart {
     }
     const bw = (W - left - right) / this.windowS;
     const warn = cssVar("--warning");
-    const good = cssVar("--good");
+    // A second without loss: green, or with two servers, that server's own colour.
+    const many = this.series.length > 1;
+    const clean = many ? cssVar(series.token) : cssVar("--good");
+    if (many) {
+      ctx.fillStyle = clean;
+      ctx.font = "600 10px system-ui, sans-serif";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText(series.short, left - 8, H / 2);
+    }
     for (const [k, b] of buckets) {
       const loss = b.lost / b.sent;
-      ctx.fillStyle = loss === 0 ? good : loss < 0.02 ? warn : ink.crit!;
+      ctx.fillStyle = loss === 0 ? clean : loss < 0.02 ? warn : ink.crit!;
       ctx.globalAlpha = loss === 0 ? 0.35 : 1;
       ctx.beginPath();
       ctx.roundRect(left + k * bw + 1, 2, Math.max(1, bw - 2), H - 4, 2);

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 ENV_PREFIX = "TEXAS2STEP_"
+PAGES = ("test", "monitor", "history", "api")  # the web UI's tabs, in order
 THEMES = ("system", "light", "dark", "america", "energy", "federal", "military", "texas")
 # Branding URLs end up in href attributes, so only these schemes are accepted.
 LINK_SCHEMES = ("https://", "http://", "mailto:", "tel:")
@@ -82,6 +83,13 @@ class Settings:
     measure_enabled: bool = True
     allow_any_target: bool = False
 
+    # The web UI's pages: any can be hidden, but not all. The API behind them stays on;
+    # results_enabled and measure_enabled turn parts of it off.
+    page_test: bool = True
+    page_monitor: bool = True
+    page_history: bool = True
+    page_api: bool = True
+
     # Defaults offered to the browser UI.
     default_streams: int = 4
     default_seconds: float = 10.0
@@ -109,6 +117,8 @@ class Settings:
             raise ValueError(
                 f"rtc_port_min/rtc_port_max: need 1 <= min <= max <= 65535, or both 0; got {ports}"
             )
+        if not self.pages:
+            raise ValueError("page_test, page_monitor, page_history, page_api: keep one shown")
         if self.default_theme not in THEMES:
             raise ValueError(f"default_theme: expected one of {', '.join(THEMES)}")
         if not self.brand_name.strip():
@@ -121,6 +131,11 @@ class Settings:
         for name, url in urls:
             if not url.lower().startswith(LINK_SCHEMES):
                 raise ValueError(f"{name}: URL must start with {', '.join(LINK_SCHEMES)}")
+
+    @property
+    def pages(self) -> list[str]:
+        """The web UI's pages this site shows, in tab order."""
+        return [page for page in PAGES if getattr(self, f"page_{page}")]
 
     @property
     def rtc_ports(self) -> tuple[int, int] | None:

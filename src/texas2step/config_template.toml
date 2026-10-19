@@ -33,6 +33,12 @@ results_path = "/var/lib/texas2step/results.db"
 # measure_enabled = true
 # allow_any_target = false              # true = any URL, not just [[locations]]
 
+# --- Pages of the web UI: hide any, but not all (the API behind them stays) ----------------
+# page_test = true                      # the Test tab
+# page_monitor = true                   # the Monitor tab
+# page_history = true                   # the History tab
+# page_api = true                       # the API tab
+
 # --- Defaults offered to the browser UI --------------------------------------------------
 # default_streams = 4
 # default_seconds = 10.0

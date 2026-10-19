@@ -32,7 +32,8 @@ Details and definitions: [docs/methodology.md](docs/methodology.md).
 
 The UI has four views: **Test** (gauge, live link animation, charts, exportable and
 shareable results), **Monitor** (continuous UDP probing with a scrolling RTT and loss
-trace, to one server or to two at once for a side-by-side comparison), **History** (saved runs and trend), and **API** (copy-ready examples). Every
+trace, to one server or to two at once for a side-by-side comparison), **History** (saved runs and trend), and **API** (copy-ready examples). A site can
+hide any of them (`page_test`, `page_monitor`, `page_history`, `page_api`). Every
 chart has a hover readout and a table equivalent.
 
 Visitors pick a theme from the header: Light, Dark, America, Energy, Federal, Military or

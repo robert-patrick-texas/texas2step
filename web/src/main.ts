@@ -6,11 +6,12 @@ import { MonitorView } from "./ui/views/monitor";
 import { TestView } from "./ui/views/test";
 
 const app = new App();
-app
-  .route(/^\/$/, () => new TestView(app))
-  .route(/^\/r\/(?<rid>[\w-]+)$/, () => new TestView(app))
-  .route(/^\/monitor$/, () => new MonitorView(app))
-  .route(/^\/history$/, () => new HistoryView(app))
-  .route(/^\/api$/, () => new ApiView(app));
+// Only the pages this site shows get routes; the server lists them on <html data-pages>.
+if (app.pages.has("test")) {
+  app.route(/^\/$/, () => new TestView(app)).route(/^\/r\/(?<rid>[\w-]+)$/, () => new TestView(app));
+}
+if (app.pages.has("monitor")) app.route(/^\/monitor$/, () => new MonitorView(app));
+if (app.pages.has("history")) app.route(/^\/history$/, () => new HistoryView(app));
+if (app.pages.has("api")) app.route(/^\/api$/, () => new ApiView(app));
 
 void app.start();

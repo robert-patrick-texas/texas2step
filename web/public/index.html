@@ -50,10 +50,10 @@
       </a>
       <!--t2s:org-->
       <nav class="tabs" aria-label="Sections">
-        <a href="./" data-link>Test</a>
-        <a href="monitor" data-link>Monitor</a>
-        <a href="history" data-link>History</a>
-        <a href="api" data-link>API</a>
+        <a href="./" data-link data-page="test">Test</a>
+        <a href="monitor" data-link data-page="monitor">Monitor</a>
+        <a href="history" data-link data-page="history">History</a>
+        <a href="api" data-link data-page="api">API</a>
       </nav>
       <div class="topbar-actions">
         <!--t2s:links-->
@@ -66,9 +66,7 @@
     <main id="view" tabindex="-1"></main>
     <footer class="footer">
       <!--t2s:footer-->
-      <!--t2s:powered--><span id="footer-version">texas2step</span>
-      <span class="dot" aria-hidden="true">·</span>
-      <a href="api/docs">OpenAPI</a>
+      <!--t2s:powered--><a id="footer-version" href="https://robert-patrick-texas.github.io/texas2step/" target="_blank" rel="noopener">texas2step</a>
       <span class="dot" aria-hidden="true">·</span>
       <span>Measurements run in your browser against the selected server</span>
     </footer>

@@ -72,6 +72,7 @@ export class MonitorView implements View {
   private two: boolean;
   private pick: { a: string; b: string };
   private seriesKey = "";
+  private invited = false; // the Servers toggle has had its one pulse
   private off: (() => void) | null = null;
   private startBtn!: HTMLButtonElement;
   private transport!: HTMLElement;
@@ -129,7 +130,7 @@ export class MonitorView implements View {
       h(
         "section",
         { class: "card chart-card" },
-        h("header", { class: "card-head" }, h("h2", {}, "Round-trip time"), h("p", {}, "One dot per probe. Red ticks along the top mark probes that never came back.")),
+        h("header", { class: "card-head head-inline" }, h("h2", {}, "Round-trip time"), h("p", {}, "One dot per probe. Red ticks along the top mark probes that never came back.")),
         this.compare,
         this.chart.el,
       ),
@@ -176,12 +177,19 @@ export class MonitorView implements View {
 
     clear(this.destBox);
     if (sides) {
-      this.destBox.append(
-        seg("Destinations", [[0, "One"], [1, "Two"]], comparing ? 1 : 0, (v) => {
-          this.two = v === 1;
-          this.layout();
-        }),
-      );
+      // Two servers at once is what sets this monitor apart, so its switch stands out: an
+      // accent ring, A's and B's colours on "Two", and one pulse when the page opens.
+      const toggle = seg("Servers", [[0, "One"], [1, "Two"]], comparing ? 1 : 0, (v) => {
+        this.two = v === 1;
+        this.layout();
+      });
+      toggle.classList.add("servers-opt");
+      const group = toggle.querySelector(".seg")!;
+      group.classList.add("seg-feature");
+      if (!comparing && !this.invited) group.classList.add("invite");
+      this.invited = true;
+      group.lastElementChild!.append(h("span", { class: "seg-dots", "aria-hidden": "true" }, ...SIDES.map((side) => h("span", { class: "legend-key dot", style: `--key:var(${side.token})` }))));
+      this.destBox.append(toggle);
       if (comparing) {
         for (const [i, side] of SIDES.entries()) {
           const select = h("select", { class: "dest-select", "aria-label": `Server ${side.short}` });

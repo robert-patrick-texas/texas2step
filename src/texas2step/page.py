@@ -5,7 +5,7 @@ fills in what only it knows:
 
 - the path prefix it is published under (``<base href>``),
 - the version (read by the UI from a meta tag),
-- the site's default theme,
+- the site's default theme, and which pages it shows,
 - the branding: name, logo, organization, links and notice.
 
 Branding is written into the page itself rather than added by script, so a renamed site
@@ -21,7 +21,7 @@ import re
 from html import escape
 from pathlib import Path
 
-from .config import Settings
+from .config import PAGES, Settings
 
 log = logging.getLogger(__name__)
 
@@ -69,10 +69,15 @@ class Shell:
             f'<meta name="texas2step-version" content="{escape(version)}" />',
             1,
         )
+        root = ['lang="en"']
         if s.default_theme != "system":
-            page = page.replace(
-                '<html lang="en">', f'<html lang="en" data-default-theme="{s.default_theme}">', 1
-            )
+            root.append(f'data-default-theme="{s.default_theme}"')
+        if s.pages != list(PAGES):
+            # The tabs of hidden pages go, and the UI is told which pages it has.
+            root.append(f'data-pages="{" ".join(s.pages)}"')
+            for hidden in set(PAGES) - set(s.pages):
+                page = re.sub(rf'\s*<a [^>]*data-page="{hidden}"[^>]*>[^<]*</a>', "", page, count=1)
+        page = page.replace('<html lang="en">', f"<html {' '.join(root)}>", 1)
         if s.brand_name != DEFAULT_NAME:
             name = escape(s.brand_name)
             page = page.replace("<title>texas2step</title>", f"<title>{name}</title>", 1)

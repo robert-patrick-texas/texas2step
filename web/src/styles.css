@@ -2108,6 +2108,52 @@ a.brand-org:hover,
   display: contents;
 }
 
+/* The Servers switch: an accent ring, and on "Two" the dots of A and B. While on One,
+   it pulses twice when the page opens. */
+.seg.seg-feature {
+  background: color-mix(in srgb, var(--sun-2) 10%, transparent);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--sun-2) 55%, transparent);
+}
+
+.seg.seg-feature.invite {
+  animation: invite 1.6s var(--ease) 0.6s 2;
+}
+
+@keyframes invite {
+  50% {
+    box-shadow:
+      0 0 0 1.5px color-mix(in srgb, var(--sun-2) 55%, transparent),
+      0 0 0 7px color-mix(in srgb, var(--sun-2) 18%, transparent);
+  }
+}
+
+.seg-dots {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 6px;
+  vertical-align: 1px;
+}
+
+.servers-opt .opt-label {
+  color: var(--ink-2);
+  font-weight: 650;
+}
+
+.card-head.head-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+}
+
+.card-head.head-inline p {
+  margin: 0;
+}
+
+.loss-strip + .loss-strip {
+  margin-top: 4px;
+}
+
 .opt-label .legend-key {
   vertical-align: 1px;
 }
@@ -2142,7 +2188,11 @@ a.brand-org:hover,
 
 .table.compare th,
 .table.compare td {
-  padding: 5px 10px;
+  padding: 3px 10px;
+}
+
+.table.compare thead th {
+  padding-bottom: 6px;
 }
 
 .table.compare thead th {
@@ -2177,7 +2227,7 @@ a.brand-org:hover,
 }
 
 .compare-sub {
-  display: block;
+  margin-left: 8px;
   color: var(--muted);
   font-size: 12px;
   font-weight: 500;

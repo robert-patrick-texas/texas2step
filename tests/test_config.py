@@ -99,6 +99,9 @@ def test_branding_rejects_unsafe_or_unknown_values(tmp_path):
         Settings(brand_links=[Link("Help", "javascript:alert(1)")])
     with pytest.raises(ValueError, match="default_theme"):
         Settings(default_theme="neon")
+    with pytest.raises(ValueError, match="keep one shown"):
+        Settings(page_test=False, page_monitor=False, page_history=False, page_api=False)
+    assert Settings(page_history=False).pages == ["test", "monitor", "api"]
     path = tmp_path / "typo.toml"
     path.write_text('[[brand_links]]\nlable = "Help"\nurl = "https://help.example"\n')
     with pytest.raises(ValueError, match="brand_links"):
