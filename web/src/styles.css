@@ -2372,8 +2372,18 @@ a.brand-org:hover,
     gap: 0;
   }
 
-  .diag-ip {
+  /* An IPv6 address must fit 39 characters; IPv4, at most 15, can stay large. The
+     server's line sits just below the IPv6 size, so the client's addresses lead. */
+  .diag-ip.v6:not(.none) {
     font-size: clamp(11px, calc((100vw - 72px) / 24), 18px);
+  }
+
+  .diag-ip.v4:not(.none) {
+    font-size: clamp(18px, calc((100vw - 72px) / 11), 24px);
+  }
+
+  .diag-server {
+    font-size: clamp(10.5px, calc((100vw - 72px) / 25.5), 15px);
   }
 }
 

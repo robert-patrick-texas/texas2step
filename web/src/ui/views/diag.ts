@@ -484,7 +484,7 @@ export class DiagView implements View {
     clear(you);
     for (const fam of ["IPv4", "IPv6"] as const) {
       const ip = this.https[fam]?.client.ip ?? this.udp[fam]?.seen?.ip ?? null;
-      you.append(h("div", { class: "diag-addr" }, h("span", { class: "diag-fam" }, `Your ${fam}`), h("span", { class: ip ? "diag-ip" : "diag-ip none" }, ip ?? `no answer over ${fam} yet`)));
+      you.append(h("div", { class: "diag-addr" }, h("span", { class: "diag-fam" }, `Your ${fam}`), h("span", { class: `diag-ip ${fam === "IPv4" ? "v4" : "v6"}${ip ? "" : " none"}` }, ip ?? `no answer over ${fam} yet`)));
     }
     const servers = (["IPv4", "IPv6"] as const)
       .map((fam) => {
