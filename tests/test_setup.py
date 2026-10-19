@@ -108,6 +108,7 @@ To                         Action      From
 """
 
 TEMPLATE = (Path(__file__).parents[1] / "src/texas2step/config_template.toml").read_text()
+SNIPPET = (Path(__file__).parents[1] / "deploy/nginx/texas2step.conf").read_text()
 
 
 @pytest.fixture(autouse=True)
@@ -128,6 +129,7 @@ def host(*parts: str, **kw) -> "setup.Host":
         nginx_dump=dump,
         site_texts=setup.split_dump(dump),
         ufw=UFW_ACTIVE,
+        packaged_snippet=SNIPPET,
     )
     for key, value in kw.items():
         setattr(h, key, value)
@@ -464,6 +466,79 @@ def test_single_family_urls_are_set_and_their_names_checked():
     p = setup.plan(host(), setup.Options(url_v4=v4))
     assert any("has no A record yet" in t for t in levels(p, setup.NOTE))
     assert setup.plan(host(), setup.Options(url_v4="v4.houston.example.net")).blocked
+
+
+# ---- Another path, such as /speedtest ----------------------------------------------------
+
+
+def test_the_packaged_snippet_moved_to_another_path():
+    text = setup.snippet_for(SNIPPET, "/speedtest")
+    assert text.startswith(setup.MARK)
+    for line in (
+        "location = /speedtest {",
+        "return 301 /speedtest/;",
+        "location ^~ /speedtest/ {",
+        "X-Forwarded-Prefix /speedtest;",
+        "proxy_pass         http://texas2step/;",  # the upstream's name, not a path
+    ):
+        assert line in text
+    assert "location ^~ /texas2step/" not in text
+    assert setup.snippet_for("location /x { }", "/speedtest") is None
+    assert setup.snippet_name("/net/speed") == "snippets/texas2step-at-net-speed.conf"
+
+
+def test_publishing_at_another_path():
+    h = host(ufw=None)
+    opts = setup.Options(id="houston", path="/speedtest/")
+    p = setup.plan(h, opts)
+    assert not p.blocked
+    assert p.snippet[0] == "/etc/nginx/snippets/texas2step-at-speedtest.conf"
+    assert p.nginx.include == "snippets/texas2step-at-speedtest.conf"
+    assert p.nginx.lines == ["    include snippets/texas2step-at-speedtest.conf;"]
+    assert p.public == "https://www.example.net/speedtest/"
+    script = setup.install_script(h, p, opts)
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert "<<'TEXAS2STEP_SNIPPET'" in script and "X-Forwarded-Prefix /speedtest;" in script
+    assert "https://www.example.net/speedtest/api/v1/health" in script
+
+    # Blockers: --speedtest as well, a path that isn't one, a hand-written file in the way.
+    assert setup.plan(host(ufw=None), setup.Options(path="/speedtest", speedtest=True)).blocked
+    assert setup.plan(host(ufw=None), setup.Options(path="speed test")).blocked
+    theirs = host(ufw=None, snippet_on_disk="location /speedtest/ { }\n")
+    assert setup.plan(theirs, setup.Options(path="/speedtest")).blocked
+    # A single-family URL on the other path is pointed out.
+    v4 = "https://v4.houston.example.net/texas2step"
+    p = setup.plan(host(ufw=None), setup.Options(path="/speedtest", url_v4=v4))
+    assert any("should end in the same path" in t for t in levels(p, setup.NOTE))
+
+
+def test_a_generated_snippet_is_refreshed_and_a_hand_made_one_left_alone():
+    site = """\
+# configuration file /etc/nginx/sites-enabled/dev.example.net:
+server {
+    listen 443 ssl;
+    server_name dev.example.net;
+    include snippets/texas2step-at-speedtest.conf;
+}
+
+# configuration file /etc/nginx/snippets/texas2step-at-speedtest.conf:
+"""
+    current = setup.snippet_for(SNIPPET, "/speedtest")
+    older = current.replace("proxy_connect_timeout 10s;", "proxy_connect_timeout 5s;")
+    h = host(site + older, ufw=None)
+    p = setup.plan(h, setup.Options())
+    assert p.nginx is None and p.snippet[0].endswith("texas2step-at-speedtest.conf")
+    assert any("rewrite" in t for t in levels(p, setup.CHANGE))
+    script = setup.install_script(h, p, setup.Options())
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert "proxy_connect_timeout 10s;" in script and "nginx -t" in script
+
+    p = setup.plan(host(site + current, ufw=None), setup.Options())
+    assert p.snippet is None
+    assert any("matches the package's snippet" in t for t in levels(p, setup.OK))
+    # A hand-made /speedtest snippet, as on PUBLISHED, isn't touched.
+    p = setup.plan(host(NGINX_CONF, PUBLISHED, ufw=None), setup.Options())
+    assert p.snippet is None and p.nginx is None
 
 
 def test_the_checksum_stamp(monkeypatch):

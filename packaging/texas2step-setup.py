@@ -51,6 +51,8 @@ DEFAULTS = "/etc/default/texas2step"
 NGINX_PREFIX = "/etc/nginx"
 UPSTREAM_CONF = "/etc/nginx/conf.d/texas2step.conf"
 SNIPPET = "snippets/texas2step.conf"
+PACKAGED_SNIPPET = f"{NGINX_PREFIX}/{SNIPPET}"
+DEFAULT_PATH = "/texas2step"
 SPEEDTEST_SNIPPET = "snippets/texas2step-speedtest.conf"
 DEFAULT_PORTS = (61000, 61999)
 REPORT = "texas2step-preflight.txt"
@@ -176,6 +178,7 @@ class Server:
     indent: str
     locations: list[str] = field(default_factory=list)  # paths, including from includes
     published: list[str] = field(default_factory=list)  # locations proxied to texas2step
+    published_in: dict[str, str] = field(default_factory=dict)  # location -> its file
 
     def label(self) -> str:
         names = " ".join(self.names) or "(no server_name)"
@@ -204,21 +207,25 @@ def _location_path(args: list[str]) -> str:
 
 
 def _walk_locations(
-    block: list[Directive], files: dict[str, str], trees: dict[str, list[Directive]], seen: set
-) -> Iterator[tuple[str, bool]]:
-    """(location path, proxies to texas2step) in a block, following includes."""
+    block: list[Directive],
+    files: dict[str, str],
+    trees: dict[str, list[Directive]],
+    seen: set,
+    here: str,
+) -> Iterator[tuple[str, bool, str]]:
+    """(location path, proxies to texas2step, file) in a block, following includes."""
     for d in block:
         if d.name == "location" and d.block is not None:
             proxied = any(
                 c.name == "proxy_pass" and c.args and c.args[0].startswith("http://texas2step")
                 for c in d.block
             )
-            yield _location_path(d.args), proxied
-            yield from _walk_locations(d.block, files, trees, seen)
+            yield _location_path(d.args), proxied, here
+            yield from _walk_locations(d.block, files, trees, seen, here)
         elif d.name == "include" and d.args:
             for f in _resolve(d.args[0], files):
                 if f not in seen:
-                    yield from _walk_locations(trees[f], files, trees, seen | {f})
+                    yield from _walk_locations(trees[f], files, trees, seen | {f}, f)
 
 
 def servers(files: dict[str, str]) -> list[Server]:
@@ -248,10 +255,11 @@ def servers(files: dict[str, str]) -> list[Server]:
                 port = _listen_port(mine[0]) if mine else 80
                 addr = _listen_addr(mine[0]) if mine else "127.0.0.1"
                 server = Server(f, d.line, names, https, port, addr, after, indent)
-                for path, proxied in _walk_locations(d.block, files, trees, {f}):
+                for path, proxied, where in _walk_locations(d.block, files, trees, {f}, f):
                     server.locations.append(path)
                     if proxied:
                         server.published.append(path)
+                        server.published_in[path] = where
                 found.append(server)
             elif d.name not in {"stream", "mail", "upstream"}:
                 visit(d.block, f, d.name)
@@ -259,6 +267,32 @@ def servers(files: dict[str, str]) -> list[Server]:
     for f, tree in trees.items():
         visit(tree, f, "")
     return found
+
+
+def snippet_name(path: str) -> str:
+    """The include for texas2step at another path, e.g. snippets/texas2step-at-speedtest.conf."""
+    return f"snippets/texas2step-at-{path.strip('/').replace('/', '-')}.conf"
+
+
+def snippet_for(packaged: str, path: str) -> str | None:
+    """The package's snippet moved from /texas2step to ``path``; None if its shape changed."""
+    # Each path follows a space; the upstream's name in "proxy_pass http://texas2step/" doesn't.
+    text = packaged.replace(" /texas2step", f" {path}")
+    needed = (
+        f"location = {path} {{",
+        f"return 301 {path}/;",
+        f"location ^~ {path}/ {{",
+        f"X-Forwarded-Prefix {path};",
+        "http://texas2step/;",
+    )
+    if not all(n in text for n in needed):
+        return None
+    return (
+        f"{MARK} from {SNIPPET}, for texas2step at {path}/.\n"
+        "# texas2step-install.sh writes it again on every run, from that package's snippet.\n"
+        "# To keep your own edits instead, delete these three lines.\n"
+        f"{text}"
+    )
 
 
 def loads_upstream(files: dict[str, str]) -> bool:
@@ -402,6 +436,8 @@ class Host:
     nft: str = ""
     docker: bool = False
     ephemeral: tuple[int, int] = (32768, 60999)
+    packaged_snippet: str = ""  # the new package's snippets/texas2step.conf
+    snippet_on_disk: str | None = None  # the generated snippet for --path, if it exists
     peers: list[Peer] = field(default_factory=list)
     # The single-family hostnames' DNS answers: name -> (A records, AAAA records).
     names: dict[str, tuple[list[str], list[str]]] = field(default_factory=dict)
@@ -460,6 +496,7 @@ class Options:
     site: str = ""
     no_nginx: bool = False
     speedtest: bool = False
+    path: str = ""  # publish at this path instead of /texas2step
     id: str = ""
     name: str = ""
     location: str = ""
@@ -477,6 +514,7 @@ class NginxEdit:
     sha256: str
     after: int
     lines: list[str]
+    include: str = SNIPPET  # the snippet the lines include
 
 
 @dataclass
@@ -488,6 +526,7 @@ class Plan:
     settings: list[str] = field(default_factory=list)  # KEY=VALUE for `config set`
     peers: list[dict[str, str]] = field(default_factory=list)  # for `config add-location`
     nginx: NginxEdit | None = None
+    snippet: tuple[str, str] | None = None  # (file, text) for texas2step at another path
     public: str = ""  # https://host/texas2step/ once published
     resolve: str = ""  # host:port for curl --resolve
     addr: str = "127.0.0.1"  # where nginx answers locally
@@ -625,13 +664,18 @@ def _check_nginx(host: Host, opts: Options, p: Plan) -> None:
     p.add(OK, "nginx is running")
     files = split_dump(host.nginx_dump)
     found = servers(files)
+    path = "/" + opts.path.strip("/") if opts.path else DEFAULT_PATH
+    if not re.fullmatch(r"(/[A-Za-z0-9._~-]+)+", path):
+        p.add(FIX, f"--path {opts.path}: expected a path such as /speedtest")
+        return
 
     # Already published: leave nginx alone, unless --site names another site for it.
-    published = [(s, path) for s in found for path in s.published]
+    published = [(s, loc) for s in found for loc in s.published]
     if published and not opts.site:
-        s, path = published[0]
-        p.add(OK, f"texas2step is already published at {path} by {s.label()}; nginx is left as is")
-        _public(p, s, path)
+        s, loc = published[0]
+        _published(host, p, files, s, loc)
+        if opts.path and loc.rstrip("/") != path:
+            p.add(NOTE, f"--path {opts.path} not used: texas2step is already published at {loc}")
         return
     if not loads_upstream(files):
         p.add(
@@ -644,18 +688,35 @@ def _check_nginx(host: Host, opts: Options, p: Plan) -> None:
     if not chosen:
         return
     if chosen.published:
-        path = chosen.published[0]
-        p.add(OK, f"texas2step is already published at {path} by {chosen.label()}")
-        _public(p, chosen, path)
+        _published(host, p, files, chosen, chosen.published[0])
         return
-    taken = [loc for loc in chosen.locations if loc.rstrip("/") == "/texas2step"]
+    taken = [loc for loc in chosen.locations if loc.rstrip("/") == path]
     if taken:
-        p.add(
-            FIX,
-            f"{chosen.label()} already has a location {taken[0]}; texas2step needs /texas2step/",
-        )
+        p.add(FIX, f"{chosen.label()} already has a location {taken[0]}; texas2step needs {path}/")
         return
-    lines = [f"{chosen.indent}include {SNIPPET};"]
+    include = SNIPPET
+    if path != DEFAULT_PATH:
+        if opts.speedtest:
+            p.add(FIX, "--speedtest redirects /speedtest to /texas2step/; leave it out with --path")
+            return
+        include = snippet_name(path)
+        target = f"{NGINX_PREFIX}/{include}"
+        if host.snippet_on_disk is not None and not host.snippet_on_disk.startswith(MARK):
+            p.add(FIX, f"{target} exists and wasn't written by texas2step-setup; move it away")
+            return
+        text = snippet_for(host.packaged_snippet, path)
+        if text is None:
+            p.add(
+                FIX,
+                f"the package's {SNIPPET} isn't the shape texas2step-setup expects, so it can't "
+                f"be moved to {path}; publish it by hand (see docs/install.md)",
+            )
+            return
+        p.snippet = (target, text)
+        p.add(
+            CHANGE, f"write {target}: the package's snippet, moved to {path}/ (shown in the script)"
+        )
+    lines = [f"{chosen.indent}include {include};"]
     if opts.speedtest:
         if any(loc.rstrip("/") == "/speedtest" for loc in chosen.locations):
             p.add(NOTE, "--speedtest skipped: that site already uses /speedtest")
@@ -667,7 +728,7 @@ def _check_nginx(host: Host, opts: Options, p: Plan) -> None:
         p.add(FIX, f"{real} changed while it was being checked; run texas2step-setup again")
         return
     sha = hashlib.sha256(disk.encode()).hexdigest()
-    p.nginx = NginxEdit(real, sha, chosen.insert_after, lines)
+    p.nginx = NginxEdit(real, sha, chosen.insert_after, lines, include)
     shown = ", ".join(x.strip() for x in lines)
     p.add(
         CHANGE,
@@ -679,7 +740,26 @@ def _check_nginx(host: Host, opts: Options, p: Plan) -> None:
             NOTE,
             f"{chosen.label()} is plain HTTP; fine on a closed network, but use HTTPS elsewhere",
         )
-    _public(p, chosen, "/texas2step/")
+    _public(p, chosen, path + "/")
+
+
+def _published(host: Host, p: Plan, files: dict[str, str], s: Server, loc: str) -> None:
+    """texas2step is already published at ``loc``. A snippet this tool wrote for another
+    path is written again from the new package; anything else is left as it is."""
+    src = s.published_in.get(loc, "")
+    _public(p, s, loc)
+    if not files.get(src, "").startswith(MARK):
+        p.add(OK, f"texas2step is already published at {loc} by {s.label()}; nginx is left as is")
+        return
+    p.add(OK, f"texas2step is already published at {loc} by {s.label()}, through {src}")
+    text = snippet_for(host.packaged_snippet, loc.rstrip("/"))
+    if text is None:
+        p.add(NOTE, f"{src} can't be refreshed: the package's snippet changed shape; check it")
+    elif text.rstrip("\n") == files[src].rstrip("\n"):
+        p.add(OK, f"{src} matches the package's snippet")
+    else:
+        p.snippet = (os.path.realpath(src), text)
+        p.add(CHANGE, f"rewrite {src} from the new package's snippet (shown in the script)")
 
 
 def _choose_site(found: list[Server], opts: Options, p: Plan) -> Server | None:
@@ -870,7 +950,15 @@ def _check_settings(host: Host, opts: Options, p: Plan) -> None:
 def _check_names(host: Host, p: Plan, urls: dict[str, str]) -> None:
     """Each single-family URL's name must resolve in its own family only, to this host."""
     for fam, url in urls.items():
-        name = urlsplit(url).hostname or ""
+        parts = urlsplit(url)
+        published = urlsplit(p.public).path.rstrip("/")
+        if p.public and parts.path.rstrip("/") != published:
+            p.add(
+                NOTE,
+                f"{url} ends in {parts.path or '/'}, but texas2step is published at {published}/ "
+                "here; the URL should end in the same path",
+            )
+        name = parts.hostname or ""
         if not name or re.fullmatch(r"[\d.]+|[0-9a-fA-F:]+", name):
             continue
         a, aaaa = host.names.get(name, ([], []))
@@ -1073,14 +1161,48 @@ def install_script(host: Host, p: Plan, opts: Options) -> str:
             out.append(shlex.join([*args, "--write"]))
     out += ["", 'step "Restarting texas2step"', "systemctl restart texas2step"]
 
+    if p.snippet:
+        target, text = p.snippet
+        out += [
+            "",
+            f'step "The nginx snippet ({target})"',
+            f"snippet={q(target)}",
+            "new=$(mktemp)",
+            "cat > \"$new\" <<'TEXAS2STEP_SNIPPET'",
+            *text.rstrip("\n").split("\n"),
+            "TEXAS2STEP_SNIPPET",
+            'if [ -e "$snippet" ] && cmp -s "$new" "$snippet"; then',
+            '    echo "$snippet is up to date"',
+            '    rm -f "$new"',
+            "else",
+            f'    if [ -e "$snippet" ] && ! head -n 1 "$snippet" | grep -qF {q(MARK)}; then',
+            '        echo "$snippet wasn\'t written by texas2step-setup; leaving it alone." >&2',
+            '        rm -f "$new"',
+            "        exit 1",
+            "    fi",
+            '    old=""',
+            '    if [ -e "$snippet" ]; then old=$(mktemp) && cp -a "$snippet" "$old"; fi',
+            '    install -m 644 "$new" "$snippet" && rm -f "$new"',
+        ]
+        if not p.nginx:  # the site includes it already: test the new text here
+            out += [
+                "    if ! nginx -t; then",
+                '        if [ -n "$old" ]; then cat "$old" > "$snippet"; else rm -f "$snippet"; fi',
+                '        echo "nginx -t failed; $snippet is back as it was." >&2',
+                "        exit 1",
+                "    fi",
+                "    systemctl reload nginx",
+            ]
+        out += ['    echo "wrote $snippet"', "fi"]
     if p.nginx:
         e = p.nginx
+        included = f"^[[:space:]]*include[[:space:]]+{re.escape(e.include)};"
         block = "\\n".join(e.lines)
         out += [
             "",
             f'step "Publishing it through nginx ({e.file})"',
             f"site={q(e.file)}",
-            f"if grep -qE '^[[:space:]]*include[[:space:]]+{re.escape(SNIPPET)};' \"$site\"; then",
+            f'if grep -qE {q(included)} "$site"; then',
             '    echo "already included in $site"',
             "else",
             f'    if ! echo {q(e.sha256)}"  $site" | sha256sum --check --status; then',
@@ -1249,6 +1371,10 @@ def gather(opts: Options, deb_path: str) -> Host:
                 h.site_texts[real] = read(real) or ""
         else:
             h.nginx_error = nginx_error(err)
+    if h.deb_exists:
+        h.packaged_snippet = packaged_file(deb_path, PACKAGED_SNIPPET).decode(errors="replace")
+    if opts.path:
+        h.snippet_on_disk = read(f"{NGINX_PREFIX}/{snippet_name('/' + opts.path.strip('/'))}")
 
     h.defaults = {"LISTEN_HOST": "127.0.0.1", "LISTEN_PORT": "8080", "WORKERS": "2"}
     h.defaults.update(parse_defaults(read(DEFAULTS) or ""))
@@ -1323,24 +1449,30 @@ def resolve_name(name: str) -> tuple[list[str], list[str]]:
 
 
 def packaged_md5(deb_path: str, path: str) -> str:
-    """md5 of one file inside the package, read straight from its data archive."""
+    """md5 of one file inside the package, or "" when it isn't there."""
+    data = packaged_file(deb_path, path)
+    return hashlib.md5(data).hexdigest() if data else ""
+
+
+def packaged_file(deb_path: str, path: str) -> bytes:
+    """One file inside the package, read straight from its data archive (b"" if absent)."""
     import tarfile
 
     proc = subprocess.Popen(["dpkg-deb", "--fsys-tarfile", deb_path], stdout=subprocess.PIPE)
-    digest = ""
+    data = b""
     try:
         with tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
             for member in tar:
                 if member.name.lstrip(".") == path and member.isfile():
                     f = tar.extractfile(member)
-                    digest = hashlib.md5(f.read()).hexdigest() if f else ""
+                    data = f.read() if f else b""
                     break
     except (OSError, tarfile.TarError):
         pass
     finally:
         proc.kill()
         proc.wait()
-    return digest
+    return data
 
 
 def preview_merge(deb_path: str) -> tuple[str, str]:
@@ -1408,6 +1540,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--site", help="nginx site file to publish texas2step on (FILE or FILE:LINE)")
     ap.add_argument("--no-nginx", action="store_true", help="don't publish it through nginx")
     ap.add_argument("--speedtest", action="store_true", help="also redirect /speedtest to it")
+    ap.add_argument(
+        "--path",
+        default="",
+        help="publish texas2step at this path instead of /texas2step, e.g. /speedtest",
+    )
     ap.add_argument("--id", default="", help="this server's short id, e.g. houston")
     ap.add_argument("--name", default="", help="this server's name, e.g. 'houston.example.net'")
     ap.add_argument("--location", default="", help="where it is, e.g. 'Houston, TX'")
@@ -1458,6 +1595,7 @@ def main(argv: list[str] | None = None) -> int:
         site=args.site or "",
         no_nginx=args.no_nginx,
         speedtest=args.speedtest,
+        path=args.path,
         id=args.id,
         name=args.name,
         location=args.location,

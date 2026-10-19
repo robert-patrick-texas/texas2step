@@ -76,6 +76,7 @@ Options:
 | `--peer URL` | Another texas2step server to offer in the location picker and in two-destination monitoring. Repeat it for each server. |
 | `--site FILE` | The nginx site to publish on, when there are several HTTPS sites. Use `FILE:LINE` when the file holds several `server` blocks. Naming a site publishes texas2step there even if another site already does. |
 | `--speedtest` | Also add the `/speedtest` redirect |
+| `--path PATH` | Publish texas2step at `PATH` instead of `/texas2step/`, e.g. `/speedtest`. The check moves the package's snippet to that path and shows it in the install script, which writes it as `snippets/texas2step-at-speedtest.conf` and includes that. Each later run writes it again from the new package. Use the same path in `--url-v4` and `--url-v6`. |
 | `--no-nginx` | Install the service only, and publish it yourself |
 | `--udp-ports MIN-MAX` | The probe's UDP range, e.g. `61000-61999` |
 | `--url-v4 URL`, `--url-v6 URL` | This server's IPv4-only and IPv6-only base URLs, for the header's IP drop-down; see [IPv4 and IPv6](configuration.md#ipv4-and-ipv6). The check looks up each name: it should have only an A record (or only AAAA), pointing at this server. After the install, the script checks that nginx answers for each name. |
@@ -100,6 +101,12 @@ the second server with `--peer` pointing at the first:
 sudo ./texas2step-setup --id houston --name houston.example.net --location "Houston, TX" \
     --url-v4 https://v4.houston.example.net/texas2step \
     --url-v6 https://v6.houston.example.net/texas2step \
+    --peer https://dallas.example.net/texas2step
+
+# or published at /speedtest/ instead:
+sudo ./texas2step-setup --path /speedtest --id houston --name houston.example.net \
+    --location "Houston, TX" --url-v4 https://v4.houston.example.net/speedtest \
+    --url-v6 https://v6.houston.example.net/speedtest \
     --peer https://dallas.example.net/texas2step
 ```
 
@@ -196,6 +203,23 @@ If your site already uses `/speedtest`, leave out the second include. To give
 texas2step its own hostname instead, such as `speed.example.net`, include
 `snippets/texas2step.conf` in that site's server block and add
 `location = / { return 302 /texas2step/; }`.
+
+### Another path, such as /speedtest/
+
+To serve texas2step at `https://www.example.net/speedtest/` itself rather than
+redirecting there, give the setup tool `--path /speedtest`. By hand, make a copy of the
+snippet with the path changed and include that instead of `snippets/texas2step.conf`:
+
+```bash
+sed 's# /texas2step# /speedtest#g' /etc/nginx/snippets/texas2step.conf \
+    | sudo tee /etc/nginx/snippets/texas2step-at-speedtest.conf >/dev/null
+```
+
+Matching on the space changes the paths (both `location` lines, the redirect and
+`X-Forwarded-Prefix`), but not `proxy_pass http://texas2step/`, where `texas2step` is
+the upstream's name. A copy made by hand doesn't follow the package, so after an upgrade
+compare it with the package's snippet. The setup tool leaves a copy it didn't write
+alone.
 
 ### HTTP/2 and parallel streams
 
