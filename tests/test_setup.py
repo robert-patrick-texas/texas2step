@@ -325,6 +325,12 @@ def test_upgrade_previews_the_merge_and_keeps_pinned_ports():
     p = setup.plan(h, setup.Options())
     assert not p.merge and any("never edited" in t for t in levels(p, setup.OK))
 
+    # A reinstall of a rebuilt package of the same version can bring a new template too.
+    h.installed, h.version_cmp, h.config_md5 = "0.2.0-1", "eq", "edited"
+    p = setup.plan(h, setup.Options())
+    assert p.mode == "reinstall" and p.merge
+    assert any("config merge" in t for t in levels(p, setup.CHANGE))
+
 
 def test_an_already_published_host_is_left_alone():
     p = setup.plan(host(NGINX_CONF, PUBLISHED, ufw=None), setup.Options())

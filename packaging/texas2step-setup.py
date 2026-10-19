@@ -728,15 +728,15 @@ def _check_settings(host: Host, opts: Options, p: Plan) -> None:
     current = toml_settings(host.config)
     if host.config is None:
         p.add(OK, f"{CONFIG} will be created from the package's template")
-    elif p.mode == "upgrade":
+    elif p.mode in {"upgrade", "reinstall"}:  # a rebuilt package can carry a new template too
         edited = host.config_md5 != host.shipped_md5
         changed = host.template_md5 != host.shipped_md5
         if not host.shipped_md5:  # dpkg's record is missing: compare with the new template
             edited = changed = host.config_md5 != host.template_md5
         if not changed:
-            p.add(OK, f"{CONFIG} stays as it is: the new version's template is the same")
+            p.add(OK, f"{CONFIG} stays as it is: the package's template is the same")
         elif not edited:
-            p.add(OK, f"{CONFIG} was never edited, so the new version's template replaces it")
+            p.add(OK, f"{CONFIG} was never edited, so the package's template replaces it")
         elif host.merge_error:
             p.merge = True
             p.add(NOTE, f"couldn't preview the settings merge: {host.merge_error}")
@@ -744,7 +744,7 @@ def _check_settings(host: Host, opts: Options, p: Plan) -> None:
             p.merge = True
             p.add(
                 CHANGE,
-                f"bring {CONFIG} up to date with the new version's template "
+                f"bring {CONFIG} up to date with the package's template "
                 "(texas2step config merge; your values kept, a dated backup made; preview below)",
             )
 
@@ -1188,7 +1188,7 @@ def gather(opts: Options, deb_path: str) -> Host:
                 break
     h.service_active = run("systemctl", "is-active", "--quiet", "texas2step")[0] == 0
     h.config = read(CONFIG)
-    if h.installed and h.version_cmp == "lt" and h.config is not None and h.deb_exists:
+    if h.installed and h.version_cmp in {"lt", "eq"} and h.config is not None and h.deb_exists:
         h.config_md5 = hashlib.md5(Path(CONFIG).read_bytes()).hexdigest()
         files = run("dpkg-query", "-W", "--showformat=${Conffiles}", "texas2step")[1]
         m = re.search(rf"^\s*{re.escape(CONFIG)} ([0-9a-f]{{32}})", files, re.M)
