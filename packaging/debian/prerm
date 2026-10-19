@@ -2,7 +2,10 @@
 set -e
 
 if [ -d /run/systemd/system ] && [ "$1" = "remove" ]; then
-    deb-systemd-invoke stop texas2step.service >/dev/null || true
+    # The service, and unattended updates if the operator turned them on. Whether they
+    # were on is kept, like the settings, until a purge.
+    deb-systemd-invoke stop texas2step.service texas2step-update.timer \
+        texas2step-update.service >/dev/null || true
 fi
 
 # Drop the byte-code postinst compiled, so dpkg can remove or replace the directories.

@@ -50,6 +50,13 @@ def test_rtc_port_range(monkeypatch):
             Settings(rtc_port_min=low, rtc_port_max=high)
 
 
+def test_update_url():
+    assert Settings().update_url.startswith("https://api.github.com/repos/")
+    assert Settings(update_url="https://mirror.example.net/texas2step").update_url
+    with pytest.raises(ValueError, match="update_url"):
+        Settings(update_url="mirror.example.net/texas2step")
+
+
 def test_unknown_key_rejected(tmp_path):
     path = tmp_path / "bad.toml"
     path.write_text('sever_name = "typo"\n')

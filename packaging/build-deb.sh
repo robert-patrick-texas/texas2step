@@ -50,6 +50,10 @@ fi
 # 2. System integration. Files under /etc become conffiles, so local edits survive
 #    upgrades.
 install -Dm644 deploy/texas2step.service "$stage/usr/lib/systemd/system/texas2step.service"
+# Unattended updates: off until the operator enables the timer.
+install -Dm644 deploy/texas2step-update.service \
+    "$stage/usr/lib/systemd/system/texas2step-update.service"
+install -Dm644 deploy/texas2step-update.timer "$stage/usr/lib/systemd/system/texas2step-update.timer"
 install -Dm644 deploy/texas2step.default "$stage/etc/default/texas2step"
 install -Dm644 src/texas2step/config_template.toml "$stage/etc/texas2step/config.toml"
 install -Dm644 deploy/nginx/texas2step-http.conf "$stage/etc/nginx/conf.d/texas2step.conf"

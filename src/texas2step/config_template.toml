@@ -52,6 +52,11 @@ results_path = "/var/lib/texas2step/results.db"
 # --- Logging (journalctl -u texas2step) ----------------------------------------------------
 # debug = false                         # true = also every request and WebRTC detail; very verbose
 
+# --- Updates (sudo texas2step update) ------------------------------------------------------
+# Where releases are found: GitHub's API for the project, or an internal mirror of it.
+# update_url = "https://api.github.com/repos/robert-patrick-texas/texas2step"
+# Unattended updates are off until you turn on their timer: docs/install.md (Upgrade).
+
 # --- Branding and themes -------------------------------------------------------------------
 # brand_name = "texas2step"             # header and browser tab
 # brand_organization = ""               # shown beside the name and in the footer

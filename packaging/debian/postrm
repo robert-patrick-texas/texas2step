@@ -14,8 +14,11 @@ if [ "$1" = "purge" ]; then
         deb-systemd-helper purge texas2step.service >/dev/null || true
         deb-systemd-helper unmask texas2step.service >/dev/null || true
     fi
-    # Saved results. The texas2step system user is kept, as Debian policy advises.
-    rm -rf /var/lib/texas2step
+    # Unattended updates, if they were turned on (systemctl enable).
+    rm -f /etc/systemd/system/timers.target.wants/texas2step-update.timer
+    # Saved results, and downloads of texas2step update. The texas2step system user is
+    # kept, as Debian policy advises.
+    rm -rf /var/lib/texas2step /var/cache/texas2step
 fi
 
 exit 0

@@ -14,6 +14,11 @@ to the current directory (or --out):
   fix first, and notes. It is printed too.
 - texas2step-install.sh: the install, reinstall or upgrade for this host, to read and
   then run with sudo. It isn't written while anything must be fixed first.
+- texas2step-plan.json: what the plan changes, for `texas2step update`.
+
+With --update, as `texas2step update` runs it, it plans only an update of the install
+that is there: the package, the settings merge and texas2step's own nginx files. It
+publishes nothing anew, adds no firewall rule and sets no settings.
 
 Standard library only, so it runs on a base Ubuntu before texas2step is installed.
 """
@@ -57,6 +62,10 @@ SPEEDTEST_SNIPPET = "snippets/texas2step-speedtest.conf"
 DEFAULT_PORTS = (61000, 61999)
 REPORT = "texas2step-preflight.txt"
 INSTALL = "texas2step-install.sh"
+PLAN_JSON = "texas2step-plan.json"
+# The package's own nginx files. When nginx loads one that an upgrade changes, the
+# install script reloads nginx.
+PACKAGED_NGINX = (UPSTREAM_CONF, PACKAGED_SNIPPET, f"{NGINX_PREFIX}/{SPEEDTEST_SNIPPET}")
 MARK = "# Written by texas2step-setup"
 
 OK, CHANGE, FIX, NOTE = "ok", "change", "fix", "note"
@@ -437,6 +446,9 @@ class Host:
     docker: bool = False
     ephemeral: tuple[int, int] = (32768, 60999)
     packaged_snippet: str = ""  # the new package's snippets/texas2step.conf
+    # The package's nginx files that nginx loads: path -> (md5 on disk, md5 dpkg recorded
+    # for the installed version, md5 in the new package).
+    nginx_files: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     snippet_on_disk: str | None = None  # the generated snippet for --path, if it exists
     peers: list[Peer] = field(default_factory=list)
     # The single-family hostnames' DNS answers: name -> (A records, AAAA records).
@@ -506,6 +518,7 @@ class Options:
     url_v6: str = ""
     no_firewall: bool = False
     allow_downgrade: bool = False
+    update: bool = False  # only update what is installed (texas2step update)
 
 
 @dataclass
@@ -535,6 +548,8 @@ class Plan:
     listen: tuple[str, str] = ("127.0.0.1", "8080")
     udp: tuple[int, int] = DEFAULT_PORTS  # the probe's UDP range once installed
     merge: bool = False  # the upgrade brings the settings file up to date
+    nginx_watch: list[str] = field(default_factory=list)  # package files nginx loads
+    nginx_reload: list[str] = field(default_factory=list)  # ...that the upgrade changes
 
     def add(self, level: str, text: str) -> None:
         self.findings.append(Finding(level, text))
@@ -552,8 +567,11 @@ def plan(host: Host, opts: Options) -> Plan:
         p.add(
             NOTE, "nginx left alone (--no-nginx): publish texas2step yourself, see docs/install.md"
         )
+    elif opts.update:
+        _check_nginx_update(host, p)
     else:
         _check_nginx(host, opts, p)
+    _check_nginx_files(host, p)
     _check_settings(host, opts, p)
     _check_firewall(host, opts, p)
     return p
@@ -612,6 +630,12 @@ def _check_package(host: Host, opts: Options, p: Plan) -> None:
         )
 
     installed, cmp = host.installed, host.version_cmp
+    if not installed and opts.update:
+        p.add(
+            FIX,
+            "texas2step isn't installed here, and --update only updates an install; "
+            "run texas2step-setup without it",
+        )
     if not installed:
         p.mode = "fresh"
         p.add(CHANGE, f"install texas2step {p.version}")
@@ -743,13 +767,50 @@ def _check_nginx(host: Host, opts: Options, p: Plan) -> None:
     _public(p, chosen, path + "/")
 
 
+def _check_nginx_update(host: Host, p: Plan) -> None:
+    """--update: refresh how texas2step is published, but never publish it anew."""
+    if not host.nginx_installed or not host.nginx_active or host.nginx_error:
+        p.add(NOTE, "nginx isn't running or can't be read, so an update leaves it alone")
+        return
+    p.add(OK, "nginx is running")
+    files = split_dump(host.nginx_dump)
+    published = [(s, loc) for s in servers(files) for loc in s.published]
+    if published:
+        _published(host, p, files, *published[0])
+    else:
+        p.add(
+            NOTE,
+            "nginx doesn't publish texas2step here; an update leaves that to you "
+            "(texas2step-setup without --update can)",
+        )
+
+
+def _check_nginx_files(host: Host, p: Plan) -> None:
+    """The package's nginx files that nginx loads, which an upgrade may change."""
+    for path, (disk, shipped, new) in host.nginx_files.items():
+        p.nginx_watch.append(path)
+        if not new or new == disk:
+            continue
+        if disk == shipped or not shipped:  # never edited: dpkg puts the new one in place
+            p.nginx_reload.append(path)
+            p.add(CHANGE, f"reload nginx after the upgrade, which changes {path}")
+        elif new != shipped:
+            p.add(
+                NOTE,
+                f"{path} was edited here, so dpkg keeps it and saves the new package's "
+                f"version as {path}.dpkg-dist; compare the two",
+            )
+
+
 def _published(host: Host, p: Plan, files: dict[str, str], s: Server, loc: str) -> None:
     """texas2step is already published at ``loc``. A snippet this tool wrote for another
     path is written again from the new package; anything else is left as it is."""
     src = s.published_in.get(loc, "")
     _public(p, s, loc)
     if not files.get(src, "").startswith(MARK):
-        p.add(OK, f"texas2step is already published at {loc} by {s.label()}; nginx is left as is")
+        p.add(
+            OK, f"texas2step is already published at {loc} by {s.label()}; the site is left as is"
+        )
         return
     p.add(OK, f"texas2step is already published at {loc} by {s.label()}, through {src}")
     text = snippet_for(host.packaged_snippet, loc.rstrip("/"))
@@ -861,13 +922,14 @@ def _check_settings(host: Host, opts: Options, p: Plan) -> None:
             wanted[key] = value
     pinned = (current.get("rtc_port_min", 0), current.get("rtc_port_max", 0))
     lo, hi = p.udp = opts.udp_ports or (pinned if pinned != (0, 0) else DEFAULT_PORTS)
-    wanted.update(rtc_port_min=lo, rtc_port_max=hi)
+    if not opts.update:
+        wanted.update(rtc_port_min=lo, rtc_port_max=hi)
     for key, value in wanted.items():
         old = current.get(key, defaults[key])
         if old != value:
             p.settings.append(f"{key}={toml_value(value)}")
             p.add(CHANGE, f"set {key}: {toml_value(old)} -> {toml_value(value)}")
-    if not opts.id and current.get("server_id", "local") == "local":
+    if not opts.id and not opts.update and current.get("server_id", "local") == "local":
         p.add(
             NOTE,
             'server_id stays "local"; give each server its own --id (and --name, '
@@ -987,8 +1049,13 @@ def _check_names(host: Host, p: Plan, urls: dict[str, str]) -> None:
 
 
 def _check_firewall(host: Host, opts: Options, p: Plan) -> None:
+    current = toml_settings(host.config)
+    if opts.update and (current.get("rtc_port_min", 0), current.get("rtc_port_max", 0)) == (0, 0):
+        return  # the OS picks the probe's ports: no range for a rule to allow
     lo, hi = p.udp
     rng = f"UDP {lo}-{hi}"
+    leave = opts.no_firewall or opts.update
+    why = "an update leaves the firewall alone" if opts.update else "left alone, --no-firewall"
     cloud = (
         "Inbound UDP must also be allowed by anything in front of this host (cloud "
         "security groups, network firewalls), which this check can't see"
@@ -997,20 +1064,16 @@ def _check_firewall(host: Host, opts: Options, p: Plan) -> None:
     if host.ufw is not None and "Status: active" in host.ufw:
         if ufw_allows(host.ufw, lo, hi):
             p.add(OK, f"ufw allows {rng}")
-        elif opts.no_firewall:
-            p.add(
-                NOTE,
-                f"ufw doesn't allow {rng} (left alone, --no-firewall): "
-                f"sudo ufw allow {lo}:{hi}/udp",
-            )
+        elif leave:
+            p.add(NOTE, f"ufw doesn't allow {rng} ({why}): sudo ufw allow {lo}:{hi}/udp")
         else:
             p.firewall.append(["ufw", "allow", f"{lo}:{hi}/udp", "comment", "texas2step probes"])
             p.add(CHANGE, f"allow {rng} in ufw")
     elif host.firewalld:
         if firewalld_allows(host.firewalld_ports, lo, hi):
             p.add(OK, f"firewalld allows {rng}")
-        elif opts.no_firewall:
-            p.add(NOTE, f"firewalld doesn't allow {rng} (left alone, --no-firewall)")
+        elif leave:
+            p.add(NOTE, f"firewalld doesn't allow {rng} ({why})")
         else:
             p.firewall.append(["firewall-cmd", "--permanent", f"--add-port={lo}-{hi}/udp"])
             p.firewall.append(["firewall-cmd", "--reload"])
@@ -1059,7 +1122,7 @@ def _check_firewall(host: Host, opts: Options, p: Plan) -> None:
 # ---- Writing the report and the install script ----------------------------------------
 
 
-def report(host: Host, p: Plan) -> str:
+def report(host: Host, p: Plan, update: bool = False) -> str:
     when = time.strftime("%Y-%m-%d %H:%M %Z")
     out = [
         f"texas2step setup for {host.hostname}, {when}",
@@ -1082,9 +1145,61 @@ def report(host: Host, p: Plan) -> str:
             "Fix the items under 'You must fix', then run texas2step-setup again. "
             "No install script was written."
         )
+    elif update:
+        out.append(f"Wrote {INSTALL} for texas2step update to run.")
     else:
         out.append(f"Next: read {INSTALL}, then run it:  sudo ./{INSTALL}")
     return "\n".join(out) + "\n"
+
+
+def plan_json(p: Plan) -> str:
+    """What the plan changes, for `texas2step update`: --auto installs only plans that
+    change nothing but the package and the settings."""
+    changes = {
+        "package": True,
+        "settings": bool(p.settings or p.peers or p.merge),
+        "nginx": bool(p.nginx or p.snippet or p.nginx_reload),
+        "firewall": bool(p.firewall),
+    }
+    data = {"version": p.version, "mode": p.mode, "blocked": p.blocked, "changes": changes}
+    return json.dumps(data, indent=2) + "\n"
+
+
+def nginx_watch(files: list[str]) -> tuple[list[str], list[str]]:
+    """Script lines for before and after the package install: when the upgrade changes
+    one of the package's nginx files that nginx loads, test and reload nginx, or put the
+    previous files back if nginx -t fails with them."""
+    if not files:
+        return [], []
+    before = [
+        "# The package's nginx files that nginx loads: if the upgrade changes one, nginx is",
+        "# tested and reloaded after it, and these copies come back if nginx -t fails.",
+        f"nginx_files=({' '.join(shlex.quote(f) for f in files)})",
+        'nginx_before=$(md5sum "${nginx_files[@]}" 2>/dev/null || true)',
+        "nginx_old=$(mktemp -d)",
+        'for f in "${nginx_files[@]}"; do',
+        '    if [ -e "$f" ]; then cp -a --parents "$f" "$nginx_old"; fi',
+        "done",
+    ]
+    after = [
+        "",
+        'if [ "$(md5sum "${nginx_files[@]}" 2>/dev/null || true)" != "$nginx_before" ]; then',
+        '    step "Reloading nginx for the package\'s changed nginx files"',
+        "    if ! nginx -t; then",
+        '        for f in "${nginx_files[@]}"; do',
+        '            if [ -e "$nginx_old$f" ]; then cp -a "$nginx_old$f" "$f"; fi',
+        "        done",
+        '        rm -rf "$nginx_old"',
+        '        echo "nginx -t fails with the new package\'s nginx files; the previous" \\',
+        '            "ones are back, and nginx runs as before." >&2',
+        "        exit 1",
+        "    fi",
+        "    systemctl reload nginx",
+        '    echo "nginx reloaded"',
+        "fi",
+        'rm -rf "$nginx_old"',
+    ]
+    return before, after
 
 
 def install_script(host: Host, p: Plan, opts: Options) -> str:
@@ -1128,9 +1243,13 @@ def install_script(host: Host, p: Plan, opts: Options) -> str:
         "flags=()",
         '[ "$installed" = "$version" ] && flags+=(--reinstall)',
         '[ "$allow_downgrade" = yes ] && flags+=(--allow-downgrades)',
+    ]
+    before_install, after_install = nginx_watch(p.nginx_watch)
+    out += before_install
+    out += [
         'step "Installing texas2step $version${installed:+ (was $installed)}"',
         "DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confold "
-        '"${flags[@]}" "$deb"',
+        '-o DPkg::Lock::Timeout=600 "${flags[@]}" "$deb"',
         "",
         "# dpkg kept the settings file and left the new template beside it: merge them.",
         f"if [ -e {CONFIG}.dpkg-dist ]; then",
@@ -1162,6 +1281,7 @@ def install_script(host: Host, p: Plan, opts: Options) -> str:
                     args += [f"--{key.replace('_', '-')}", peer[key]]
             out.append(shlex.join([*args, "--write"]))
     out += ["", 'step "Restarting texas2step"', "systemctl restart texas2step"]
+    out += after_install
 
     if p.snippet:
         target, text = p.snippet
@@ -1398,6 +1518,18 @@ def gather(opts: Options, deb_path: str) -> Host:
                 h.version_cmp = op
                 break
     h.service_active = run("systemctl", "is-active", "--quiet", "texas2step")[0] == 0
+    loaded = [f for f in PACKAGED_NGINX if f in split_dump(h.nginx_dump)] if h.nginx_dump else []
+    if h.installed and h.deb_exists and loaded:
+        files = run("dpkg-query", "-W", "--showformat=${Conffiles}", "texas2step")[1]
+        new = packaged_files(deb_path, loaded)
+        for path in loaded:
+            m = re.search(rf"^\s*{re.escape(path)} ([0-9a-f]{{32}})", files, re.M)
+            disk = Path(path).read_bytes() if os.path.isfile(path) else None
+            h.nginx_files[path] = (
+                hashlib.md5(disk).hexdigest() if disk is not None else "",
+                m.group(1) if m else "",
+                hashlib.md5(new[path]).hexdigest() if path in new else "",
+            )
     h.config = read(CONFIG)
     if h.installed and h.version_cmp in {"lt", "eq"} and h.config is not None and h.deb_exists:
         h.config_md5 = hashlib.md5(Path(CONFIG).read_bytes()).hexdigest()
@@ -1458,23 +1590,30 @@ def packaged_md5(deb_path: str, path: str) -> str:
 
 def packaged_file(deb_path: str, path: str) -> bytes:
     """One file inside the package, read straight from its data archive (b"" if absent)."""
+    return packaged_files(deb_path, [path]).get(path, b"")
+
+
+def packaged_files(deb_path: str, paths: list[str]) -> dict[str, bytes]:
+    """Those of ``paths`` that are files in the package, read in one pass."""
     import tarfile
 
     proc = subprocess.Popen(["dpkg-deb", "--fsys-tarfile", deb_path], stdout=subprocess.PIPE)
-    data = b""
+    found: dict[str, bytes] = {}
     try:
         with tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
             for member in tar:
-                if member.name.lstrip(".") == path and member.isfile():
+                name = member.name.lstrip(".")
+                if name in paths and member.isfile():
                     f = tar.extractfile(member)
-                    data = f.read() if f else b""
-                    break
+                    found[name] = f.read() if f else b""
+                    if len(found) == len(paths):
+                        break
     except (OSError, tarfile.TarError):
         pass
     finally:
         proc.kill()
         proc.wait()
-    return data
+    return found
 
 
 def preview_merge(deb_path: str) -> tuple[str, str]:
@@ -1577,8 +1716,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--no-firewall", action="store_true", help="don't change the firewall")
     ap.add_argument("--allow-downgrade", action="store_true", help="install an older version")
+    ap.add_argument(
+        "--update",
+        action="store_true",
+        help="only update the install that is here: the package, its settings template and "
+        "texas2step's own nginx files; nothing is published anew, no firewall rule or setting "
+        "is added (texas2step update uses this)",
+    )
     ap.add_argument("--out", default=".", help="where to write the report and script")
     args = ap.parse_args(argv)
+    changes = (args.site, args.no_nginx, args.speedtest, args.path, args.id, args.name)
+    changes += (args.location, args.peer, args.udp_ports, args.url_v4, args.url_v6)
+    if args.update and any(changes):
+        ap.error("--update changes only what is installed; leave out the other options")
 
     if os.geteuid() != 0:
         print(
@@ -1607,10 +1757,11 @@ def main(argv: list[str] | None = None) -> int:
         url_v6=args.url_v6,
         no_firewall=args.no_firewall,
         allow_downgrade=args.allow_downgrade,
+        update=args.update,
     )
     host = gather(opts, os.path.abspath(deb))
     p = plan(host, opts)
-    text = report(host, p)
+    text = report(host, p, args.update)
     print(text, end="")
 
     out = Path(args.out)
@@ -1618,8 +1769,9 @@ def main(argv: list[str] | None = None) -> int:
     if not out.is_dir():
         out.mkdir(parents=True)
         os.chown(out, *owner)  # the operator's, like the files in it
-    (out / REPORT).write_text(text)
-    os.chown(out / REPORT, *owner)
+    for name, body in ((REPORT, text), (PLAN_JSON, plan_json(p))):
+        (out / name).write_text(body)
+        os.chown(out / name, *owner)
     script = out / INSTALL
     if p.blocked:
         if script.exists() and MARK in script.read_text(errors="replace"):
@@ -1628,7 +1780,8 @@ def main(argv: list[str] | None = None) -> int:
     script.write_text(install_script(host, p, opts))
     script.chmod(0o755)
     os.chown(script, *owner)
-    print(f"Wrote {out / REPORT} and {script}.")
+    if not args.update:
+        print(f"Wrote {out / REPORT} and {script}.")
     return 0
 
 

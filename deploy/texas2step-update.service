@@ -1,0 +1,17 @@
+[Unit]
+Description=Install a new texas2step release, if there is one (texas2step update --auto)
+Documentation=https://robert-patrick-texas.github.io/texas2step/docs/install.html#unattended-updates
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=TEXAS2STEP_CONFIG=/etc/texas2step/config.toml
+# Installs only when the new release's plan changes nothing but the package and the
+# settings; otherwise it logs a warning and waits for: sudo texas2step update
+ExecStart=/usr/bin/texas2step update --auto
+# Downloads and apt have their own timeouts; this one catches anything else.
+TimeoutStartSec=1h
+# A proxy for the downloads: sudo systemctl edit texas2step-update.service, then add
+#   [Service]
+#   Environment=https_proxy=http://proxy.example.net:3128

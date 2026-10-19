@@ -1,6 +1,7 @@
 """packaging/texas2step-setup.py: parsing the host's state, and the plan and script it writes."""
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -114,7 +115,7 @@ SNIPPET = (Path(__file__).parents[1] / "deploy/nginx/texas2step.conf").read_text
 @pytest.fixture(autouse=True)
 def no_real_paths(monkeypatch):
     # Fixture paths must not resolve through this machine's own /etc/nginx.
-    monkeypatch.setattr(setup.os.path, "realpath", lambda p: p)
+    monkeypatch.setattr(setup.os.path, "realpath", lambda p, **_: p)
 
 
 def host(*parts: str, **kw) -> "setup.Host":
@@ -566,3 +567,111 @@ def test_missing_dependencies_apt_can_install():
     deps = [setup.Dep("python3", ">= 3.14", None, False, True)]
     p = setup.plan(host(deps=deps), setup.Options())
     assert "apt installs python3 >= 3.14" in levels(p, setup.CHANGE)
+
+
+# ---- --update, as texas2step update runs it ------------------------------------------
+
+UPGRADE = {"installed": "0.1.0-1", "version_cmp": "lt", "config": TEMPLATE, "service_active": True}
+PINNED = TEMPLATE.replace("# rtc_port_min = 0", "rtc_port_min = 61000").replace(
+    "# rtc_port_max = 0", "rtc_port_max = 61999"
+)
+
+
+def changes(p):
+    return json.loads(setup.plan_json(p))["changes"]
+
+
+def test_an_update_changes_only_what_is_installed():
+    # Not published, no ufw rule, OS-chosen ports: a full run would change all three.
+    full = setup.plan(host(**UPGRADE), setup.Options())
+    assert full.nginx and full.firewall and any("rtc_port_min" in s for s in full.settings)
+    assert changes(full) == {"package": True, "settings": True, "nginx": True, "firewall": True}
+
+    p = setup.plan(host(**UPGRADE), setup.Options(update=True))
+    assert not p.blocked and p.nginx is None and not p.firewall and not p.settings
+    assert levels(p, setup.CHANGE) == ["upgrade texas2step 0.1.0-1 -> 0.2.0-1; settings are kept"]
+    assert any("an update leaves that to you" in t for t in levels(p, setup.NOTE))
+    assert not any('server_id stays "local"' in t for t in levels(p, setup.NOTE))
+    assert changes(p) == {"package": True, "settings": False, "nginx": False, "firewall": False}
+    assert "for texas2step update to run" in setup.report(host(**UPGRADE), p, update=True)
+
+    # With pinned ports the firewall is reported, never changed.
+    p = setup.plan(host(**UPGRADE | {"config": PINNED}), setup.Options(update=True))
+    assert not p.firewall
+    assert (
+        "ufw doesn't allow UDP 61000-61999 (an update leaves the firewall alone): "
+        "sudo ufw allow 61000:61999/udp"
+    ) in levels(p, setup.NOTE)
+    # nginx that isn't there, or isn't running, is no blocker for an update.
+    for broken in ({"nginx_installed": False}, {"nginx_active": False}, {"nginx_error": "x"}):
+        assert not setup.plan(host(**UPGRADE | broken), setup.Options(update=True)).blocked
+    # It only updates an install.
+    p = setup.plan(host(), setup.Options(update=True))
+    assert any("--update only updates an install" in t for t in levels(p, setup.FIX))
+
+
+def test_an_update_refreshes_a_generated_snippet():
+    site = """\
+# configuration file /etc/nginx/sites-enabled/dev.example.net:
+server {
+    listen 443 ssl;
+    server_name dev.example.net;
+    include snippets/texas2step-at-speedtest.conf;
+}
+
+# configuration file /etc/nginx/snippets/texas2step-at-speedtest.conf:
+"""
+    older = setup.snippet_for(SNIPPET, "/speedtest").replace("10s;", "5s;")
+    p = setup.plan(host(site + older, **UPGRADE), setup.Options(update=True))
+    assert p.snippet and p.public == "https://dev.example.net/speedtest/"
+    assert changes(p)["nginx"]
+
+
+def test_nginx_reloads_when_the_upgrade_changes_a_file_it_loads():
+    snippet, upstream = setup.PACKAGED_SNIPPET, setup.UPSTREAM_CONF
+    files = {snippet: ("old", "old", "new"), upstream: ("same", "same", "same")}
+    h = host(**UPGRADE, nginx_files=files)
+    p = setup.plan(h, setup.Options(update=True))
+    assert p.nginx_watch == [snippet, upstream] and p.nginx_reload == [snippet]
+    assert f"reload nginx after the upgrade, which changes {snippet}" in levels(p, setup.CHANGE)
+    assert changes(p)["nginx"]
+    script = setup.install_script(h, p, setup.Options(update=True))
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    assert f"nginx_files=({snippet} {upstream})" in script
+    assert "-o DPkg::Lock::Timeout=600" in script  # waits for unattended-upgrades
+
+    # dpkg keeps a file the operator edited: nothing to reload, but worth a note.
+    h.nginx_files = {snippet: ("mine", "old", "new")}
+    p = setup.plan(h, setup.Options(update=True))
+    assert not p.nginx_reload and not changes(p)["nginx"]
+    assert any(f"{snippet}.dpkg-dist" in t for t in levels(p, setup.NOTE))
+
+
+@pytest.mark.parametrize(
+    ("changed", "nginx_t", "status", "calls", "content"),
+    [
+        (False, 0, 0, [], "old"),
+        (True, 0, 0, ["nginx -t", "systemctl reload nginx"], "new"),
+        (True, 1, 1, ["nginx -t"], "old"),  # the previous file is back
+    ],
+)
+def test_the_reload_lines_run(tmp_path, changed, nginx_t, status, calls, content):
+    conf = tmp_path / "etc/nginx/snippets/texas2step.conf"
+    conf.parent.mkdir(parents=True)
+    conf.write_text("old")
+    conf.chmod(0o640)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "calls"
+    for name, code in (("nginx", nginx_t), ("systemctl", 0)):
+        stub = bin_dir / name
+        stub.write_text(f'#!/bin/sh\necho "{name} $*" >> {log}\nexit {code}\n')
+        stub.chmod(0o755)
+    before, after = setup.nginx_watch([str(conf)])
+    apt = [f"echo new > {conf}"] if changed else []  # dpkg puts the new file in place
+    script = "\n".join(["set -euo pipefail", "step() { :; }", *before, *apt, *after])
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin"}
+    r = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+    assert r.returncode == status, r.stderr
+    assert (log.read_text().splitlines() if log.exists() else []) == calls
+    assert conf.read_text().strip() == content and conf.stat().st_mode & 0o777 == 0o640

@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily check for a new texas2step release (unattended updates)
+Documentation=https://robert-patrick-texas.github.io/texas2step/docs/install.html#unattended-updates
+
+[Timer]
+# An update restarts the service, which ends tests running at that moment: early in the
+# morning, spread over an hour. Another time: sudo systemctl edit texas2step-update.timer
+OnCalendar=*-*-* 04:00
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target

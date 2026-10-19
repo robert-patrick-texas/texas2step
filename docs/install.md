@@ -337,18 +337,137 @@ To see the ports in use during a test, run `sudo ss -uanp | grep texas2step`.
 
 ## Upgrade
 
-The simplest way is the [setup tool](#install-or-upgrade-with-the-setup-tool). Copy the
-new `texas2step-setup` and `.deb` to the server, then run the check and the install
-script. The check shows how your settings file will be merged with the new template,
-and the script does the merge for you.
+### With texas2step update
+
+If `texas2step --help` lists the `update` command, one command upgrades the server:
+
+```bash
+texas2step update --check   # is a newer release out? (no sudo needed)
+sudo texas2step update
+```
+
+It takes the steps below for you:
+
+1. It asks GitHub for the newest release, and downloads its `.deb` and `texas2step-setup`
+   to `/var/cache/texas2step/update/<version>/`. Each must match the SHA-256 that GitHub
+   publishes with the release, or it isn't used.
+2. It runs that release's setup tool in update mode, which plans only the update of what
+   is installed: the package, the [settings merge](#with-the-setup-tool-or-by-hand) and
+   texas2step's own nginx files. It publishes nothing anew, adds no firewall rule and
+   changes no setting.
+3. It shows that plan and asks before it runs the install script. The script reloads
+   nginx when the package changes an nginx file that nginx loads, and checks that the new
+   version answers, directly and through nginx.
+
+The options:
+
+* `--yes` installs without asking, for scripts and configuration management.
+* `--version <version>` installs that release instead of the newest. Add
+  `--allow-downgrade` for an older one, to go back to it.
+* Behind a proxy: `sudo https_proxy=http://proxy.example.net:3128 texas2step update`.
+
+Where the server can't reach GitHub, point it at a mirror: see
+[Without access to GitHub](#without-access-to-github). On a server whose texas2step
+doesn't have the command yet, upgrade once [with the setup tool](#with-the-setup-tool-or-by-hand).
+
+### Unattended updates
+
+The package brings a timer for them, off until you turn it on:
+
+```bash
+sudo systemctl enable --now texas2step-update.timer
+```
+
+Every day at a random time between 04:00 and 05:00, the timer runs
+`texas2step update --auto`. When a newer release is out, it downloads and checks it as
+above. Then:
+
+* If the plan changes nothing but the package and the settings, it installs it. That
+  restarts texas2step, which ends any test running at that moment.
+* If the plan would also change nginx (a release with a new nginx snippet) or the
+  firewall, it installs nothing and logs a warning. Install that release yourself with
+  `sudo texas2step update`.
+
+Check on it:
+
+```bash
+systemctl list-timers texas2step-update.timer   # the next and the last run
+journalctl -u texas2step-update                 # what each run did
+```
+
+To run it at another time, `sudo systemctl edit texas2step-update.timer` and add:
+
+```ini
+[Timer]
+OnCalendar=
+OnCalendar=Sun 03:00
+```
+
+Behind a proxy, `sudo systemctl edit texas2step-update.service` and add:
+
+```ini
+[Service]
+Environment=https_proxy=http://proxy.example.net:3128
+```
+
+To turn unattended updates off again: `sudo systemctl disable --now texas2step-update.timer`.
+
+### Without access to GitHub
+
+The `update_url` setting tells `texas2step update` where to look for releases. For
+GitHub Enterprise, use its API address for your copy of the project, such as
+`https://github.example.net/api/v3/repos/example/texas2step`.
+
+Any web server can hold a mirror instead. It must answer
+`<update_url>/releases/latest`, and `<update_url>/releases/tags/v<version>` for
+`--version`, with the release as GitHub's API describes it. For each of the two files,
+that gives its `name`, `size`, `digest` (`"sha256:<hex>"`) and `browser_download_url`,
+the address to download it from. On a machine that can reach GitHub, this copies a
+release into `mirror/`, for a web server that serves that directory at
+`https://mirror.example.net/texas2step`:
+
+```bash
+python3 - <version> https://mirror.example.net/texas2step <<'PY'
+import json, os, sys, urllib.request
+version, base = sys.argv[1], sys.argv[2]
+api = "https://api.github.com/repos/robert-patrick-texas/texas2step/releases/tags/v"
+release = json.load(urllib.request.urlopen(api + version))
+os.makedirs(f"mirror/download/v{version}", exist_ok=True)
+os.makedirs("mirror/releases/tags", exist_ok=True)
+for asset in release["assets"]:
+    path = f"download/v{version}/{asset['name']}"
+    urllib.request.urlretrieve(asset["browser_download_url"], f"mirror/{path}")
+    asset["browser_download_url"] = f"{base}/{path}"
+for path in (f"releases/tags/v{version}", "releases/latest"):
+    with open(f"mirror/{path}", "w") as f:
+        json.dump(release, f)
+PY
+```
+
+Then, on each server:
+
+```bash
+sudo texas2step config set update_url=https://mirror.example.net/texas2step --write
+texas2step update --check
+```
+
+The mirror's description carries the SHA-256 values with it, so compare them once with
+those in the release notes on GitHub.
+
+### With the setup tool, or by hand
+
+The [setup tool](#install-or-upgrade-with-the-setup-tool) does what `texas2step update`
+does, step by step. Copy the new `texas2step-setup` and `.deb` to the server, then run
+the check and the install script. The check shows how your settings file will be merged
+with the new template, and the script does the merge for you. The script also reloads
+nginx when the package changes one of its nginx files that nginx loads, and rewrites and
+reloads a snippet the setup tool made for another path, such as
+`texas2step-at-speedtest.conf`.
 
 By hand: run the commands from [step 1](#1-install-the-package) again. They fetch the
 newest release. The service restarts with your settings, and saved results are kept.
-
 nginx reads a new version of the package's snippets in `/etc/nginx/snippets/` when it
-next reloads: `sudo nginx -t && sudo systemctl reload nginx`. A snippet the setup tool
-made for another path, such as `texas2step-at-speedtest.conf`, is rewritten and reloaded
-by its install script.
+next reloads: `sudo nginx -t && sudo systemctl reload nginx`.
 
 When a new version's settings template differs from your edited
 `/etc/texas2step/config.toml`, apt asks what to do with it. Keep yours (**N**, the

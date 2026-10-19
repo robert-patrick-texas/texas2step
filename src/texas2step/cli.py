@@ -337,6 +337,27 @@ def cmd_config_add_location(args: argparse.Namespace) -> None:
     _apply_edit(args, lambda text: config_edit.add_location(text, location), again)
 
 
+def cmd_update(args: argparse.Namespace) -> None:
+    from . import update
+    from .config import load_settings
+
+    if args.auto and (args.check or args.release or args.allow_downgrade):
+        sys.exit("texas2step update: --auto takes no other options")
+    if args.allow_downgrade and not args.release:
+        sys.exit("texas2step update: --allow-downgrade goes with --version")
+    try:
+        # A server without a settings file still has update_url's default (or its env).
+        settings = load_settings(args.config if os.path.exists(args.config) else None)
+    except (OSError, ValueError) as exc:
+        sys.exit(f"texas2step: {exc}")
+    try:
+        sys.exit(update.main(args, settings))
+    except update.UpdateError as exc:
+        sys.exit(f"texas2step update: {exc}")
+    except KeyboardInterrupt:
+        sys.exit(130)
+
+
 async def _save(target: str, result: dict[str, Any]) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(f"{engine._base(target)}{engine.API}/results", json=result)
@@ -452,6 +473,40 @@ def build_parser() -> argparse.ArgumentParser:
     add_location.add_argument("--url-v6", help="IPv6-only base URL")
     settings_file(add_location)
     add_location.set_defaults(func=cmd_config_add_location)
+
+    upd = sub.add_parser(
+        "update",
+        help="install a newer release on this server",
+        description="Look for a newer texas2step release (at update_url: GitHub, or a "
+        "mirror), download its package and setup tool, check both against the SHA-256 "
+        "published with it, show the setup tool's plan, then run its install script. "
+        "Needs sudo, except with --check.",
+    )
+    upd.add_argument(
+        "--check", action="store_true", help="only say whether a newer release is out (exit 100)"
+    )
+    upd.add_argument(
+        "--version",
+        dest="release",
+        metavar="VERSION",
+        help="install this release instead of the newest, e.g. 1.2.0",
+    )
+    upd.add_argument(
+        "--allow-downgrade", action="store_true", help="with --version: install an older release"
+    )
+    upd.add_argument("-y", "--yes", action="store_true", help="install without asking")
+    upd.add_argument(
+        "--auto",
+        action="store_true",
+        help="for the update timer: install only when the plan changes nothing but the "
+        "package and the settings, without asking",
+    )
+    upd.add_argument(
+        "--config",
+        default=os.environ.get("TEXAS2STEP_CONFIG", "/etc/texas2step/config.toml"),
+        help="settings file with update_url (default: %(default)s)",
+    )
+    upd.set_defaults(func=cmd_update)
 
     def target(p: argparse.ArgumentParser) -> None:
         p.add_argument("url", help="base URL of a texas2step server")

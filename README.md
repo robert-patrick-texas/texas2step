@@ -66,9 +66,10 @@ sudo ./texas2step-setup --id houston --name "houston.example.net" --location "Ho
 sudo ./texas2step-install.sh                     # after reading it
 ```
 
-The [install guide](docs/install.md) covers the rest: the setup tool's options, the
-optional `/speedtest` address, configuration, the firewall rule for the UDP test,
-upgrades and removal.
+Once installed, `sudo texas2step update` upgrades it to the newest release, and a timer
+can do that unattended. The [install guide](docs/install.md) covers the rest: the setup
+tool's options, the optional `/speedtest` address, configuration, the firewall rule for
+the UDP test, updates and removal.
 
 To run it from source instead:
 
