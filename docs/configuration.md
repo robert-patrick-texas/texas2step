@@ -127,7 +127,7 @@ url = "mailto:noc@acme.example"
   | Theme | Look |
   |---|---|
   | Light, Dark | The original texas2step look: warm neutrals and a Texas-sunset accent |
-  | America | Cool white with Old Glory blue and red, a flag-stripe band and a faint field of stars |
+  | America | Cool white with Old Glory blue and red: the window framed by a navy rule across the top and red rules down both sides, and a faint field of stars |
   | Energy | A national lab after hours: near-black blue surfaces, Cherenkov blue into fusion-plasma violet, a glowing beam line under the header and a faint machine-room lattice, for the Department of Energy's supercomputing, fusion and nuclear sites (colours only, no seals or insignia) |
   | Federal | Deep-navy masthead with a gold rule, cool grey-blue surfaces, serif headings and crisp corners, in the style of federal websites such as whitehouse.gov and energy.gov (colours and type only, no seals or insignia) |
   | Military | Ranger-green masthead with a coyote-tan rule, khaki surfaces, olive-drab buttons, condensed capital headings and a faint topographic map (colours and type only, no insignia, branch marks or camouflage) |

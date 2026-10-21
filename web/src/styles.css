@@ -197,8 +197,8 @@
   --notice-ink: #d2d8e4;
 }
 
-/* America: Old Glory red and blue on a cool white, a flag stripe and a faint field of
-   stars. Blue leads; red is the accent. */
+/* America: Old Glory red and blue on a cool white, the window framed in navy and red,
+   and a faint field of stars. Blue leads; red is the accent. */
 [data-theme="america"] {
   color-scheme: light;
   --page: #f2f5fa;
@@ -794,7 +794,6 @@ a.brand-org:hover,
 }
 
 [data-theme="texas"] .topbar::after,
-[data-theme="america"] .topbar::before,
 [data-theme="energy"] .topbar::after {
   content: "";
   position: absolute;
@@ -823,16 +822,32 @@ a.brand-org:hover,
     var(--page);
 }
 
+/* Blue deepening toward the upper left. Its text stays dark, at 5.5:1 or better: white
+   would need a darker blue than the light end could share a row with. */
 [data-theme="america"] .topbar {
-  background: color-mix(in srgb, #dfe7f4 85%, transparent);
+  --ink-2: var(--ink);
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, #5b85c9 90%, transparent),
+    color-mix(in srgb, #a6bde3 90%, transparent)
+  );
 }
 
-[data-theme="america"] .topbar::before {
-  top: 0;
-  height: 4px;
+/* The window framed in the flag's colours: a navy rule across the top and red rules
+   down both sides, over everything as the page scrolls but never in the way. The red
+   grows from 6px to 12px once the margins have room, staying 10px clear of the header
+   as on a phone. */
+[data-theme="america"] body::before {
+  --edge: clamp(6px, (100vw - 1240px) / 2 - 10px, 12px);
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
   background:
-    linear-gradient(90deg, #0a3161 0 40%, transparent 40%),
-    repeating-linear-gradient(90deg, #b31942 0 18px, #ffffff 18px 30px);
+    linear-gradient(#0a3161, #0a3161) top / 100% 4px no-repeat,
+    linear-gradient(#8f1435, #8f1435) left / var(--edge) 100% no-repeat,
+    linear-gradient(#8f1435, #8f1435) right / var(--edge) 100% no-repeat;
 }
 
 [data-theme="america"] .backdrop {
