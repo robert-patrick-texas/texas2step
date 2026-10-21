@@ -109,9 +109,10 @@ export class App {
       this.locations = [];
     }
     const saved = store<{ id: string }>("t2s.server", { id: "" }).id;
-    const pick = this.locations.find((l) => l.id === saved) ?? this.locations[0] ?? null;
+    // Chosen before the picker is drawn, so the header shows the remembered server.
+    this.selected = this.locations.find((l) => l.id === saved) ?? this.locations[0] ?? null;
     this.renderPicker();
-    await this.select(pick);
+    await this.select(this.selected);
   }
 
   /** The address family the chosen setting holds `loc` to: only where it has that hostname. */
@@ -212,9 +213,7 @@ export class App {
     const select = h("select", { class: "picker-select", "aria-label": "Test server" });
     for (const loc of this.locations) {
       const label = loc.location ? `${loc.name} — ${loc.location}` : loc.name;
-      const opt = h("option", { value: loc.id }, label);
-      if (loc.id === this.selected?.id || (!this.selected && loc === this.locations[0])) opt.selected = true;
-      select.append(opt);
+      select.append(h("option", { value: loc.id, selected: loc.id === this.selected?.id }, label));
     }
     select.addEventListener("change", () => void this.select(this.locations.find((l) => l.id === select.value) ?? null));
     root.append(h("label", { class: "picker" }, h("span", { class: "picker-status" }), select));

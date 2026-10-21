@@ -142,7 +142,8 @@ Restart the service after changing any of these: `sudo systemctl restart texas2s
 
 Every server lists itself first. Add other texas2step servers to offer them in the
 picker; browsers then test against them directly (cross-origin), and
-`/api/v1/measure/*` may target them.
+`/api/v1/measure/*` may target them. A visitor's choice of server is remembered in
+their browser, like the theme, so a return visit tests the same server.
 
 ```toml
 [[locations]]
