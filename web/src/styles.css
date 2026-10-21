@@ -1997,6 +1997,11 @@ a.brand-org:hover,
   font-size: 12.5px;
 }
 
+.table .cell-sub {
+  display: block;
+  color: var(--muted);
+}
+
 .table tbody tr:hover td {
   background: color-mix(in srgb, var(--ink) 2.5%, transparent);
 }
@@ -2332,6 +2337,13 @@ a.brand-org:hover,
 .egress-fam dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+
+/* Where a value came from, on a line of its own under it. */
+.egress-note {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .diag-log-head {

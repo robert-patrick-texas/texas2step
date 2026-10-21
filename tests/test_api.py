@@ -176,6 +176,7 @@ def test_results_round_trip(client):
         "version": 1,
         "tool": f"texas2step-web/{__version__}",
         "server": {"id": "t1"},
+        "client": {"ip": "203.0.113.7", "local_ip": "10.0.0.10"},
         "download": {"mbps": 940.5},
         "upload": {"mbps": 410.0},
         "latency": {"median": 3.2, "jitter": 0.4},
@@ -185,6 +186,8 @@ def test_results_round_trip(client):
     assert saved.status_code == 201
     rid = saved.json()["id"]
     assert saved.json()["download_mbps"] == 940.5
+    assert saved.json()["client_local_ip"] == "10.0.0.10"
+    assert saved.json()["client_mac"] is None
 
     full = client.get(f"/api/v1/results/{rid}").json()
     assert full["id"] == rid and full["upload"]["mbps"] == 410.0
@@ -193,6 +196,7 @@ def test_results_round_trip(client):
     assert listing[0]["id"] == rid
     assert listing[0]["latency_ms"] == 3.2
     assert listing[0]["loss_pct"] == 0.2
+    assert listing[0]["client_local_ip"] == "10.0.0.10"
 
 
 def test_results_validation(client):

@@ -456,6 +456,8 @@ export class TestView implements View {
     const add = (k: string, v: string | undefined | null) => v && rows.push([k, v]);
     add("Server", [r.server.name, r.server.location, r.server.url].filter(Boolean).join(" · "));
     add("Client", [r.client.ip, r.client.family, r.client.protocol].filter(Boolean).join(" · "));
+    add("This computer", r.client.local_ip);
+    add("MAC", r.client.mac && `${r.client.mac}, read from the IPv6 address (EUI-64)`);
     add("Started", when(r.started_at));
     add("Configuration", `${r.config.streams} streams · ${r.config.seconds} s per direction · ${r.config.packets} UDP probes every ${r.config.interval_ms} ms`);
     const lat = r.latency;

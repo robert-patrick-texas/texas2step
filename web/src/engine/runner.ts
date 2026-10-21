@@ -1,5 +1,6 @@
 // Orchestrates a full test: idle latency → download → upload → packet loss.
 import type { Direction, LatencyStats, ServerInfo, TestResult, ThroughputResult, WhoAmI } from "../types";
+import { eui64Mac } from "./addr";
 import { measureHttpLatency, probeWhile, WsProber } from "./latency";
 import { measureLossRtc, measureLossWs, RtcProbe } from "./loss";
 import { clearTimings, type Endpoint } from "./net";
@@ -51,6 +52,7 @@ export class TestRun {
         family: whoami?.family ?? null,
         protocol: whoami?.http_version,
         user_agent: navigator.userAgent,
+        mac: eui64Mac(whoami?.ip) ?? undefined,
       },
       config: {
         streams: config.streams,
@@ -146,6 +148,11 @@ export class TestRun {
       try {
         const probe = await RtcProbe.connect(this.ep, this.info.ice_servers);
         try {
+          const local = (await probe.path())?.local;
+          if (local) {
+            this.result.client.local_ip = local;
+            this.result.client.mac ??= eui64Mac(local) ?? undefined;
+          }
           return await measureLossRtc(probe, opts);
         } finally {
           probe.close();

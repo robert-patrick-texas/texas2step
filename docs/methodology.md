@@ -197,6 +197,38 @@ yet stays grey and keeps trying. One the server doesn't offer is grey and isn't 
 The clock offset is the server's time minus the browser's at the middle of the round
 trip, ± half the round trip.
 
+### This computer's address
+
+Browsers hide the computer's own address from web pages. WebRTC, the only place a page
+could see it, gives a random name ending in `.local` instead. So by default the NAT and
+egress box shows only the addresses the server sees. Where the browser reveals it, the
+box adds **This computer**, the address of the interface the UDP path leaves by, and a
+**NAT** row comparing it with the address the server sees. Browser test runs save it
+with their results, in History's **Local** column.
+
+To have managed browsers reveal it to this site only:
+
+* **Chrome and Edge**: the `WebRtcLocalIpsAllowedUrls` policy, listing the site, such as
+  `https://www.example.net`.
+* **Firefox**: `media.peerconnection.ice.obfuscate_host_addresses.blocklist`, a
+  comma-separated list of hostnames, such as `www.example.net`. Set it in
+  `about:config`, or with the `Preferences` enterprise policy.
+* **Safari** has no such policy.
+
+List only the texas2step site: each site listed can learn the internal address of every
+computer that visits it. Browsers also reveal the address to a page they have given
+camera or microphone access.
+
+No browser tells a web page the computer's MAC address, and the server can't see it
+past the first router. An IPv6 address formed by EUI-64 carries it, though: its last
+64 bits are the MAC with `ff:fe` in the middle and one bit inverted. When this
+computer's address, or the one the server sees, is such an address, the IPv6 part of the
+box shows the MAC, and test runs save it. Current Windows, macOS, iOS, Android and
+Linux use privacy or stable random addresses by default, so it mostly turns up for
+printers, embedded devices and older systems. To find a computer from its local address
+instead, look it up in the site's ARP or DHCP tables, then in the switch's MAC address
+table or the wireless controller's client list.
+
 ## Known limitations
 
 * The UDP test needs UDP from the client to the server. Set `rtc_port_min` and

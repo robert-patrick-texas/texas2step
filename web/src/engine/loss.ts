@@ -1,6 +1,7 @@
 // UDP probing over a WebRTC data channel (unordered, no retransmissions), with a
 // WebSocket fallback when UDP is blocked.
 import type { LossResult } from "../types";
+import { revealed } from "./addr";
 import type { WsProber } from "./latency";
 import { type Endpoint, type Family, sleep } from "./net";
 import { summarize } from "./stats";
@@ -70,11 +71,14 @@ export class RtcProbe {
       await pc.setLocalDescription(await pc.createOffer());
       // The server answers without trickle ICE, so send a complete candidate list.
       await waitFor(pc, "icegatheringstatechange", 2500, () => pc.iceGatheringState === "complete");
+      // A single-family hostname covers HTTP; ICE would still pick either family for UDP.
+      // Both ends' candidates are held to the family: a browser that reveals its addresses
+      // would otherwise be reached in the other family by the server's own checks.
+      const offer = pc.localDescription!.sdp;
       const answer = await ep.post<RTCSessionDescriptionInit>("/rtc/offer", {
-        sdp: pc.localDescription!.sdp,
+        sdp: ep.family ? onlyFamily(offer, ep.family) : offer,
         type: "offer",
       });
-      // A single-family hostname covers HTTP; ICE would still pick either family for UDP.
       const sdp = ep.family ? onlyFamily(answer.sdp!, ep.family) : answer.sdp;
       if (ep.family && !/^a=candidate:/m.test(sdp ?? "")) {
         throw new NotOffered(`the server offers no ${ep.family === "ipv6" ? "IPv6" : "IPv4"} address for UDP`);
@@ -99,10 +103,13 @@ export class RtcProbe {
     return (await this.path())?.family ?? null;
   }
 
-  /** The server's end of the UDP path ICE chose: its address and port. */
-  async path(): Promise<{ address: string; port: number | null; family: "IPv4" | "IPv6" } | null> {
+  /**
+   * The UDP path ICE chose: the server's address and port, and this computer's own address
+   * on it where the browser reveals it (`local`; see revealed()).
+   */
+  async path(): Promise<{ address: string; port: number | null; family: "IPv4" | "IPv6"; local: string | null } | null> {
     const stats = await this.pc.getStats();
-    let pair: { remoteCandidateId?: string } | undefined;
+    let pair: { remoteCandidateId?: string; localCandidateId?: string } | undefined;
     stats.forEach((s) => {
       if (s.type === "transport" && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId);
     });
@@ -112,7 +119,10 @@ export class RtcProbe {
     const remote = pair?.remoteCandidateId ? stats.get(pair.remoteCandidateId) : undefined;
     const address: string | undefined = remote?.address ?? remote?.ip;
     if (!address) return null;
-    return { address, port: typeof remote?.port === "number" ? remote.port : null, family: address.includes(":") ? "IPv6" : "IPv4" };
+    // A host candidate is the interface's own address; a reflexive or relayed one is based on it.
+    const mine = pair?.localCandidateId ? stats.get(pair.localCandidateId) : undefined;
+    const local = revealed(mine?.candidateType === "host" ? (mine.address ?? mine.ip) : mine?.relatedAddress);
+    return { address, port: typeof remote?.port === "number" ? remote.port : null, family: address.includes(":") ? "IPv6" : "IPv4", local };
   }
 
   send(seq: number, size: number): void {
@@ -165,11 +175,18 @@ export class RtcProbe {
   }
 }
 
-/** The SDP with only the server's candidates of one address family. */
+/**
+ * The SDP with only the candidates of one address family. A hidden address (a name ending
+ * in ".local") stays, as its family can't be told.
+ */
 function onlyFamily(sdp: string, family: Family): string {
   return sdp
     .split("\r\n")
-    .filter((line) => !line.startsWith("a=candidate:") || (line.split(" ")[4] ?? "").includes(":") === (family === "ipv6"))
+    .filter((line) => {
+      if (!line.startsWith("a=candidate:")) return true;
+      const address = line.split(" ")[4] ?? "";
+      return address.endsWith(".local") || address.includes(":") === (family === "ipv6");
+    })
     .join("\r\n");
 }
 

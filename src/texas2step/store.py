@@ -40,6 +40,15 @@ SUMMARY_COLUMNS = (
     "loss_pct",
 )
 
+# Summary fields read from the saved result itself, so databases from before them need no
+# new column: this computer's own address and a MAC, where the client could tell them.
+PAYLOAD_FIELDS = {"client_local_ip": ("client", "local_ip"), "client_mac": ("client", "mac")}
+PAYLOAD_SQL = ", ".join(
+    f"CASE WHEN json_type(payload, '$.{a}.{b}') = 'text' "
+    f"THEN json_extract(payload, '$.{a}.{b}') END AS {name}"
+    for name, (a, b) in PAYLOAD_FIELDS.items()
+)
+
 
 def _dig(data: Any, *path: str) -> float | None:
     for key in path:
@@ -47,6 +56,14 @@ def _dig(data: Any, *path: str) -> float | None:
             return None
         data = data.get(key)
     return float(data) if isinstance(data, int | float) and not isinstance(data, bool) else None
+
+
+def _text(data: Any, *path: str) -> str | None:
+    for key in path:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data if isinstance(data, str) else None
 
 
 class ResultStore:
@@ -104,10 +121,11 @@ class ResultStore:
                 "(SELECT id FROM results ORDER BY created_at DESC LIMIT ?)",
                 (self.max_rows,),
             )
-        return dict(zip(SUMMARY_COLUMNS, row[:-1], strict=True))
+        summary = dict(zip(SUMMARY_COLUMNS, row[:-1], strict=True))
+        return summary | {name: _text(result, *path) for name, path in PAYLOAD_FIELDS.items()}
 
     def recent(self, limit: int = 50, before: float | None = None) -> list[dict[str, Any]]:
-        sql = f"SELECT {', '.join(SUMMARY_COLUMNS)} FROM results"
+        sql = f"SELECT {', '.join(SUMMARY_COLUMNS)}, {PAYLOAD_SQL} FROM results"
         args: list[Any] = []
         if before is not None:
             sql += " WHERE created_at < ?"

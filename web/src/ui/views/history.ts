@@ -42,6 +42,8 @@ export class HistoryView implements View {
         h("td", {}, this.app.pages.has("test") ? h("a", { href: appPath(`/r/${r.id}`), "data-link": true }, when(r.created_at)) : when(r.created_at)),
         h("td", {}, r.server_id ?? "—"),
         h("td", { class: "mono" }, r.client_ip ?? "—"),
+        // Where the browser revealed it, and a MAC read from an EUI-64 IPv6 address.
+        h("td", { class: "mono" }, r.client_local_ip ?? "—", r.client_mac ? h("span", { class: "cell-sub", title: "MAC, read from the IPv6 address (EUI-64)" }, r.client_mac) : null),
         h("td", { class: "num" }, text(rate(r.download_mbps))),
         h("td", { class: "num" }, text(rate(r.upload_mbps))),
         h("td", { class: "num" }, text(ms(r.latency_ms))),
@@ -60,7 +62,7 @@ export class HistoryView implements View {
           h(
             "table",
             { class: "table data" },
-            h("thead", {}, h("tr", {}, ...["When", "Server", "Client", "Download", "Upload", "Latency", "Jitter", "Loss", "Via"].map((c, i) => h("th", { scope: "col", class: i >= 3 && i <= 7 ? "num" : "" }, c)))),
+            h("thead", {}, h("tr", {}, ...["When", "Server", "Client", "Local", "Download", "Upload", "Latency", "Jitter", "Loss", "Via"].map((c, i) => h("th", { scope: "col", class: i >= 4 && i <= 8 ? "num" : "" }, c)))),
             h("tbody", {}, ...rows),
           ),
         ),

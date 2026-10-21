@@ -2,6 +2,7 @@
 // as the page is open: HTTPS, WebSocket and UDP, over IPv4 and over IPv6. Each answer also
 // says what the server saw: the client's address and port, the HTTP version, TLS, the
 // server's own TCP round trip, and its clock.
+import { eui64Mac } from "../../engine/addr";
 import { WsProber } from "../../engine/latency";
 import { NotOffered, RtcProbe, type UdpAddress } from "../../engine/loss";
 import { Endpoint } from "../../engine/net";
@@ -296,7 +297,7 @@ class UdpMethod extends Method {
         const [path, seen] = await Promise.all([probe.path(), probe.address()]);
         if (path?.port) this.port = `UDP ${path.port}`;
         this.detail = [path ? `to ${path.address}` : "", seen?.ip ? `seen from ${hostPort(seen.ip, seen.port)}` : ""].filter(Boolean).join(" · ") || "WebRTC data channel, no retransmits";
-        this.view.udpPath(this.fam as Fam, path?.address ?? null, path?.port ?? null, seen);
+        this.view.udpPath(this.fam as Fam, path?.address ?? null, path?.port ?? null, seen, path?.local ?? null);
       })
       .catch((err: unknown) => {
         if (err instanceof NotOffered && !this.stopped) {
@@ -327,7 +328,7 @@ export class DiagView implements View {
   private timer = 0;
   private off: (() => void) | null = null;
   private https: Partial<Record<Fam, DiagHttp>> = {};
-  private udp: Partial<Record<Fam, { ip: string | null; port: number | null; seen: UdpAddress | null }>> = {};
+  private udp: Partial<Record<Fam, { ip: string | null; port: number | null; seen: UdpAddress | null; local: string | null }>> = {};
   private offsets: number[] = [];
   private offsetSpread: number[] = [];
   private events: Event[] = [];
@@ -375,7 +376,7 @@ export class DiagView implements View {
         { class: "grid" },
         card(
           "NAT and egress",
-          "Your address and port as the server sees them, over TCP and over UDP.",
+          "Your address and port as the server sees them, over TCP and over UDP, and this computer's own address where the browser reveals it.",
           this.els.egress,
           h("p", { class: "diag-note" }, "Behind NAT the ports differ, as they should. Different addresses mean TCP and UDP leave by different routes or NAT pools, as with several internet links or carrier-grade NAT."),
         ),
@@ -461,8 +462,8 @@ export class DiagView implements View {
     }
   }
 
-  udpPath(fam: Fam, ip: string | null, port: number | null, seen: UdpAddress | null): void {
-    this.udp[fam] = { ip, port, seen };
+  udpPath(fam: Fam, ip: string | null, port: number | null, seen: UdpAddress | null, local: string | null): void {
+    this.udp[fam] = { ip, port, seen, local };
   }
 
   log(who: Method | null, text: string): void {
@@ -512,18 +513,32 @@ export class DiagView implements View {
     for (const fam of ["IPv4", "IPv6"] as const) {
       const tcp = this.https[fam]?.client;
       const udp = this.udp[fam]?.seen;
+      // This computer's own address on the UDP path: only where the browser reveals it.
+      const local = this.udp[fam]?.local ?? null;
       let verdict = "—";
       if (tcp?.ip && udp?.ip) {
         if (tcp.ip !== udp.ip) verdict = "Different addresses";
         else if (tcp.port && udp.port && tcp.port !== udp.port) verdict = "Same address, other port";
         else verdict = "Same address";
       }
+      const outside = udp?.ip ?? tcp?.ip;
+      const mac = fam === "IPv6" ? [local, tcp?.ip, udp?.ip].map(eui64Mac).find(Boolean) : null;
+      const row = (term: string, value: string | HTMLElement, mono = true) => [h("dt", {}, term), h("dd", mono ? { class: "mono" } : {}, value)];
       this.els.egress.append(
         h(
           "div",
           { class: "egress-fam" },
           h("h3", {}, fam),
-          h("dl", {}, h("dt", {}, "Over HTTPS (TCP)"), h("dd", { class: "mono" }, hostPort(tcp?.ip, tcp?.port)), h("dt", {}, "Over UDP"), h("dd", { class: "mono" }, hostPort(udp?.ip, udp?.port)), h("dt", {}, "Compared"), h("dd", {}, verdict)),
+          h(
+            "dl",
+            {},
+            ...(local ? row("This computer", local) : []),
+            ...row("Over HTTPS (TCP)", hostPort(tcp?.ip, tcp?.port)),
+            ...row("Over UDP", hostPort(udp?.ip, udp?.port)),
+            ...row("Compared", verdict, false),
+            ...(local && outside ? row("NAT", local === outside ? "none: same address" : `${local} → ${outside}`) : []),
+            ...(mac ? row("MAC", h("span", {}, mac, h("span", { class: "egress-note" }, "read from the IPv6 address (EUI-64)"))) : []),
+          ),
         ),
       );
     }

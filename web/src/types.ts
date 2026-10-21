@@ -73,7 +73,9 @@ export interface TestResult {
   started_at: string;
   duration_s?: number;
   server: { id?: string; name?: string; location?: string; url: string; version?: string };
-  client: { ip?: string; family?: string | null; protocol?: string; user_agent?: string };
+  /** `local_ip`: this computer's own address on the UDP path, where the browser reveals it.
+   *  `mac`: read from an EUI-64 IPv6 address, the local one or the one the server saw. */
+  client: { ip?: string; family?: string | null; protocol?: string; user_agent?: string; local_ip?: string; mac?: string };
   config: { streams: number; seconds: number; packets: number; interval_ms: number };
   latency?: LatencyStats;
   download?: ThroughputResult;
@@ -127,6 +129,8 @@ export interface ResultSummary {
   id: string;
   created_at: number;
   client_ip: string | null;
+  client_local_ip: string | null;
+  client_mac: string | null;
   server_id: string | null;
   source: string | null;
   download_mbps: number | null;

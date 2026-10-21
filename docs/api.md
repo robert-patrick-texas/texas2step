@@ -121,7 +121,8 @@ Browser runs, `texas2step run --json` and `/measure/full` share one shape (snake
   "tool": "texas2step-web/<version>",
   "started_at": "2026-10-18T07:24:00Z",
   "server": {"id": "dallas", "name": "dallas.example.net", "location": "Dallas, TX", "url": "https://…", "version": "<version>"},
-  "client": {"ip": "10.1.2.3", "family": "IPv4", "protocol": "h2", "user_agent": "…"},
+  "client": {"ip": "203.0.113.7", "family": "IPv4", "protocol": "h2", "user_agent": "…",
+             "local_ip": "10.0.0.10", "mac": "00:11:22:33:44:55"},
   "config": {"streams": 4, "seconds": 10, "packets": 500, "interval_ms": 10},
   "latency": {"count": 20, "lost": 0, "min": 2.9, "median": 3.2, "p90": 3.8, "jitter": 0.4, "samples": [ … ], …},
   "download": {"mbps": 941.2, "peak_mbps": 948.0, "bytes": …, "timeline": [ …per 100 ms… ],
@@ -135,4 +136,8 @@ Browser runs, `texas2step run --json` and `/measure/full` share one shape (snake
 }
 ```
 
-`readiness` is computed by the browser client only.
+`readiness` is computed by the browser client only. So are `client.local_ip`, this
+computer's own address on the UDP path where the browser reveals it, and `client.mac`,
+read from an EUI-64 IPv6 address (see
+[This computer's address](methodology.md#this-computers-address)). Either is left out
+when unknown. Summaries carry them as `client_local_ip` and `client_mac`.
