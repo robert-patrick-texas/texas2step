@@ -72,6 +72,17 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [1.8.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v1.8.0) (2026-10-22)
+
+- [x] Access codes for servers open to the Internet: the service desk reads callers a
+  code that changes daily, weekly or monthly, from words every server works out from a
+  shared key, or from the site's own list ([Access codes](access.md)).
+- [x] `internal_networks`: no code there, and only they get History, the API tab, saved
+  results, the API explorer and the server-side measurements.
+- [x] Result IDs that read well over the phone, and History opens one as it is read out.
+- [x] `texas2step access show`, `words` and `key`; `--code` for the command line's tests.
+- [x] The Test page's link card follows the server picker.
+
 ### [1.7.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v1.7.0) (2026-10-22)
 
 - [x] `update_url` can name a mirror in a directory on the server, such as
