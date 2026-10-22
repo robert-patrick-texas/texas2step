@@ -139,6 +139,7 @@ measure the others through the API. See [docs/configuration.md](docs/configurati
 * [API](docs/api.md): endpoints and the UDP probe protocol.
 * [Development](docs/development.md): running from source, tests, docs site, packaging,
   releases.
+* [Roadmap](docs/roadmap.md): ideas for future work.
 
 The same pages are published at
 [robert-patrick-texas.github.io/texas2step](https://robert-patrick-texas.github.io/texas2step/).

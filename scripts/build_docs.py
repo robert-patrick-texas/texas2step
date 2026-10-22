@@ -32,6 +32,7 @@ from urllib.parse import quote, unquote, urlsplit
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
+from mdit_py_plugins.tasklists import tasklists_plugin
 from pygments import highlight
 from pygments.formatters.html import HtmlFormatter
 from pygments.lexers import get_lexer_by_name
@@ -52,6 +53,7 @@ LEADING: list[tuple[str, str | None]] = [
     ("docs/methodology.md", None),
     ("docs/api.md", None),
     ("docs/development.md", None),
+    ("docs/roadmap.md", None),
 ]
 TRAILING: list[tuple[str, str | None]] = [
     ("LICENSE.md", "License"),
@@ -197,7 +199,8 @@ class Site:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.repo = repository_url(root)
-        self.md = MarkdownIt("gfm-like", {"highlight": highlight_code})
+        # Task lists ("- [x] done") as checkboxes, as GitHub shows them.
+        self.md = MarkdownIt("gfm-like", {"highlight": highlight_code}).use(tasklists_plugin)
         # Like GitHub, link bare URLs only when they carry a scheme: "app.py" is not a site.
         if self.md.linkify is not None:
             self.md.linkify.set({"fuzzy_link": False})

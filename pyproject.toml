@@ -42,6 +42,7 @@ dev = [
 # scripts/build_docs.py: Markdown to the static HTML site in html/
 docs = [
     "markdown-it-py[linkify]>=3",
+    "mdit-py-plugins>=0.6.1",
     "pygments>=2.18",
 ]
 

@@ -305,6 +305,40 @@ body {
   margin: 0.3em 0 0;
 }
 
+/* Task lists, as on the roadmap: a checkbox where the bullet would be. */
+.prose .task-list-item {
+  list-style: none;
+}
+
+/* Drawn here, as browsers grey out a disabled checkbox: outlined to come, filled when done. */
+.prose .task-list-item-checkbox {
+  appearance: none;
+  display: inline-grid;
+  place-content: center;
+  width: 1em;
+  height: 1em;
+  margin: 0 0.45em 0 -1.4em;
+  vertical-align: -0.12em;
+  border: 1.5px solid var(--muted);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.prose .task-list-item-checkbox:checked {
+  border-color: var(--link);
+  background: var(--link);
+}
+
+.prose .task-list-item-checkbox:checked::before {
+  content: "";
+  width: 0.28em;
+  height: 0.52em;
+  margin-top: -0.12em;
+  border: solid var(--surface);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
 .prose h1 {
   position: relative;
   margin: 0 0 26px;
