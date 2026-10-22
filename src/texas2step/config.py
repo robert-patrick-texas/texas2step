@@ -106,7 +106,8 @@ class Settings:
     debug: bool = False
 
     # Where `texas2step update` looks for releases: a GitHub repository's API address,
-    # or a mirror that answers <update_url>/releases/latest the same way.
+    # or a mirror that answers <update_url>/releases/latest the same way, on a web
+    # server or in a directory (file:///opt/texas2step/mirror).
     update_url: str = "https://api.github.com/repos/robert-patrick-texas/texas2step"
 
     # Other servers offered in the location picker (this server is always first).
@@ -137,8 +138,8 @@ class Settings:
             raise ValueError(f"default_theme: expected one of {', '.join(THEMES)}")
         if self.brand_credit not in CREDITS:
             raise ValueError(f"brand_credit: expected one of {', '.join(CREDITS)}")
-        if not self.update_url.startswith(("https://", "http://")):
-            raise ValueError("update_url: expected an https:// URL")
+        if not self.update_url.startswith(("https://", "http://", "file:///")):
+            raise ValueError("update_url: expected an https:// URL, or file:/// and a directory")
         if not self.brand_name.strip():
             raise ValueError("brand_name: must not be empty")
         urls = [("brand_url", self.brand_url)] if self.brand_url else []

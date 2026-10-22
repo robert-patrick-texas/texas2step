@@ -53,8 +53,10 @@ def test_rtc_port_range(monkeypatch):
 def test_update_url():
     assert Settings().update_url.startswith("https://api.github.com/repos/")
     assert Settings(update_url="https://mirror.example.net/texas2step").update_url
-    with pytest.raises(ValueError, match="update_url"):
-        Settings(update_url="mirror.example.net/texas2step")
+    assert Settings(update_url="file:///opt/texas2step/mirror").update_url
+    for url in ("mirror.example.net/texas2step", "file://mirror/texas2step", "/opt/mirror"):
+        with pytest.raises(ValueError, match="update_url"):
+            Settings(update_url=url)
 
 
 def test_unknown_key_rejected(tmp_path):

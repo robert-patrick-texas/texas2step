@@ -90,6 +90,41 @@ class Mirror:
             self.routes["/repos/x/texas2step/releases/latest"] = body
 
 
+class FileMirror:
+    """A mirror in a directory, laid out as the install guide's script copies releases."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.base = root.as_uri()  # file:///.../usb%20mirror
+
+    def release(self, version: str, date: str, *, latest=False, deb=DEB, base=None):
+        files = {f"texas2step-{version}-1-amd64.deb": deb, "texas2step-setup": FAKE_SETUP.encode()}
+        (self.root / "download" / f"v{version}").mkdir(parents=True, exist_ok=True)
+        (self.root / "releases" / "tags").mkdir(parents=True, exist_ok=True)
+        assets = []
+        for name, data in files.items():
+            (self.root / "download" / f"v{version}" / name).write_bytes(data)
+            assets.append(
+                {
+                    "name": name,
+                    "browser_download_url": f"{base or self.base}/download/v{version}/{name}",
+                    "digest": digest(DEB if name.endswith(".deb") else data),
+                    "size": len(data),
+                }
+            )
+        data = json.dumps(
+            {
+                "tag_name": f"v{version}",
+                "published_at": f"{date}T12:00:00Z",
+                "html_url": f"https://example.net/releases/v{version}",
+                "assets": assets,
+            }
+        )
+        (self.root / "releases" / "tags" / f"v{version}").write_text(data)
+        if latest:
+            (self.root / "releases" / "latest").write_text(data)
+
+
 @pytest.fixture
 def mirror():
     m = Mirror()
@@ -235,6 +270,64 @@ def test_one_update_at_a_time(mirror, host):
             run(mirror, "--yes")
     finally:
         update.os.close(fd)
+
+
+@pytest.fixture
+def directory(tmp_path):
+    m = FileMirror(tmp_path / "usb mirror")
+    m.release("1.3.0", "2026-11-02", latest=True)
+    m.release("1.1.0", "2026-10-19")
+    return m
+
+
+def test_a_mirror_in_a_directory_updates_as_from_the_web(directory, host, capfd):
+    assert run(directory, "--check") == update.AVAILABLE
+    assert (
+        "texas2step 1.2.0 is installed; 1.3.0 is available (2026-11-02)." in capfd.readouterr().out
+    )
+    assert not update.CACHE.exists()
+
+    assert run(directory, "--auto") == 0  # the update timer
+    folder = update.CACHE / "1.3.0-1"
+    deb, setup = folder / "texas2step-1.3.0-1-amd64.deb", folder / "texas2step-setup"
+    assert deb.read_bytes() == DEB and deb.stat().st_mode & 0o777 == 0o644
+    assert setup.stat().st_mode & 0o777 == 0o755
+    assert host["setup"]() == ["--update", "--out", str(folder)]  # the copy runs
+    assert host.pop("script") == folder / "texas2step-install.sh"
+    out = capfd.readouterr().out
+    assert f"Copying texas2step-1.3.0-1-amd64.deb (0 MB) and texas2step-setup to {folder}/" in out
+    assert "Both match the SHA-256 published with the release." in out
+
+    assert run(directory, "--version", "1.1.0", "--allow-downgrade", "--yes") == 0
+    assert host["script"] == update.CACHE / "1.1.0-1" / "texas2step-install.sh"
+    with pytest.raises(
+        update.UpdateError, match=r"no release v9\.9\.9 at file:///.*/usb%20mirror/"
+    ):
+        run(directory, "--version", "9.9.9")
+
+
+def test_a_mirror_in_a_directory_is_checked_as_from_the_web(directory, host):
+    directory.release("1.3.0", "2026-11-02", latest=True, deb=b"tampered")
+    with pytest.raises(update.UpdateError, match="doesn't match the SHA-256"):
+        run(directory, "--yes")
+    assert list((update.CACHE / "1.3.0-1").iterdir()) == []
+
+    (directory.root / "download/v1.3.0/texas2step-1.3.0-1-amd64.deb").unlink()
+    with pytest.raises(update.UpdateError, match=r"amd64\.deb: No such file or directory"):
+        run(directory, "--yes")
+    assert list((update.CACHE / "1.3.0-1").iterdir()) == []
+
+    # Copied there from a web mirror's tree: its files are on the web server, not here.
+    directory.release("1.3.0", "2026-11-02", latest=True, base="https://mirror.example.net/t2s")
+    with pytest.raises(update.UpdateError, match="names its files with file:/// URLs"):
+        run(directory, "--check")
+    (directory.root / "releases/latest").write_text("[]")
+    with pytest.raises(update.UpdateError, match="didn't give a release"):
+        run(directory, "--check")
+    (directory.root / "releases/latest").unlink()
+    with pytest.raises(update.UpdateError, match=r"no release at file:///.*/releases/latest"):
+        run(directory, "--check")
+    assert "script" not in host
 
 
 def test_releases_without_what_an_update_needs(monkeypatch):

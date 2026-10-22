@@ -484,8 +484,9 @@ def build_parser() -> argparse.ArgumentParser:
         "update",
         help="install a newer release on this server",
         description="Look for a newer texas2step release (at update_url: GitHub, or a "
-        "mirror), download its package and setup tool, check both against the SHA-256 "
-        "published with it, show the setup tool's plan, then run its install script. "
+        "mirror on a web server or in a directory), download its package and setup tool, "
+        "check both against the SHA-256 published with it, show the setup tool's plan, "
+        "then run its install script. "
         "With --from DIR, use a release's package and setup tool already on this server "
         "instead, without downloading. Needs sudo, except with --check.",
     )

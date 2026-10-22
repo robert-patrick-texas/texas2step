@@ -4,7 +4,8 @@ It takes the steps the install guide's Upgrade section has an operator take by h
 
 1. ask the releases API (``update_url``) for the newest release, or for one version;
 2. download its .deb and texas2step-setup to CACHE/<version>/, each checked against the
-   SHA-256 the API publishes for it;
+   SHA-256 the API publishes for it. A mirror in a directory (``file:///...``) has the
+   same layout, read from disk: the files are copied, and checked the same way;
 3. run that release's setup tool with ``--update``. Only it knows its own nginx snippet
    and settings template, so it makes the plan: the package, the settings merge and
    texas2step's own nginx files, nothing else. It writes the plan as text, as
@@ -32,7 +33,8 @@ import shutil
 import ssl
 import subprocess
 import sys
-from collections.abc import Callable
+import urllib.parse
+from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,7 +60,7 @@ class UpdateError(Exception):
 @dataclass
 class Asset:
     name: str
-    url: str  # where it comes from: a download URL, or a path for --from
+    url: str  # where it comes from: a download or file:/// URL, or a path for --from
     sha256: str
     size: int
 
@@ -80,19 +82,30 @@ def release_url(base: str, version: str | None) -> str:
     return f"{base}/releases/tags/v{version.removeprefix('v')}"
 
 
-def _asset(entry: dict, tag: str) -> Asset:
+def _path(url: str) -> Path:
+    """The file a file:/// URL names."""
+    return Path(urllib.parse.unquote(urllib.parse.urlsplit(url).path))
+
+
+def _asset(entry: dict, tag: str, local: bool) -> Asset:
     name = str(entry.get("name") or "")
     algo, _, value = str(entry.get("digest") or "").partition(":")
     if algo != "sha256" or not re.fullmatch(r"[0-9a-f]{64}", value):
         raise UpdateError(f"release {tag}: {name} has no SHA-256 to check it against")
     url = str(entry.get("browser_download_url") or "")
-    if not url.startswith(("https://", "http://")):
+    if not url.startswith(("file:///",) if local else ("https://", "http://")):
+        if url and local:
+            raise UpdateError(
+                f"release {tag}: {name} is at {url}, but a mirror in a directory names "
+                "its files with file:/// URLs"
+            )
         raise UpdateError(f"release {tag}: {name} has no download URL")
     return Asset(name, url, value, int(entry.get("size") or 0))
 
 
-def parse_release(data: dict, arch: str) -> Release:
-    """The parts of a releases API answer (GitHub's shape) that an update needs."""
+def parse_release(data: dict, arch: str, local: bool = False) -> Release:
+    """The parts of a releases API answer (GitHub's shape) that an update needs; ``local``
+    for a mirror in a directory, whose files are on this server."""
     tag = str(data.get("tag_name") or "?")
     assets = [a for a in data.get("assets") or [] if isinstance(a, dict)]
     deb = re.compile(rf"texas2step-([0-9][0-9A-Za-z.+~]*-[0-9A-Za-z.+~]+)-{re.escape(arch)}\.deb")
@@ -109,8 +122,8 @@ def parse_release(data: dict, arch: str) -> Release:
         version=version,
         date=str(data.get("published_at") or "")[:10],
         page=str(data.get("html_url") or ""),
-        deb=_asset(newest, tag),
-        setup=_asset(setup, tag),
+        deb=_asset(newest, tag, local),
+        setup=_asset(setup, tag, local),
     )
 
 
@@ -191,22 +204,32 @@ def client() -> httpx.Client:
 
 def fetch_release(http: httpx.Client, base: str, version: str | None, arch: str) -> Release:
     url = release_url(base, version)
+    missing = f"no release v{version.removeprefix('v')}" if version else "no release"
+    local = url.startswith("file://")  # a mirror in a directory
+    if local:
+        try:
+            body = _path(url).read_bytes()
+        except FileNotFoundError:
+            raise UpdateError(f"{missing} at {url}") from None
+        except OSError as exc:
+            raise UpdateError(f"can't read {url}: {exc.strerror}") from exc
+    else:
+        try:
+            r = http.get(url, headers={"Accept": "application/vnd.github+json"})
+        except httpx.HTTPError as exc:
+            raise UpdateError(f"can't reach {url}: {type(exc).__name__}: {exc}") from exc
+        if r.status_code == 404:
+            raise UpdateError(f"{missing} at {url}")
+        if r.status_code != 200:
+            raise UpdateError(f"{url} answered {r.status_code} {r.reason_phrase}")
+        body = r.content
     try:
-        r = http.get(url, headers={"Accept": "application/vnd.github+json"})
-    except httpx.HTTPError as exc:
-        raise UpdateError(f"can't reach {url}: {type(exc).__name__}: {exc}") from exc
-    if r.status_code == 404:
-        what = f"no release v{version.removeprefix('v')}" if version else "no release"
-        raise UpdateError(f"{what} at {url}")
-    if r.status_code != 200:
-        raise UpdateError(f"{url} answered {r.status_code} {r.reason_phrase}")
-    try:
-        data = r.json()
+        data = json.loads(body)
     except ValueError as exc:
-        raise UpdateError(f"{url} didn't answer with JSON") from exc
+        raise UpdateError(f"{url} didn't give JSON") from exc
     if not isinstance(data, dict):
-        raise UpdateError(f"{url} didn't answer with a release")
-    return parse_release(data, arch)
+        raise UpdateError(f"{url} didn't give a release")
+    return parse_release(data, arch, local)
 
 
 def _sha256(path: Path) -> str:
@@ -217,22 +240,37 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+@contextlib.contextmanager
+def _source(http: httpx.Client, asset: Asset) -> Generator[Iterator[bytes]]:
+    """``asset``'s bytes: downloaded, or read from the file a file:/// URL names."""
+    if asset.url.startswith("file://"):
+        with _path(asset.url).open("rb") as fh:
+            yield iter(lambda: fh.read(1 << 20), b"")
+        return
+    with http.stream("GET", asset.url) as r:
+        if r.status_code != 200:
+            raise UpdateError(f"{asset.url} answered {r.status_code} {r.reason_phrase}")
+        yield r.iter_bytes(1 << 20)
+
+
 def download(http: httpx.Client, asset: Asset, folder: Path, mode: int) -> Path:
-    """``asset`` in ``folder``, checked against its SHA-256; kept from an earlier try."""
+    """``asset`` in ``folder``, checked against its SHA-256 as it is written there, so
+    what runs as root is what was checked; kept from an earlier try."""
     path = folder / asset.name
     if not (path.is_file() and _sha256(path) == asset.sha256):
         part = path.with_name(path.name + ".part")
         digest = hashlib.sha256()
         try:
-            with http.stream("GET", asset.url) as r, part.open("wb") as fh:
-                if r.status_code != 200:
-                    raise UpdateError(f"{asset.url} answered {r.status_code} {r.reason_phrase}")
-                for chunk in r.iter_bytes(1 << 20):
+            with _source(http, asset) as chunks, part.open("wb") as fh:
+                for chunk in chunks:
                     fh.write(chunk)
                     digest.update(chunk)
         except httpx.HTTPError as exc:
             part.unlink(missing_ok=True)
             raise UpdateError(f"downloading {asset.name}: {type(exc).__name__}: {exc}") from exc
+        except OSError as exc:  # a mirror's file, or the cache
+            part.unlink(missing_ok=True)
+            raise UpdateError(f"{asset.name}: {exc.strerror} ({exc.filename})") from exc
         except BaseException:
             part.unlink(missing_ok=True)
             raise
@@ -376,7 +414,8 @@ def _install(
         say(f"The package matches the SHA-256 its {SETUP} was built with.\n")
     else:
         mb = f" ({release.deb.size / 1e6:.0f} MB)" if release.deb.size else ""
-        say(f"Downloading {release.deb.name}{mb} and {SETUP} to {folder}/")
+        verb = "Copying" if release.deb.url.startswith("file://") else "Downloading"
+        say(f"{verb} {release.deb.name}{mb} and {SETUP} to {folder}/")
         download(http, release.deb, folder, 0o644)
         setup = download(http, release.setup, folder, 0o755)
         say("Both match the SHA-256 published with the release.\n")

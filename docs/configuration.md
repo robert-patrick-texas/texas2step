@@ -39,7 +39,7 @@ file up to date with the new version's template and keeps your values; see
 | `cors_origins` | `["*"]` | Origins allowed to call the API from a browser |
 | `trusted_proxies` | `["127.0.0.1", "::1"]` | Peers whose `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Prefix` and `X-Client-Protocol` are believed |
 | `debug` | `false` | Also log every request and the UDP probe's WebRTC detail; see [Logging](#logging) |
-| `update_url` | GitHub's API for the project | Where `texas2step update` looks for releases: GitHub, GitHub Enterprise or a mirror; see [Without access to GitHub](install.md#without-access-to-github) |
+| `update_url` | GitHub's API for the project | Where `texas2step update` looks for releases: GitHub, GitHub Enterprise, or a mirror on a web server or in a directory (`file:///opt/texas2step/mirror`); see [Without access to GitHub](install.md#without-access-to-github) |
 | `brand_name` | `texas2step` | Name in the header and the browser tab |
 | `brand_organization` | `""` | Organization shown beside the name and in the footer |
 | `brand_url` | `""` | The organization's website; the organization name links to it |

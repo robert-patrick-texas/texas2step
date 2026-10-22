@@ -489,7 +489,8 @@ To turn unattended updates off again: `sudo systemctl disable --now texas2step-u
 ### Without access to GitHub
 
 On a closed network, put each release on the server by hand, or keep a mirror that
-`texas2step update` and the update timer can reach.
+`texas2step update` and the update timer can reach: on a web server, or in a directory
+on the server itself.
 
 **From files on the server.** On a machine that can reach GitHub, download the
 release's two files, `texas2step-<version>-1-amd64.deb` and `texas2step-setup`, and
@@ -513,7 +514,7 @@ stops the update with nothing installed. Both are copied to
 is what was checked. The update then goes on as from GitHub: the setup tool's plan, the
 question (or `--yes`) and the install script. The same version is reinstalled; an older
 one needs `--allow-downgrade`. The update timer doesn't use `--from`; for unattended
-updates on a closed network, keep a mirror.
+updates on a closed network, keep a mirror, which can be a directory on the server.
 
 **From GitHub Enterprise or a mirror.** The `update_url` setting tells
 `texas2step update` where to look for releases. For GitHub Enterprise, use its API
@@ -555,6 +556,39 @@ texas2step update --check
 
 The mirror's description carries the SHA-256 values with it, so compare them once with
 those in the release notes on GitHub.
+
+**From a mirror in a directory.** Without a web server, each server can hold the mirror
+itself, in a directory such as `/opt/texas2step/mirror`. Run the script above with
+`file:///opt/texas2step/mirror` in place of `https://mirror.example.net/texas2step`, so
+that the description names each file where it will be on the server. Copy the `mirror/`
+it made to the server, then:
+
+```bash
+sudo mkdir -p /opt/texas2step/mirror
+sudo cp -r mirror/. /opt/texas2step/mirror/
+sudo texas2step config set update_url=file:///opt/texas2step/mirror --write
+texas2step update --check
+```
+
+```text
+texas2step <installed> is installed; <newest> is available (<date>).
+  Release notes: https://github.com/robert-patrick-texas/texas2step/releases/tag/v<newest>
+To install it: sudo texas2step update
+```
+
+`texas2step update` and the update timer then work as with a mirror on a web server,
+except that they copy the two files rather than download them: each is checked against
+the SHA-256 in the description as it is written to
+`/var/cache/texas2step/update/<version>/`, so what runs as root is what was checked. For
+each new release, run the script again in the same place and copy `mirror/` over once
+more: the release is added, `releases/latest` now describes it, and the timer installs it
+on its next run. Earlier releases stay there for `--version`. A mirror made for a web
+server doesn't work from a directory, nor the other way round, since each names its files
+at its own address.
+
+Whoever can write to the mirror decides what `texas2step update` installs as root,
+including the timer's runs with nobody there. Keep it writable only by root, or by an
+account you trust as much, such as one that copies new releases in.
 
 ### With the setup tool, or by hand
 
@@ -607,6 +641,10 @@ sudo apt purge texas2step    # also removes them, and the nginx snippets
 
 Before purging, take the `include snippets/texas2step*.conf;` lines out of your site,
 otherwise `nginx -t` fails once the snippets are gone.
+
+A [mirror in a directory](#without-access-to-github) under `/opt/texas2step` is kept,
+and with it `/opt/texas2step` (dpkg warns that the directory isn't empty). Remove it yourself
+when it's no longer needed: `sudo rm -r /opt/texas2step`.
 
 ## Security notes
 
