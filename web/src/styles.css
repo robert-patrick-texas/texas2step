@@ -1851,13 +1851,18 @@ a.brand-org:hover,
 
 /* Packets */
 
+/* The grid is drawn to its column's width, so neither may widen the column: a canvas
+   starts 300px wide, and on a narrow phone that would hold the card's content wider
+   than the card. */
 .packet-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 
 .packet-canvas {
   display: block;
+  max-width: 100%;
 }
 
 .packet-scale {
