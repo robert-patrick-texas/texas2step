@@ -1,7 +1,8 @@
 // Application shell: routing, theme, server selection and shared settings.
-import { appPath, Endpoint, type Family, routeOf } from "../engine/net";
+import { appPath, Endpoint, type Family, routeOf, whenDenied } from "../engine/net";
 import type { Location, ServerInfo, WhoAmI } from "../types";
 import { $, clear, h, save, setText, store } from "./dom";
+import { admit, forgetPass } from "./gate";
 import { mountSizePicker } from "./size";
 import { mountThemeMenu } from "./theme";
 
@@ -27,6 +28,8 @@ export class App {
   whoami: WhoAmI | null = null;
   locations: Location[] = [];
   selected: Location | null = null;
+  /** Whether this visitor gets the service desk's functions (saved results, share links). */
+  desk = true;
   settings: Settings;
   /** The pages this site shows: all of them unless the server lists fewer. */
   readonly pages = new Set((document.documentElement.dataset.pages ?? "test monitor diag history api").split(" "));
@@ -51,6 +54,14 @@ export class App {
     for (const event of ["resize", "t2s:size"]) window.addEventListener(event, () => this.fitHeader());
     void document.fonts?.ready.then(() => this.fitHeader());
     this.fitHeader();
+    // A server that asks for the desk's code gets it before anything else; when the pass
+    // runs out, the page starts over at the code screen.
+    whenDenied(() => {
+      forgetPass();
+      window.location.reload();
+    });
+    this.desk = (await admit(this.origin))?.desk ?? true;
+    this.fitHeader(); // the tabs are back
     document.addEventListener("click", (ev) => {
       const a = (ev.target as Element).closest<HTMLAnchorElement>("a[data-link]");
       if (!a || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button !== 0) return;

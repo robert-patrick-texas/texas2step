@@ -9,6 +9,11 @@ if [ "$1" = "configure" ]; then
     # Byte-compile once here: the service cannot write into /opt at run time.
     /opt/texas2step/venv/bin/python -m compileall -q -j 0 /opt/texas2step/venv/lib \
         >/dev/null 2>&1 || true
+    # A random access key of this server's own (docs/access.md), unless it has one: the
+    # codes and words an organization uses come from it, so no two installs share them.
+    # Readable by root and the service's group only. It stays put on upgrades.
+    /opt/texas2step/venv/bin/texas2step access key --init \
+        || echo "texas2step: no access key was made; see docs/access.md" >&2
 fi
 
 # Enable and (re)start the service, as dh_installsystemd would.

@@ -11,6 +11,7 @@ Settings are resolved in this order (later wins):
 from __future__ import annotations
 
 import dataclasses
+import ipaddress
 import os
 import tomllib
 import types
@@ -18,6 +19,9 @@ import typing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from .access import INTERVALS
 
 ENV_PREFIX = "TEXAS2STEP_"
 PAGES = ("test", "monitor", "diag", "history", "api")  # the web UI's tabs, in order
@@ -110,6 +114,19 @@ class Settings:
     # server or in a directory (file:///opt/texas2step/mirror).
     update_url: str = "https://api.github.com/repos/robert-patrick-texas/texas2step"
 
+    # Internet-facing servers (docs/access.md). access_code asks visitors from outside
+    # internal_networks for the service desk's code before they can test: "off", or how
+    # often the code changes: "daily", "weekly", "monthly" or "fixed".
+    access_code: str = "off"
+    access_timezone: str = "America/New_York"  # when daily, weekly and monthly codes change
+    access_words: str = ""  # the site's own list, one entry per line; empty: built-in words
+    access_digits: int = 2  # the digits that end a code
+    access_pass_hours: float = 12.0  # how long an entered code lets a browser keep testing
+    access_key_file: str = "/etc/texas2step/access.key"  # the same key on every server
+    # The organization's own networks (addresses or CIDR blocks): no code is asked there,
+    # and only they get saved results, the API explorer and the server-side measurements.
+    internal_networks: list[str] = field(default_factory=list)
+
     # Other servers offered in the location picker (this server is always first).
     locations: list[Location] = field(default_factory=list)
 
@@ -140,6 +157,31 @@ class Settings:
             raise ValueError(f"brand_credit: expected one of {', '.join(CREDITS)}")
         if not self.update_url.startswith(("https://", "http://", "file:///")):
             raise ValueError("update_url: expected an https:// URL, or file:/// and a directory")
+        if self.access_code not in INTERVALS:
+            raise ValueError(f"access_code: expected one of {', '.join(INTERVALS)}")
+        try:
+            ZoneInfo(self.access_timezone)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError(
+                f"access_timezone: {self.access_timezone!r} isn't a time zone, "
+                "e.g. America/New_York or UTC"
+            ) from None
+        if not 2 <= self.access_digits <= 4:
+            raise ValueError("access_digits: expected 2, 3 or 4")
+        if not 1 <= self.access_pass_hours <= 168:
+            raise ValueError("access_pass_hours: expected 1 to 168 hours")
+        for net in self.internal_networks:
+            try:
+                ipaddress.ip_network(net.strip(), strict=False)
+            except ValueError:
+                raise ValueError(
+                    f"internal_networks: {net!r} isn't an address or a network such as 10.0.0.0/8"
+                ) from None
+        if self.internal_networks and not {"test", "monitor", "diag"} & set(self.pages):
+            raise ValueError(
+                "internal_networks: keep page_test, page_monitor or page_diag shown, "
+                "for visitors from outside them"
+            )
         if not self.brand_name.strip():
             raise ValueError("brand_name: must not be empty")
         urls = [("brand_url", self.brand_url)] if self.brand_url else []

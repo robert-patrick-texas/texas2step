@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import itertools
 import json
 import struct
@@ -16,6 +17,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 
@@ -28,6 +30,8 @@ PROBE = struct.Struct("<Id")  # sequence number, sender clock (ms)
 USER_AGENT = f"texas2step-engine/{__version__}"
 
 Progress = Callable[[str, dict[str, Any]], Awaitable[None] | None]
+# An access pass (docs/access.md), sent as ?pass= with every request; see unlock().
+PASS: contextvars.ContextVar[str] = contextvars.ContextVar("texas2step_pass", default="")
 
 
 def _base(url: str) -> str:
@@ -38,7 +42,8 @@ def _base(url: str) -> str:
 
 
 def _ws_url(base: str) -> str:
-    return "ws" + base.removeprefix("http") + f"{API}/ws"
+    url = "ws" + base.removeprefix("http") + f"{API}/ws"
+    return f"{url}?{urlencode({'pass': PASS.get()})}" if PASS.get() else url
 
 
 def server_timing_ms(header: str | None, metric: str = "app") -> float:
@@ -59,7 +64,26 @@ def _client(streams: int = 1, timeout: float = 10.0) -> httpx.AsyncClient:
         timeout=httpx.Timeout(timeout, read=timeout),
         limits=httpx.Limits(max_connections=streams + 2, max_keepalive_connections=streams + 2),
         headers={"user-agent": USER_AGENT},
+        params={"pass": PASS.get()} if PASS.get() else None,
     )
+
+
+async def unlock(target: str, code: str | None) -> str:
+    """A pass for ``code`` from the server at ``target``: "" if it asks for no code.
+    PermissionError if it asks for one and ``code`` is missing or wrong."""
+    url = f"{_base(target)}{API}/access"
+    async with _client() as client:
+        r = await client.get(url)
+        if r.status_code == 404 or not r.json().get("required"):
+            return ""  # a server from before access codes, or one that doesn't ask
+        if not code:
+            raise PermissionError("asks for an access code: add --code, or set TEXAS2STEP_CODE")
+        r = await client.post(url, json={"code": code})
+        if r.status_code != 200:
+            json_body = "json" in r.headers.get("content-type", "")
+            detail = r.json().get("detail") if json_body else None
+            raise PermissionError(detail or f"{r.status_code} {r.reason_phrase}")
+        return r.json()["pass"]
 
 
 async def _emit(progress: Progress | None, phase: str, data: dict[str, Any]) -> None:

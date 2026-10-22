@@ -99,6 +99,8 @@ export class TestView implements View {
   private options!: HTMLElement;
   private run: TestRun | null = null;
   private result: TestResult | null = null;
+  /** Whether the page shows a saved result (/r/<id>) rather than a test from this visit. */
+  private showingSaved = false;
   private off: (() => void) | null = null;
 
   constructor(private readonly app: App) {}
@@ -206,7 +208,10 @@ export class TestView implements View {
 
   private describeEndpoints(): void {
     const { info, whoami } = this.app;
-    const client = this.result?.client;
+    // A saved result's own two ends; otherwise the server the next test goes to, which
+    // may not be the last test's after a switch in the picker.
+    const saved = this.showingSaved ? this.result : null;
+    const client = saved?.client;
     // The address gets a line of its own, so a full IPv6 address fits.
     const line = (el: HTMLElement, text: string) => {
       setText(el, text);
@@ -215,10 +220,11 @@ export class TestView implements View {
     setText(this.link.client.title, "You");
     line(this.link.client.detail, client?.ip ?? whoami?.ip ?? "—");
     line(this.link.client.sub, [client?.family ?? whoami?.family, client?.protocol ?? whoami?.http_version].filter(Boolean).join(" · "));
-    const server = this.result?.server ?? info?.server;
+    const server = saved?.server ?? info?.server;
+    const version = saved?.server.version ?? info?.version;
     setText(this.link.server.title, server?.name ?? "Server");
-    line(this.link.server.detail, server?.location || (info ? "" : "unreachable"));
-    line(this.link.server.sub, info ? `v${info.version}` : "");
+    line(this.link.server.detail, server?.location || (info || saved ? "" : "unreachable"));
+    line(this.link.server.sub, version ? `v${version}` : "");
   }
 
   // ---- Running -------------------------------------------------------------------
@@ -238,6 +244,8 @@ export class TestView implements View {
     if (routeOf(window.location.pathname) !== "/") history.replaceState(null, "", appPath("/"));
     this.banner.hidden = true;
     this.result = null;
+    this.showingSaved = false;
+    this.describeEndpoints();
     this.renderResult(null);
     const { streams, seconds, packets, intervalMs } = app.settings;
     this.packets.reset(packets);
@@ -296,6 +304,7 @@ export class TestView implements View {
     }
     if (!result) return;
     this.result = result;
+    this.describeEndpoints();
     this.renderResult(result);
     setText(this.status, `Done in ${result.duration_s?.toFixed(0)} s.`);
     await this.save(result);
@@ -325,7 +334,9 @@ export class TestView implements View {
     try {
       const saved = await this.app.origin.post<{ id: string }>("/results", result);
       result.id = saved.id;
-      history.replaceState(null, "", appPath(`/r/${saved.id}`));
+      setText(this.status, `${this.status.textContent ?? ""} Saved as ${saved.id}.`.trim());
+      // A visitor without the desk's functions can't open /r/ links; the desk can.
+      if (this.app.desk) history.replaceState(null, "", appPath(`/r/${saved.id}`));
     } catch (err) {
       console.warn("could not save result", err);
     }
@@ -336,6 +347,7 @@ export class TestView implements View {
     try {
       const result = await this.app.origin.json<TestResult>(`/results/${encodeURIComponent(id)}`);
       this.result = result;
+      this.showingSaved = true;
       this.packets.reset(result.loss?.packets.length ?? 0);
       this.renderResult(result);
       this.describeEndpoints();
@@ -499,10 +511,13 @@ export class TestView implements View {
     const copy = h("button", { class: "btn", type: "button" }, "Copy JSON");
     copy.addEventListener("click", () => void navigator.clipboard.writeText(json()).then(() => flash(copy, "Copied")));
     this.actions.append(download, copy);
-    if (r.id) {
+    if (r.id && this.app.desk) {
       const share = h("button", { class: "btn primary", type: "button" }, "Copy share link");
       share.addEventListener("click", () => void navigator.clipboard.writeText(`${window.location.origin}${appPath(`/r/${r.id}`)}`).then(() => flash(share, "Link copied")));
       this.actions.append(share);
+    } else if (r.id) {
+      // Read out over the phone: the desk opens it from History.
+      this.actions.append(h("p", { class: "result-id" }, "Result ID ", h("strong", {}, r.id), " · read it to the service desk"));
     }
   }
 }

@@ -109,7 +109,29 @@ curl -s -X POST https://dallas.example.net/texas2step/api/v1/measure/full \
 |---|---|---|
 | POST | `/api/v1/results` | Store a result object (`"version": 1`, ≤ 2 MB). Returns its summary and `id` |
 | GET | `/api/v1/results?limit=50&before=<epoch>` | Summaries, newest first |
-| GET | `/api/v1/results/{id}` | One result in full; also viewable at `/r/{id}` |
+| GET | `/api/v1/results/{id}` | One result in full; also viewable at `/r/{id}`. Case and separators in the ID don't matter |
+
+## Access codes
+
+On a server with `access_code` on ([Access codes](access.md)), a client from outside
+`internal_networks` sends a pass as `?pass=<pass>` with each request under `/api/v1/`
+(except `/health` and `/access`); without a valid one it gets `401`. The WebSocket takes
+it the same way. With `internal_networks` set, clients from outside them get `404` for
+reading results, `/api/v1/measure/*`, `/api/docs` and `/api/openapi.json`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/access?pass=<pass>` | `{"required", "desk"}`: whether this client needs a pass, and gets the desk's functions; with `pass`, also whether that pass is valid and when it expires |
+| POST | `/api/v1/access` | `{"code": "maple.river.42"}` (any case and separators) returns `{"pass", "expires"}`. A wrong code is `403`; 10 in 10 minutes from one address, `429` |
+| GET | `/api/v1/access/code` | The current code, when it changes, and the previous one while it still works; only from `internal_networks` |
+
+```bash
+pass=$(curl -s -X POST https://speedtest.example.net/texas2step/api/v1/access \
+  -H 'content-type: application/json' -d '{"code": "maple.river.42"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["pass"])')
+curl -s "https://speedtest.example.net/texas2step/api/v1/info?pass=$pass"
+```
+
+The command line does this with `--code`: `texas2step run <url> --code maple.river.42`.
 
 ## Result object
 

@@ -122,15 +122,19 @@ def cmd_serve(args: argparse.Namespace) -> None:
     import uvicorn
 
     from . import logs
+    from .access import Codes
     from .config import load_settings
 
     if args.config:
         os.environ["TEXAS2STEP_CONFIG"] = os.path.abspath(args.config)
-    # Each worker loads the settings again; this read is for logging, set up before them.
+    # Each worker loads the settings again; this read is for logging, set up before them,
+    # and to stop here, with one line, when the access key or word list can't be used.
     try:
-        debug = load_settings().debug
+        settings = load_settings()
+        Codes.load(settings)
     except (OSError, ValueError) as exc:
         sys.exit(f"texas2step: {exc}")
+    debug = settings.debug
     uvicorn.run(
         "texas2step.app:create_app",
         factory=True,
@@ -363,14 +367,148 @@ def cmd_update(args: argparse.Namespace) -> None:
         sys.exit(130)
 
 
+def _access_settings(args: argparse.Namespace) -> Any:
+    from .config import load_settings
+
+    try:
+        # A server without a settings file still has the defaults (or its environment).
+        return load_settings(args.config if os.path.exists(args.config) else None)
+    except (OSError, ValueError) as exc:
+        sys.exit(f"texas2step: {exc}")
+
+
+def _access_codes(settings: Any) -> Any:
+    """The server's codes; while they are off, the daily ones it would give."""
+    from . import access
+
+    interval = settings.access_code if settings.access_code != "off" else "daily"
+    try:
+        return access.Codes.load(settings, interval)
+    except access.AccessError as exc:
+        hint = " (try sudo)" if "Permission denied" in str(exc) else ""
+        sys.exit(f"texas2step: {exc}{hint}")
+
+
+def _when(moment: Any) -> str:
+    from datetime import UTC, datetime
+
+    left = int((moment - datetime.now(UTC)).total_seconds() // 60)
+    days, hours, minutes = left // 1440, left % 1440 // 60, left % 60
+    span = f"{days} d {hours} h" if days else f"{hours} h {minutes} min"
+    return f"{moment:%a %Y-%m-%d %H:%M %Z}, in {span}"
+
+
+def cmd_access_show(args: argparse.Namespace) -> None:
+    from datetime import UTC, datetime
+
+    settings = _access_settings(args)
+    codes = _access_codes(settings)
+    current = codes.current(datetime.now(UTC))
+    this, last = {
+        "daily": ("Today's code", "Yesterday's"),
+        "weekly": ("This week's code", "Last week's"),
+        "monthly": ("This month's code", "Last month's"),
+        "fixed": ("The code", ""),
+    }[codes.interval]
+    if settings.access_code == "off":
+        print('Access codes are off (access_code = "off"). Were they daily, the code would be:')
+    elif codes.interval == "fixed":
+        print("Access codes: fixed. The code changes only with a new key.")
+    else:
+        starts = {"daily": "", "weekly": " on Mondays", "monthly": " on the 1st"}[codes.interval]
+        print(f"Access codes: {codes.interval}, changing at midnight{starts}, {codes.zone_name}.")
+    rows = [
+        (
+            this,
+            current.code
+            + (f"   (until {_when(current.period.end)})" if current.period.end else ""),
+        )
+    ]
+    if current.previous and current.previous_until:
+        rows.append(
+            (last, f"{current.previous}   (still works until {_when(current.previous_until)})")
+        )
+    words = (
+        "from " + settings.access_words if codes.site else "drawn from the built-in list by the key"
+    )
+    rows += [
+        ("Words", f"{len(codes.words)} {words}"),
+        ("Key", settings.access_key_file),
+        ("Fingerprint", f"{codes.fingerprint()}   (the same on servers that give the same codes)"),
+    ]
+    width = max(len(label) for label, _ in rows) + 2
+    for label, value in rows:
+        print(f"{label + ':':<{width}}{value}")
+    if settings.access_code != "off" and not settings.internal_networks:
+        print(
+            "\nNo internal_networks are set, so every visitor needs a code, and anyone with "
+            "one can read saved results. See docs/access.md."
+        )
+
+
+def cmd_access_words(args: argparse.Namespace) -> None:
+    codes = _access_codes(_access_settings(args))
+    print("\n".join(codes.words))
+
+
+def cmd_access_key(args: argparse.Namespace) -> None:
+    from . import access
+
+    path = Path(_access_settings(args).access_key_file)
+    if not (args.new or args.init or args.import_):
+        try:
+            print(path.read_text().strip())
+        except OSError as exc:
+            hint = " (try sudo)" if isinstance(exc, PermissionError) else ""
+            sys.exit(f"texas2step: can't read {path}: {exc.strerror}{hint}")
+        return
+    if args.init and path.exists():
+        return  # the package's postinst: an existing key stays
+    if args.import_:
+        text = sys.stdin.read().strip()
+        try:
+            access.parse_key(text)
+        except access.AccessError as exc:
+            sys.exit(f"texas2step: {exc}")
+    else:
+        text = access.new_key()
+    if path.exists() and not args.yes and not args.import_:
+        if not sys.stdin.isatty():
+            sys.exit("texas2step: there is a key already; add --yes to replace it")
+        answer = input(f"Replace {path}? Codes and passes from the old key stop working. [y/N] ")
+        if answer.strip().lower() not in {"y", "yes"}:
+            sys.exit("Nothing changed.")
+    try:
+        access.write_key(path, text)
+    except OSError as exc:
+        hint = " (try sudo)" if isinstance(exc, PermissionError) else ""
+        sys.exit(f"texas2step: can't write {path}: {exc.strerror}{hint}")
+    if args.new:
+        print(f"Wrote {path}. Copy it to the organization's other servers, then on each:")
+        print("  sudo systemctl restart texas2step")
+    elif args.import_:
+        print(f"Wrote {path}. Then: sudo systemctl restart texas2step")
+
+
 async def _save(target: str, result: dict[str, Any]) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=10) as client:
+    async with engine._client() as client:
         r = await client.post(f"{engine._base(target)}{engine.API}/results", json=result)
         r.raise_for_status()
         return r.json()
 
 
+def _unlock(args: argparse.Namespace) -> None:
+    """Trade --code for a pass, which every request then carries (docs/access.md)."""
+    try:
+        engine.PASS.set(_run(engine.unlock(args.url, args.code)))
+    except PermissionError as exc:
+        sys.exit(f"texas2step: {engine._base(args.url)} {exc}")
+    except ValueError:
+        pass  # not JSON: the test itself says what went wrong
+
+
 def cmd_run(args: argparse.Namespace) -> None:
+    _unlock(args)
     live = _Live(not args.json)
     result = _run(
         engine.run_all(
@@ -396,6 +534,7 @@ def _discrete(
     **kwargs: Any,
 ) -> Callable[[argparse.Namespace], None]:
     def command(args: argparse.Namespace) -> None:
+        _unlock(args)
         live = _Live(not args.json)
         options = {name: getattr(args, attr) for name, attr in kwargs.items()}
         result = _run(func(args.url, progress=live, **options))
@@ -525,9 +664,54 @@ def build_parser() -> argparse.ArgumentParser:
     )
     upd.set_defaults(func=cmd_update)
 
+    acc = sub.add_parser(
+        "access",
+        help="access codes for servers open to the Internet",
+        description="Show the current access code, the words codes are made of, or this "
+        "server's key, which every server of an organization must share (docs/access.md).",
+    )
+    acc_sub = acc.add_subparsers(dest="action", required=True)
+
+    def settings_file(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--config",
+            default=os.environ.get("TEXAS2STEP_CONFIG", "/etc/texas2step/config.toml"),
+            help="settings file (default: %(default)s)",
+        )
+
+    show = acc_sub.add_parser(
+        "show", help="the current code, when it changes, and a fingerprint to compare servers"
+    )
+    settings_file(show)
+    show.set_defaults(func=cmd_access_show)
+    words = acc_sub.add_parser("words", help="the words codes are made of, one per line")
+    settings_file(words)
+    words.set_defaults(func=cmd_access_words)
+    key = acc_sub.add_parser(
+        "key",
+        help="print this server's key, or replace it",
+        description="Print the key (to copy it to another server), make a new one, or "
+        "take one from another server on stdin: "
+        "ssh first sudo texas2step access key | sudo texas2step access key --import",
+    )
+    settings_file(key)
+    what = key.add_mutually_exclusive_group()
+    what.add_argument("--new", action="store_true", help="make a new random key")
+    what.add_argument(
+        "--import", dest="import_", action="store_true", help="take the key from stdin"
+    )
+    what.add_argument("--init", action="store_true", help="make a key only if there is none")
+    key.add_argument("-y", "--yes", action="store_true", help="replace a key without asking")
+    key.set_defaults(func=cmd_access_key)
+
     def target(p: argparse.ArgumentParser) -> None:
         p.add_argument("url", help="base URL of a texas2step server")
         p.add_argument("--json", action="store_true", help="print the raw result as JSON")
+        p.add_argument(
+            "--code",
+            default=os.environ.get("TEXAS2STEP_CODE"),
+            help="the access code, for a server that asks for one (default: $TEXAS2STEP_CODE)",
+        )
 
     def throughput(p: argparse.ArgumentParser) -> None:
         p.add_argument("--seconds", type=float, default=10.0)

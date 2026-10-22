@@ -1,3 +1,3 @@
-from . import measure, meta, results, wire
+from . import access, measure, meta, results, wire
 
-routers = [wire.router, meta.router, measure.router, results.router]
+routers = [wire.router, meta.router, access.router, measure.router, results.router]

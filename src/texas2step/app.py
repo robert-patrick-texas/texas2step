@@ -16,8 +16,10 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.websockets import WebSocketClose
 
 from . import __version__, page
+from .access import Attempts, Codes, is_internal
 from .api import routers
 from .api.meta import client_address, http_version
 from .config import Settings, load_settings
@@ -34,6 +36,7 @@ PREFIX = re.compile(r"(?:/(?!\.\.?(?:/|$))[A-Za-z0-9._~-]+)+")  # no "." or ".."
 # closed before it was accepted gets a 403 from uvicorn.
 RESPONSE_STARTS = ("http.response.start", "websocket.http.response.start")
 WEBSOCKET_STATUS = {"websocket.accept": 101, "websocket.close": 403}
+PASS_PARAM = re.compile(rb"(^|&)pass=[^&]*")
 
 
 class TimingAllowOrigin:
@@ -96,6 +99,60 @@ class ForwardedPrefix:
         return ""
 
 
+class AccessGate:
+    """Asks visitors from outside ``internal_networks`` for an access pass before tests,
+    when ``access_code`` is on, and keeps the service desk's functions to those networks
+    when they are set (docs/access.md). It sits inside CORSMiddleware, so a page on
+    another server can read the refusal. Raw ASGI, like TimingAllowOrigin.
+    """
+
+    PUBLIC = ("/api/v1/health", "/api/v1/access")
+    DESK_PAGES = ("/history", "/api", "/api/docs", "/api/openapi.json", "/api/v1/access/code")
+
+    def __init__(self, app: ASGIApp, settings: Settings) -> None:
+        self.app = app
+        self.settings = settings
+
+    @classmethod
+    def desk_only(cls, method: str, path: str) -> bool:
+        if path in cls.DESK_PAGES or path.startswith(("/r/", "/api/v1/measure/")):
+            return True
+        # Saving a result stays open, so a visitor can save a test for the desk to read.
+        results = path == "/api/v1/results" or path.startswith("/api/v1/results/")
+        return results and method != "POST"
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        codes: Codes | None = scope["app"].state.codes if "app" in scope else None
+        networks = self.settings.internal_networks
+        if scope["type"] not in ("http", "websocket") or (codes is None and not networks):
+            await self.app(scope, receive, send)
+            return
+        conn = HTTPConnection(scope)
+        path, root = scope["path"], scope.get("root_path", "")
+        if root and path.startswith(root):
+            path = path[len(root) :] or "/"
+        ip, _ = client_address(conn)
+        inside = is_internal(ip, networks)
+        if networks and not inside and self.desk_only(scope.get("method", "GET"), path):
+            await self._refuse(scope, receive, send, 404, "Not Found")
+            return
+        needs_pass = (
+            codes and not inside and path.startswith("/api/v1/") and path not in self.PUBLIC
+        )
+        if needs_pass and codes.pass_expires(conn.query_params.get("pass", "")) is None:
+            await self._refuse(scope, receive, send, 401, "access code required")
+            return
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _refuse(scope: Scope, receive: Receive, send: Send, status: int, why: str) -> None:
+        if scope["type"] == "websocket":
+            await WebSocketClose(code=1008, reason=why)(scope, receive, send)
+            return
+        response = JSONResponse({"detail": why}, status, headers={"Cache-Control": "no-store"})
+        await response(scope, receive, send)
+
+
 class RequestLog:
     """Logs one line per request, with the client's address as /api/v1/whoami sees it.
 
@@ -139,7 +196,8 @@ class RequestLog:
         # The raw bytes, escaped: a decoded path could hold a newline and fake a line.
         target = scope.get("raw_path") or scope["path"].encode()
         if scope.get("query_string"):
-            target += b"?" + scope["query_string"]
+            # An access pass would let anyone who reads the journal test until it expires.
+            target += b"?" + PASS_PARAM.sub(rb"\1pass=*", scope["query_string"])
         target = target.decode("ascii", "backslashreplace")
         if scope["type"] == "websocket":
             request = f"WebSocket {target}"
@@ -171,6 +229,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
     app.state.settings = settings
+    app.state.codes = Codes.load(settings)
+    app.state.attempts = Attempts()
     app.state.store = None
     app.state.rtc = RtcEcho(
         settings.ice_servers,
@@ -180,6 +240,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         port_range=settings.rtc_ports,
     )
 
+    app.add_middleware(AccessGate, settings=settings)  # inside CORS: its refusals get CORS headers
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -201,7 +262,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     async def spa(request: Request) -> HTMLResponse:
         # Relative URLs in the page resolve against <base href>, which carries the prefix.
-        body = shell.render(index.read_text(), request.scope.get("root_path", ""), __version__)
+        # Visitors from outside internal_networks don't get the desk's tabs.
+        ip, _ = client_address(request)
+        outside = settings.internal_networks and not is_internal(ip, settings.internal_networks)
+        hide = page.DESK_PAGES if outside else frozenset()
+        root = request.scope.get("root_path", "")
+        body = shell.render(index.read_text(), root, __version__, hide)
         return HTMLResponse(body, headers={"Cache-Control": "no-cache"})
 
     for route in SPA_ROUTES:

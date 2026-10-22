@@ -19,6 +19,23 @@ export function routeOf(pathname: string): string {
   return pathname.startsWith(BASE_PATH) ? pathname.slice(BASE_PATH.length) || "/" : pathname;
 }
 
+/**
+ * The access pass (docs/access.md), sent as ?pass= with every request to every server. A
+ * query parameter, not a header: a header would make the browser send a preflight before
+ * each timed ping and download to another server, and skew the timings.
+ */
+let accessPass = "";
+let denied: (() => void) | null = null;
+
+export function setPass(pass: string): void {
+  accessPass = pass;
+}
+
+/** Called when this app's own server stops taking the pass (it expired). */
+export function whenDenied(fn: () => void): void {
+  denied = fn;
+}
+
 /** An address family the visitor can hold a server to, through its single-family hostname. */
 export type Family = "ipv4" | "ipv6";
 
@@ -40,6 +57,7 @@ export class Endpoint {
   url(path: string, params: Record<string, string | number> = {}): string {
     const url = new URL(this.base + API + path);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+    if (accessPass) url.searchParams.set("pass", accessPass);
     return url.href;
   }
 
@@ -49,6 +67,7 @@ export class Endpoint {
 
   async json<T>(path: string, init: RequestInit = {}): Promise<T> {
     const res = await fetch(this.url(path), { cache: "no-store", ...init });
+    if (res.status === 401 && this.base === new Endpoint("").base) denied?.();
     if (!res.ok) {
       let detail = res.statusText;
       try {

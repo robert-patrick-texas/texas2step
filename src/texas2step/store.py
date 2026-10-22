@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import sqlite3
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+# Result IDs are read out over the phone: lowercase, without 0/o, 1/l/i or u/v.
+ID_LETTERS = "23456789abcdefghjkmnpqrstwxyz"
+
+
+def new_id() -> str:
+    """Such as k7q2-m9xd. IDs from before 1.8.0 (token_urlsafe) still work."""
+    chars = "".join(secrets.choice(ID_LETTERS) for _ in range(8))
+    return f"{chars[:4]}-{chars[4:]}"
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS results (
@@ -102,7 +113,7 @@ class ResultStore:
             self._db.close()
 
     def add(self, result: dict[str, Any], client_ip: str | None) -> dict[str, Any]:
-        rid = secrets.token_urlsafe(6)
+        rid = new_id()
         created = time.time()
         result = {**result, "id": rid, "saved_at": created}
         row = (
@@ -140,6 +151,14 @@ class ResultStore:
             return [dict(r) for r in self._db.execute(sql, args)]
 
     def get(self, rid: str) -> dict[str, Any] | None:
+        """A result by its ID, as given, or as read out over the phone (see new_id)."""
+        ids = [rid]
+        spoken = "".join(re.findall(r"[a-z0-9]", rid.lower()))
+        if len(spoken) == 8:
+            ids.append(f"{spoken[:4]}-{spoken[4:]}")
         with self._lock:
-            row = self._db.execute("SELECT payload FROM results WHERE id = ?", (rid,)).fetchone()
-        return json.loads(row["payload"]) if row else None
+            for one in ids:
+                row = self._db.execute("SELECT payload FROM results WHERE id = ?", (one,))
+                if found := row.fetchone():
+                    return json.loads(found["payload"])
+        return None

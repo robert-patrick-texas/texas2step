@@ -7,17 +7,24 @@ Files: *
 Copyright: 2026 Robert Patrick
 License: Apache-2.0
 
+Files: opt/texas2step/venv/lib/*
+Copyright: The authors of each bundled Python package
+License: various
+ The Python packages bundled under /opt/texas2step/venv carry their own
+ licenses; see each package's *.dist-info directory.
+
 Files: opt/texas2step/venv/lib/python3*/site-packages/texas2step/static/assets/swagger/*
 Copyright: 2020-2021 SmartBear Software Inc.
 License: Apache-2.0
 Comment: Swagger UI (swagger-ui-dist), for the OpenAPI explorer at /api/docs. The
  libraries it bundles are listed in swagger-ui-bundle.js.LICENSE.txt alongside it.
 
-Files: opt/texas2step/venv/lib/*
-Copyright: The authors of each bundled Python package
-License: various
- The Python packages bundled under /opt/texas2step/venv carry their own
- licenses; see each package's *.dist-info directory.
+Files: opt/texas2step/venv/lib/python3*/site-packages/texas2step/words.txt
+Copyright: 2016 Electronic Frontier Foundation
+License: CC-BY-4.0
+Comment: The built-in words for access codes: the EFF's short word list 1
+ (https://www.eff.org/dice), without its dice numbers and twelve words that are
+ hard to tell apart over the phone, as the file's header lists.
 
 License: Apache-2.0
  Licensed under the Apache License, Version 2.0 (the "License"); you may not
@@ -34,3 +41,9 @@ License: Apache-2.0
  .
  On Debian systems, the complete text of the Apache License, Version 2.0 can
  be found in "/usr/share/common-licenses/Apache-2.0".
+
+License: CC-BY-4.0
+ Creative Commons Attribution 4.0 International. You may share and adapt the
+ material for any purpose, if you give appropriate credit, provide a link to the
+ license, and indicate if changes were made. The full license is at
+ https://creativecommons.org/licenses/by/4.0/legalcode

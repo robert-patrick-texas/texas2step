@@ -57,6 +57,16 @@ results_path = "/var/lib/texas2step/results.db"
 # update_url = "https://api.github.com/repos/robert-patrick-texas/texas2step"
 # Unattended updates are off until you turn on their timer: docs/install.md (Upgrade).
 
+# --- Access codes, for servers open to the Internet (docs/access.md) -----------------------
+# access_code = "off"                   # or how often the code changes: daily, weekly, monthly, fixed
+# access_timezone = "America/New_York"  # when daily, weekly and monthly codes change
+# access_words = ""                     # your own list, e.g. "/etc/texas2step/access-words.txt"
+# access_digits = 2                     # digits at the end of a code: 2, 3 or 4
+# access_pass_hours = 12.0              # how long an entered code lets a browser keep testing
+# access_key_file = "/etc/texas2step/access.key"  # copy the same key to every server
+# internal_networks = []                # e.g. ["10.0.0.0/8", "198.51.100.0/24"]: no code, and
+#                                       # only they see History, the API tab and saved results
+
 # --- Branding and themes -------------------------------------------------------------------
 # brand_name = "texas2step"             # header and browser tab
 # brand_organization = ""               # shown beside the name and in the footer

@@ -141,3 +141,20 @@ export interface ResultSummary {
   jitter_ms: number | null;
   loss_pct: number | null;
 }
+
+/** GET /api/v1/access: whether this visitor needs a code, and gets the desk's functions. */
+export interface AccessStatus {
+  required: boolean;
+  desk: boolean;
+  pass?: { valid: boolean; expires: number | null };
+}
+
+/** GET /api/v1/access/code, for the service desk. */
+export interface AccessCode {
+  code: string;
+  interval: string;
+  timezone: string;
+  changes_at: string | null;
+  previous: string | null;
+  previous_until: string | null;
+}

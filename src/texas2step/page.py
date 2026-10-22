@@ -54,6 +54,10 @@ def logo_file(settings: Settings) -> Path | None:
     return None
 
 
+# The service desk's pages: with internal_networks set, only those networks get them.
+DESK_PAGES = frozenset({"history", "api"})
+
+
 class Shell:
     """Renders the page for this site. The site-wide parts are worked out once."""
 
@@ -61,8 +65,12 @@ class Shell:
         self.settings = settings
         self.logo_version = hashlib.sha256(logo.read_bytes()).hexdigest()[:10] if logo else None
 
-    def render(self, template: str, root_path: str, version: str) -> str:
+    def render(
+        self, template: str, root_path: str, version: str, hide: frozenset[str] = frozenset()
+    ) -> str:
+        """The page, without the tabs of ``hide`` (the desk's, for visitors from outside)."""
         s = self.settings
+        pages = [p for p in s.pages if p not in hide]
         page = template.replace('<base href="/" />', f'<base href="{escape(root_path)}/" />', 1)
         page = page.replace(
             '<meta name="texas2step-version" content="" />',
@@ -72,10 +80,10 @@ class Shell:
         root = ['lang="en"']
         if s.default_theme != "system":
             root.append(f'data-default-theme="{s.default_theme}"')
-        if s.pages != list(PAGES):
+        if pages != list(PAGES):
             # The tabs of hidden pages go, and the UI is told which pages it has.
-            root.append(f'data-pages="{" ".join(s.pages)}"')
-            for hidden in set(PAGES) - set(s.pages):
+            root.append(f'data-pages="{" ".join(pages)}"')
+            for hidden in set(PAGES) - set(pages):
                 page = re.sub(rf'\s*<a [^>]*data-page="{hidden}"[^>]*>[^<]*</a>', "", page, count=1)
         page = page.replace('<html lang="en">', f"<html {' '.join(root)}>", 1)
         # The footer's "texas2step <version>": a link to the project, plain text, or gone.

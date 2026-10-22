@@ -1,6 +1,6 @@
 // Saved results on this server: a trend chart and a table that links to each run.
 import { appPath } from "../../engine/net";
-import type { ResultSummary } from "../../types";
+import type { AccessCode, ResultSummary } from "../../types";
 import type { App, View } from "../app";
 import { axisX, gridY, legend, linear, linePath } from "../charts/common";
 import { clear, h, onResize, pointerIn, s } from "../dom";
@@ -12,11 +12,41 @@ export class HistoryView implements View {
 
   mount(root: HTMLElement): void {
     const body = h("div", {}, h("p", { class: "status" }, "Loading…"));
+    const desk = h("div", { class: "desk-tools" });
     root.append(
-      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "History"), h("p", { class: "lede" }, "Tests saved on this server, newest first. Browser runs save automatically; use texas2step run --save from the CLI."))),
+      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "History"), h("p", { class: "lede" }, "Tests saved on this server, newest first. Browser runs save automatically; use texas2step run --save from the CLI.")), desk),
       body,
     );
+    if (this.app.pages.has("test")) desk.append(this.opener());
+    void this.code(desk);
     void this.load(body);
+  }
+
+  /** Opens a result by the ID a caller reads out; case and spaces don't matter. */
+  private opener(): HTMLFormElement {
+    const input = h("input", { class: "code-input small", type: "text", placeholder: "Result ID", "aria-label": "Result ID", autocomplete: "off", autocapitalize: "none", spellcheck: "false", required: true });
+    const form = h("form", { class: "desk-open" }, input, h("button", { class: "btn small", type: "submit" }, "Open"));
+    form.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const id = input.value.trim().replace(/\s+/g, "");
+      if (id) this.app.navigate(`/r/${encodeURIComponent(id)}`);
+    });
+    return form;
+  }
+
+  /** The visitors' access code, where this server asks for one (docs/access.md). */
+  private async code(desk: HTMLElement): Promise<void> {
+    let code: AccessCode;
+    try {
+      code = await this.app.origin.json<AccessCode>("/access/code");
+    } catch {
+      return; // no access codes here, or not for this client
+    }
+    const at = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: code.timezone, timeZoneName: "short" });
+    const changes = code.changes_at ? `changes ${at(code.changes_at)}` : "fixed";
+    const until = code.previous_until === code.changes_at ? "then" : at(code.previous_until ?? "");
+    const before = code.previous && code.previous_until ? ` · ${code.previous} still works until ${until}` : "";
+    desk.prepend(h("p", { class: "desk-code", title: `The code visitors enter (${code.interval}, ${code.timezone})` }, "Access code ", h("strong", {}, code.code), h("span", { class: "cell-sub" }, ` ${changes}${before}`)));
   }
 
   private async load(body: HTMLElement): Promise<void> {

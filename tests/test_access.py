@@ -1,0 +1,510 @@
+"""Access codes, passes, and the desk's functions kept to internal networks."""
+
+import io
+import logging
+import re
+import stat
+import sys
+import threading
+import time
+from datetime import UTC, datetime, timedelta
+
+import pytest
+import uvicorn
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from texas2step import access, cli, engine
+from texas2step.access import Attempts, Codes, is_internal, normalize
+from texas2step.app import create_app
+from texas2step.config import Settings
+from texas2step.store import ID_LETTERS, ResultStore, new_id
+
+KEY = access.parse_key(access.new_key())
+OUTSIDE = {"X-Forwarded-For": "203.0.113.9"}
+INSIDE = {"X-Forwarded-For": "10.1.2.3"}
+NYC = "America/New_York"
+
+
+def codes(interval="daily", words=None, digits=2, key=KEY, zone=NYC) -> Codes:
+    site = words is not None
+    return Codes(key, interval, zone, digits, words or access.drawn_words(key), site, 12)
+
+
+def site_list(n=120) -> list[str]:
+    return [f"place{i}" for i in range(n)]
+
+
+# --- Words and keys ----------------------------------------------------------------
+
+
+def test_normalize_takes_any_case_and_separator():
+    assert normalize("Maple River 42") == "maple.river.42"
+    assert normalize("  fort-bragg_68 ") == "fort.bragg.68"
+    assert normalize("austin...42") == "austin.42"
+    assert normalize("") == ""
+
+
+def test_built_in_words_leave_out_the_confusing_ones():
+    words = access.builtin_words()
+    assert len(words) == 1284 == len(set(words))
+    assert all(re.fullmatch(r"[a-z]{3,5}", w) for w in words)
+    for gone in ("whole", "chili", "size", "rack", "sweat", "five", "seven", "zero", "dot"):
+        assert gone not in words
+
+
+def test_each_key_draws_its_own_words():
+    drawn = access.drawn_words(KEY)
+    assert len(drawn) == access.DRAW == len(set(drawn)) and drawn == sorted(drawn)
+    assert set(drawn) <= set(access.builtin_words())
+    assert access.drawn_words(KEY) == drawn  # the same key, the same draw, on every server
+    other = access.drawn_words(access.parse_key(access.new_key()))
+    assert len(set(drawn) & set(other)) < 300  # about 40 % in common, by chance
+
+
+def test_keys(tmp_path):
+    text = access.new_key()
+    assert len(access.parse_key(text)) == 32
+    for junk in ("", "short", text + "AA", text[:-1] + "!"):
+        with pytest.raises(access.AccessError, match="not an access key"):
+            access.parse_key(junk)
+    path = tmp_path / "access.key"
+    with pytest.raises(access.AccessError, match=r"missing; make one with: sudo texas2step"):
+        access.read_key(path)
+    access.write_key(path, text)
+    assert access.read_key(path) == access.parse_key(text)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+
+
+def test_a_site_list_is_normalized_and_checked(tmp_path):
+    path = tmp_path / "words.txt"
+    lines = ["# our places", "Fort Bragg", "  los-alamos ", "", *site_list(98)]
+    path.write_text("\n".join(lines) + "\n")
+    words = access.site_words(path)
+    assert words[:2] == ["fort.bragg", "los.alamos"] and len(words) == 100
+
+    for bad, said in (
+        ("Zürich", "has letters outside ASCII"),
+        ("42", "has no letters"),
+        ("a" * 41, "is over 40 characters"),
+        ("fort-bragg", "'fort.bragg' repeats line 2"),
+    ):
+        path.write_text("\n".join([*lines, bad]) + "\n")
+        with pytest.raises(access.AccessError, match=re.escape(said)):
+            access.site_words(path)
+    path.write_text("\n".join(site_list(99)) + "\n")
+    with pytest.raises(access.AccessError, match="has 99 entries; a list needs at least 100"):
+        access.site_words(path)
+
+
+# --- Codes -------------------------------------------------------------------------
+
+
+def test_built_in_codes_are_two_words_and_digits():
+    c = codes()
+    now = datetime(2026, 10, 22, 15, tzinfo=UTC)
+    code = c.current(now).code
+    first, second, digits = code.split(".")
+    assert first in c.words and second in c.words and first != second
+    assert re.fullmatch(r"\d\d", digits)
+    assert codes().current(now).code == code  # every server with the key agrees
+    assert codes(key=access.parse_key(access.new_key())).current(now).code != code
+    assert re.fullmatch(r"[a-z]+\.[a-z]+\.\d{4}", codes(digits=4).current(now).code)
+
+
+def test_site_codes_are_one_entry_and_digits():
+    words = ["fort.bragg", *site_list()]
+    c = codes(words=words)
+    entry, _, digits = c.current(datetime(2026, 10, 22, tzinfo=UTC)).code.rpartition(".")
+    assert entry in words and re.fullmatch(r"\d\d", digits)
+
+
+def test_periods_follow_the_organizations_time_zone():
+    late = datetime(2026, 10, 22, 3, 30, tzinfo=UTC)  # 23:30 on the 21st in New York
+    day = codes().period(late)
+    assert day.id == "2026-10-21"
+    assert day.end == datetime(2026, 10, 22, tzinfo=day.end.tzinfo)
+    assert codes(zone="UTC").period(late).id == "2026-10-22"
+    week = codes("weekly").period(late)
+    assert (week.id, week.start.weekday()) == ("2026-W43", 0)  # Monday 2026-10-19
+    month = codes("monthly").period(late)
+    assert month.id == "2026-10" and month.end.month == 11
+    assert codes("fixed").period(late) == access.Period("fixed", None, None)
+    assert codes("fixed").current(late).code == codes("fixed").current(late + timedelta(400)).code
+
+
+def test_the_previous_code_works_for_a_day():
+    c = codes()
+    start = c.period(datetime(2026, 10, 22, 12, tzinfo=UTC)).start
+    yesterday = c.current(start - timedelta(hours=1)).code
+    today = c.current(start + timedelta(hours=1))
+    assert today.previous == yesterday and today.code != yesterday
+    assert c.check(yesterday, start + timedelta(hours=23))
+    assert not c.check(yesterday, start + timedelta(hours=25))
+    # A day later, today's code is the one still working for a day.
+    assert c.current(start + timedelta(hours=25)).previous == today.code
+    assert c.check(today.code, start + timedelta(hours=25))
+    # A weekly code: last week's works on Monday, not on Wednesday.
+    w = codes("weekly")
+    monday = w.period(start).start
+    assert w.current(monday + timedelta(hours=12)).previous
+    assert w.current(monday + timedelta(days=2)).previous is None
+
+
+def test_a_typed_code_counts_with_any_case_and_separators():
+    c = codes()
+    now = datetime(2026, 10, 22, 12, tzinfo=UTC)
+    first, second, digits = c.current(now).code.split(".")
+    for typed in (
+        f"{first}.{second}.{digits}",
+        f"{first.upper()} {second.title()} {digits}",
+        f"{first}-{second}-{digits}",
+        f" {first}, {second}: {digits} ",
+        f"{first}.{second}.{int(digits)}",  # "7" for "07"
+    ):
+        assert c.check(typed, now), typed
+    assert not c.check(f"{second}.{first}.{digits}", now)
+    assert not c.check(f"{first}.{second}.{(int(digits) + 1) % 100:02d}", now)
+    assert not c.check("", now)
+
+
+def test_the_fingerprint_changes_with_anything_that_changes_codes():
+    print_ = codes().fingerprint()
+    assert re.fullmatch(r"[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}", print_)
+    assert codes().fingerprint() == print_
+    for other in (
+        codes("weekly"),
+        codes(zone="UTC"),
+        codes(digits=3),
+        codes(words=site_list()),
+        codes(key=access.parse_key(access.new_key())),
+    ):
+        assert other.fingerprint() != print_
+
+
+def test_passes():
+    c = codes()
+    token, expires = c.issue(now=1_000_000)
+    assert expires == 1_000_000 + 12 * 3600
+    assert c.pass_expires(token, now=1_000_100) == expires
+    assert c.pass_expires(token, now=expires) is None  # expired
+    stamp, _, sig = token.partition(".")
+    assert c.pass_expires(f"{int(stamp) + 60}.{sig}", now=1_000_100) is None  # altered
+    assert codes(key=access.parse_key(access.new_key())).pass_expires(token, 1_000_100) is None
+    long = Codes(KEY, "daily", NYC, 2, c.words, False, 48).issue(now=1_000_000)[0]
+    assert c.pass_expires(long, now=1_000_100) is None  # longer than this server's passes
+    for junk in ("", "abc", "1.2.3", f"{'9' * 20}.{sig}"):
+        assert c.pass_expires(junk, now=1_000_100) is None
+
+
+def test_who_is_internal():
+    nets = ["10.0.0.0/8", "2001:db8::/32", "198.51.100.7"]
+    assert is_internal("127.0.0.1", []) and is_internal("::1", [])
+    assert is_internal("10.200.1.1", nets) and is_internal("::ffff:10.0.0.1", nets)
+    assert is_internal("2001:db8::5", nets) and is_internal("198.51.100.7", nets)
+    assert not is_internal("198.51.100.8", nets) and not is_internal("203.0.113.9", nets)
+    assert not is_internal("unknown", nets)
+
+
+def test_wrong_codes_are_counted_per_address():
+    tries = Attempts(limit=3, window=60)
+    for t in range(3):
+        assert not tries.blocked("a", now=t)
+        tries.failed("a", now=t)
+    assert tries.blocked("a", now=10) and not tries.blocked("b", now=10)
+    assert not tries.blocked("a", now=61)  # the oldest fell out of the window
+
+
+# --- The server --------------------------------------------------------------------
+
+
+@pytest.fixture
+def key_file(tmp_path):
+    path = tmp_path / "access.key"
+    access.write_key(path, access.new_key())
+    return path
+
+
+def gated(tmp_path, key_file, **kw) -> TestClient:
+    settings = Settings(
+        results_path=str(tmp_path / "r.db"),
+        trusted_proxies=["testclient"],  # so X-Forwarded-For names the visitor
+        access_key_file=str(key_file),
+        **({"access_code": "daily"} | kw),
+    )
+    return TestClient(create_app(settings))
+
+
+def unlock(c: TestClient, headers=OUTSIDE) -> str:
+    code = c.app.state.codes.current(datetime.now(UTC)).code
+    r = c.post("/api/v1/access", json={"code": code.upper().replace(".", " ")}, headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()["pass"]
+
+
+def test_visitors_need_a_pass_for_tests(tmp_path, key_file, caplog):
+    with gated(tmp_path, key_file) as c:
+        assert c.get("/api/v1/access", headers=OUTSIDE).json() == {"required": True, "desk": True}
+        for open_path in ("/", "/monitor", "/api/v1/health", "/favicon.svg"):
+            assert c.get(open_path, headers=OUTSIDE).status_code == 200, open_path
+        for path in ("/api/v1/info", "/api/v1/locations", "/api/v1/ping", "/api/v1/whoami"):
+            assert c.get(path, headers=OUTSIDE).status_code == 401, path
+        r = c.get("/api/v1/ping", headers=OUTSIDE | {"Origin": "https://other.example"})
+        assert r.status_code == 401 and r.headers["access-control-allow-origin"] == "*"
+        assert c.post("/api/v1/up", content=b"x", headers=OUTSIDE).status_code == 401
+        with pytest.raises(WebSocketDisconnect), c.websocket_connect("/api/v1/ws", headers=OUTSIDE):
+            pass
+
+        with caplog.at_level(logging.WARNING):
+            r = c.post("/api/v1/access", json={"code": "wrong.words.00"}, headers=OUTSIDE)
+        assert r.status_code == 403 and "wrong access code from 203.0.113.9" in caplog.text
+
+        token = unlock(c)
+        assert c.get("/api/v1/info", params={"pass": token}, headers=OUTSIDE).status_code == 200
+        r = c.get("/api/v1/access", params={"pass": token}, headers=OUTSIDE).json()
+        assert r["pass"]["valid"] and r["pass"]["expires"] > time.time()
+        with c.websocket_connect(f"/api/v1/ws?pass={token}", headers=OUTSIDE) as ws:
+            ws.send_bytes(b"\x01")
+            assert ws.receive_bytes() == b"\x01"
+        # The same key on another server: the pass works there too.
+        with gated(tmp_path, key_file) as other:
+            assert (
+                other.get("/api/v1/ping", params={"pass": token}, headers=OUTSIDE).status_code
+                == 200
+            )
+
+
+def test_loopback_and_internal_networks_need_no_code(tmp_path, key_file):
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        assert c.get("/api/v1/access", headers=INSIDE).json() == {"required": False, "desk": True}
+        assert c.get("/api/v1/info", headers=INSIDE).status_code == 200
+        assert c.get("/api/v1/info", headers={"X-Forwarded-For": "127.0.0.1"}).status_code == 200
+        assert c.get("/api/v1/info", headers=OUTSIDE).status_code == 401
+
+
+def test_wrong_codes_lock_an_address_out_for_a_while(tmp_path, key_file):
+    with gated(tmp_path, key_file) as c:
+        for _ in range(10):
+            r = c.post("/api/v1/access", json={"code": "no"}, headers=OUTSIDE)
+            assert r.status_code == 403
+        r = c.post("/api/v1/access", json={"code": "no"}, headers=OUTSIDE)
+        assert r.status_code == 429
+        assert c.post("/api/v1/access", json={"code": "no"}, headers=INSIDE).status_code == 403
+
+
+def test_the_desk_reads_the_code(tmp_path, key_file):
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        r = c.get("/api/v1/access/code", headers=INSIDE)
+        body = r.json()
+        assert (
+            r.status_code == 200
+            and body["code"] == c.app.state.codes.current(datetime.now(UTC)).code
+        )
+        assert body["interval"] == "daily" and body["timezone"] == NYC and body["changes_at"]
+        assert c.get("/api/v1/access/code", headers=OUTSIDE).status_code == 404
+    with gated(tmp_path, key_file) as c:  # without internal networks, only the CLI shows it
+        assert (
+            c.get("/api/v1/access/code", headers={"X-Forwarded-For": "127.0.0.1"}).status_code
+            == 404
+        )
+
+
+def test_desk_functions_stay_on_internal_networks(tmp_path, key_file):
+    with gated(tmp_path, key_file, access_code="off", internal_networks=["10.0.0.0/8"]) as c:
+        result = {"version": 1, "server": {"id": "x"}, "download": {"mbps": 1.0}}
+        saved = c.post("/api/v1/results", json=result, headers=OUTSIDE)
+        assert saved.status_code == 201  # a visitor saves a test for the desk to read
+        rid = saved.json()["id"]
+        for path in (
+            "/api/v1/results",
+            f"/api/v1/results/{rid}",
+            f"/r/{rid}",
+            "/history",
+            "/api",
+            "/api/docs",
+            "/api/openapi.json",
+        ):
+            assert c.get(path, headers=OUTSIDE).status_code == 404, path
+            assert c.get(path, headers=INSIDE).status_code == 200, path
+        r = c.post("/api/v1/measure/latency", json={"target": "x"}, headers=OUTSIDE)
+        assert r.status_code == 404
+        assert c.get("/api/v1/access", headers=OUTSIDE).json() == {"required": False, "desk": False}
+
+        page = c.get("/", headers=OUTSIDE).text
+        assert 'data-pages="test monitor diag"' in page
+        assert 'data-page="history"' not in page and 'data-page="api"' not in page
+        page = c.get("/", headers=INSIDE).text
+        assert "data-pages=" not in page and 'data-page="history"' in page
+
+        # Behind nginx at a path, the same.
+        prefix = OUTSIDE | {"X-Forwarded-Prefix": "/speedtest"}
+        assert c.get("/speedtest/api/v1/results", headers=prefix).status_code == 404
+        assert (
+            c.get(
+                "/api/v1/results", headers=INSIDE | {"X-Forwarded-Prefix": "/speedtest"}
+            ).status_code
+            == 200
+        )
+
+
+def test_the_journal_never_shows_a_pass(tmp_path, key_file, caplog):
+    with gated(tmp_path, key_file) as c, caplog.at_level(logging.WARNING, "texas2step.access"):
+        c.get("/api/v1/ping", params={"r": "1", "pass": "123.secret"}, headers=OUTSIDE)
+    assert "secret" not in caplog.text and "/api/v1/ping?r=1&pass=* " in caplog.text
+
+
+def test_access_settings_that_cant_work(tmp_path):
+    with pytest.raises(ValueError, match=r"access\.key is missing"):
+        create_app(Settings(access_code="daily", access_key_file=str(tmp_path / "access.key")))
+    for kw, said in (
+        ({"access_code": "hourly"}, "access_code: expected one of"),
+        ({"access_timezone": "Mars/Base"}, "isn't a time zone"),
+        ({"access_digits": 1}, "access_digits"),
+        ({"access_pass_hours": 0}, "access_pass_hours"),
+        ({"internal_networks": ["10.0.0.0/33"]}, "isn't an address or a network"),
+        (
+            {
+                "internal_networks": ["10.0.0.0/8"],
+                "page_test": False,
+                "page_monitor": False,
+                "page_diag": False,
+            },
+            "keep page_test, page_monitor or page_diag shown",
+        ),
+    ):
+        with pytest.raises(ValueError, match=said):
+            Settings(**kw)
+
+
+# --- Result IDs --------------------------------------------------------------------
+
+
+def test_result_ids_read_well_over_the_phone(tmp_path):
+    rid = new_id()
+    assert re.fullmatch(f"[{ID_LETTERS}]{{4}}-[{ID_LETTERS}]{{4}}", rid)
+    store = ResultStore(str(tmp_path / "r.db"), 100)
+    saved = store.add({"version": 1}, "203.0.113.9")["id"]
+    for said in (saved, saved.upper(), saved.replace("-", ""), saved.replace("-", " ")):
+        assert store.get(said)["id"] == saved
+    # An ID from before: as it was.
+    store._db.execute(
+        "UPDATE results SET id = 'aB3_x-9Q', payload = json_set(payload, '$.id', 'aB3_x-9Q')"
+    )
+    assert store.get("aB3_x-9Q")["id"] == "aB3_x-9Q" and store.get("ab3x9q") is None
+    store.close()
+
+
+# --- The command line --------------------------------------------------------------
+
+
+def config_file(tmp_path, key_file, **kw) -> str:
+    path = tmp_path / "config.toml"
+    lines = [f'access_key_file = "{key_file}"', *(f"{k} = {v!r}" for k, v in kw.items())]
+    path.write_text("\n".join(lines).replace("'", '"') + "\n")
+    return str(path)
+
+
+def test_access_key_commands(tmp_path, monkeypatch, capsys):
+    key_file = tmp_path / "access.key"
+    conf = config_file(tmp_path, key_file)
+    cli.main(["access", "key", "--init", "--config", conf])
+    first = key_file.read_text().strip()
+    cli.main(["access", "key", "--init", "--config", conf])  # an existing key stays
+    assert key_file.read_text().strip() == first
+    capsys.readouterr()
+    cli.main(["access", "key", "--config", conf])
+    assert capsys.readouterr().out.strip() == first
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))  # no terminal to ask on
+    with pytest.raises(SystemExit, match="there is a key already; add --yes"):
+        cli.main(["access", "key", "--new", "--config", conf])
+    cli.main(["access", "key", "--new", "--yes", "--config", conf])
+    assert key_file.read_text().strip() != first
+    assert "Copy it to the organization's other servers" in capsys.readouterr().out
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(first + "\n"))
+    cli.main(["access", "key", "--import", "--config", conf])
+    assert key_file.read_text().strip() == first
+    monkeypatch.setattr(sys, "stdin", io.StringIO("not a key"))
+    with pytest.raises(SystemExit, match="not an access key"):
+        cli.main(["access", "key", "--import", "--config", conf])
+
+
+def test_access_show_and_words(tmp_path, key_file, capsys):
+    conf = config_file(tmp_path, key_file, access_code="weekly")
+    cli.main(["access", "show", "--config", conf])
+    out = capsys.readouterr().out
+    assert "Access codes: weekly, changing at midnight on Mondays, America/New_York." in out
+    code = re.search(r"This week's code: +(\S+)", out)[1]
+    assert re.fullmatch(r"[a-z]+\.[a-z]+\.\d\d", code)
+    assert "512 drawn from the built-in list by the key" in out
+    assert re.search(r"Fingerprint: +[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}", out)
+    assert "No internal_networks are set" in out
+    cli.main(["access", "words", "--config", conf])
+    assert capsys.readouterr().out.split() == access.drawn_words(access.read_key(key_file))
+
+    cli.main(["access", "show", "--config", config_file(tmp_path, key_file)])
+    assert 'Access codes are off (access_code = "off")' in capsys.readouterr().out
+
+
+@pytest.fixture
+def gated_server(tmp_path, key_file):
+    """A real server that asks for a code, on loopback but taking X-Forwarded-For from
+    itself, so the CLI's requests (with a forged visitor address) count as outside."""
+    settings = Settings(
+        results_path=str(tmp_path / "r.db"),
+        access_code="daily",
+        access_key_file=str(key_file),
+        internal_networks=["10.0.0.0/8"],
+        trusted_proxies=[],  # loopback stays loopback: the test marks itself outside below
+    )
+    app = create_app(settings)
+    sock_port = _port()
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=sock_port, log_level="warning")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    while not server.started:
+        time.sleep(0.05)
+    yield f"http://127.0.0.1:{sock_port}", app
+    server.should_exit = True
+    thread.join(timeout=10)
+
+
+def _port() -> int:
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_the_cli_trades_its_code_for_a_pass(gated_server, monkeypatch, capsys):
+    url, app = gated_server
+    # Loopback is internal, so for this test treat it as outside.
+    monkeypatch.setattr("texas2step.app.is_internal", lambda ip, nets: False)
+    monkeypatch.setattr("texas2step.api.access.is_internal", lambda ip, nets: False)
+    with pytest.raises(SystemExit, match="asks for an access code: add --code"):
+        cli.main(["latency", url, "--count", "2"])
+    with pytest.raises(SystemExit, match="that isn't the current access code"):
+        cli.main(["latency", url, "--count", "2", "--code", "wrong.code.00"])
+    code = app.state.codes.current(datetime.now(UTC)).code
+    token = engine.PASS.set("")
+    try:
+        cli.main(
+            [
+                "download",
+                url,
+                "--seconds",
+                "0.5",
+                "--streams",
+                "1",
+                "--code",
+                code.replace(".", " "),
+            ]
+        )
+        assert "Download" in capsys.readouterr().out
+        assert engine.PASS.get()  # every request after the code carried the pass
+    finally:
+        engine.PASS.reset(token)

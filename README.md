@@ -130,11 +130,14 @@ Full reference: [docs/api.md](docs/api.md), or `/api/docs` on a running server.
 List other texas2step servers in the config and they appear in the header's server
 picker. The browser tests the chosen server directly (cross-origin), and each server can
 measure the others through the API. See [docs/configuration.md](docs/configuration.md).
+For servers open to the Internet, see [Access codes](docs/access.md).
 
 ## Documentation
 
 * [Install](docs/install.md): the Ubuntu package, nginx, firewall, upgrades.
 * [Configuration](docs/configuration.md): every setting.
+* [Access codes](docs/access.md): servers open to the Internet, a code from the service
+  desk, and the desk's tools kept to your networks.
 * [Methodology](docs/methodology.md): what is measured, and how.
 * [API](docs/api.md): endpoints and the UDP probe protocol.
 * [Development](docs/development.md): running from source, tests, docs site, packaging,

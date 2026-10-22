@@ -40,6 +40,13 @@ file up to date with the new version's template and keeps your values; see
 | `trusted_proxies` | `["127.0.0.1", "::1"]` | Peers whose `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Prefix` and `X-Client-Protocol` are believed |
 | `debug` | `false` | Also log every request and the UDP probe's WebRTC detail; see [Logging](#logging) |
 | `update_url` | GitHub's API for the project | Where `texas2step update` looks for releases: GitHub, GitHub Enterprise, or a mirror on a web server or in a directory (`file:///opt/texas2step/mirror`); see [Without access to GitHub](install.md#without-access-to-github) |
+| `access_code` | `off` | Ask visitors from outside `internal_networks` for the service desk's code before they test: how often it changes, `daily`, `weekly`, `monthly` or `fixed`; see [Access codes](access.md) |
+| `access_timezone` | `America/New_York` | The time zone whose midnight starts a new code |
+| `access_words` | `""` | A file of your own words for codes, one entry per line; empty uses the built-in words |
+| `access_digits` | 2 | The digits that end a code: 2, 3 or 4 |
+| `access_pass_hours` | 12 | How long an entered code lets a browser keep testing |
+| `access_key_file` | `/etc/texas2step/access.key` | The key codes come from; the same on every server of an organization |
+| `internal_networks` | `[]` | Your own networks, as addresses or CIDR blocks: no code is asked there, and only they get History, the API tab, saved results, the API explorer and `/api/v1/measure/*` |
 | `brand_name` | `texas2step` | Name in the header and the browser tab |
 | `brand_organization` | `""` | Organization shown beside the name and in the footer |
 | `brand_url` | `""` | The organization's website; the organization name links to it |
