@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from . import __version__, payload
+from . import __version__, iface, payload
 from .stats import bufferbloat_grade, summarize, summarize_throughput
 
 API = "/api/v1"
@@ -397,12 +397,21 @@ async def run_all(
     interval_ms: float = 10.0,
     loss: bool = True,
     progress: Progress | None = None,
+    local: bool = False,
 ) -> dict[str, Any]:
+    """A full test toward ``target``. With ``local``, the result also gives this host's
+    own address on the connection the server saw, as the socket was bound, and the MAC
+    of the NIC the kernel routes it out of (the CLI's; a server measuring for an API
+    caller keeps them to itself)."""
     base = _base(target)
     started = datetime.now(UTC)
     async with _client() as client:
         info = (await client.get(f"{base}{API}/info")).json()
-        whoami = (await client.get(f"{base}{API}/whoami")).json()
+        r = await client.get(f"{base}{API}/whoami")
+        whoami = r.json()
+        stream = r.extensions.get("network_stream") if local else None
+        mine = stream.get_extra_info("client_addr") if stream else None
+        theirs = stream.get_extra_info("server_addr") if stream else None
 
     result: dict[str, Any] = {
         "version": 1,
@@ -422,6 +431,10 @@ async def run_all(
             "interval_ms": interval_ms,
         },
     }
+    if mine:
+        result["client"]["local_ip"] = mine[0]
+        if mac := await asyncio.to_thread(iface.mac_of, mine[0], theirs[0] if theirs else None):
+            result["client"] |= {"mac": mac, "mac_source": "nic"}
     result["latency"] = await measure_latency(base, progress=progress)
     result["download"] = await measure_download(base, seconds, streams, progress=progress)
     result["upload"] = await measure_upload(base, seconds, streams, progress=progress)

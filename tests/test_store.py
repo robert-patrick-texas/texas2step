@@ -37,18 +37,18 @@ def test_add_and_read_back(tmp_path):
 
 def test_summaries_carry_the_local_address_and_mac(tmp_path):
     store = ResultStore(tmp_path / "r.db")
-    local = ("10.0.0.10", "00:11:22:33:44:55")
-    client = {"ip": "203.0.113.7", "local_ip": local[0], "mac": local[1]}
+    local = ("10.0.0.10", "00:11:22:33:44:55", "nic")
+    client = {"ip": "203.0.113.7", "local_ip": local[0], "mac": local[1], "mac_source": local[2]}
     saved = store.add({"version": 1, "client": client}, "203.0.113.7")
     plain = store.add({"version": 1, "client": {"ip": "203.0.113.8"}}, "203.0.113.8")
     odd = store.add({"version": 1, "client": {"local_ip": 10, "mac": ["x"]}}, None)
     listed = {r["id"]: r for r in store.recent(10)}
 
     def fields(summary):
-        return summary["client_local_ip"], summary["client_mac"]
+        return summary["client_local_ip"], summary["client_mac"], summary["client_mac_source"]
 
     assert fields(saved) == fields(listed[saved["id"]]) == local
     # Only text is taken from a result; anything else reads as missing.
     for summary in (plain, odd, listed[plain["id"]], listed[odd["id"]]):
-        assert fields(summary) == (None, None)
+        assert fields(summary) == (None, None, None)
     store.close()

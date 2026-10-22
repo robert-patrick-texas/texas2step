@@ -42,7 +42,12 @@ async def test_server_side_measure_endpoint(live_server):
 
 
 async def test_run_all_shape(live_server):
-    r = await engine.run_all(live_server, seconds=1, streams=1, packets=50, interval_ms=2)
+    r = await engine.run_all(
+        live_server, seconds=1, streams=1, packets=50, interval_ms=2, local=True
+    )
     assert r["version"] == 1
     assert {"latency", "download", "upload", "loss", "bufferbloat"} <= set(r)
     assert r["bufferbloat"]["grade"] is not None
+    # The CLI's own end of the connection the server saw; loopback has no MAC.
+    assert r["client"]["local_ip"] == r["client"]["ip"] == "127.0.0.1"
+    assert "mac" not in r["client"]

@@ -91,6 +91,9 @@ def _report(result: dict[str, Any]) -> str:
         _throughput_line("Upload", result.get("upload"), idle),
         _loss_line(result.get("loss")),
     ]
+    if client.get("local_ip"):
+        mac = f" · MAC {client['mac']}" if client.get("mac") else ""
+        lines.insert(2, f"this computer {client['local_ip']}{mac}")
     grade = (result.get("bufferbloat") or {}).get("grade")
     if grade:
         lines.append(f"  {'Bufferbloat':<11} {grade:>14}")
@@ -376,6 +379,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             interval_ms=args.interval,
             loss=not args.no_loss,
             progress=live,
+            local=not args.no_local,
         )
     )
     live.clear()
@@ -523,6 +527,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--interval", type=float, default=10.0, help="ms between UDP probes")
     run.add_argument("--no-loss", action="store_true", help="skip the UDP packet-loss test")
     run.add_argument("--save", action="store_true", help="store the result on the server")
+    run.add_argument(
+        "--no-local",
+        action="store_true",
+        help="leave this computer's own address and MAC out of the result",
+    )
     run.set_defaults(func=cmd_run)
 
     lat = sub.add_parser("latency", help="idle HTTP round-trip time and jitter")

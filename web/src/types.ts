@@ -73,9 +73,10 @@ export interface TestResult {
   started_at: string;
   duration_s?: number;
   server: { id?: string; name?: string; location?: string; url: string; version?: string };
-  /** `local_ip`: this computer's own address on the UDP path, where the browser reveals it.
-   *  `mac`: read from an EUI-64 IPv6 address, the local one or the one the server saw. */
-  client: { ip?: string; family?: string | null; protocol?: string; user_agent?: string; local_ip?: string; mac?: string };
+  /** `local_ip`: this computer's own address: the browser's on the UDP path, where it
+   *  reveals it, or the CLI's on its connection. `mac`: of the NIC the CLI's connection
+   *  left by (`mac_source` "nic"), or read from an EUI-64 IPv6 address ("eui64"). */
+  client: { ip?: string; family?: string | null; protocol?: string; user_agent?: string; local_ip?: string; mac?: string; mac_source?: "nic" | "eui64" };
   config: { streams: number; seconds: number; packets: number; interval_ms: number };
   latency?: LatencyStats;
   download?: ThroughputResult;
@@ -131,6 +132,7 @@ export interface ResultSummary {
   client_ip: string | null;
   client_local_ip: string | null;
   client_mac: string | null;
+  client_mac_source: "nic" | "eui64" | null;
   server_id: string | null;
   source: string | null;
   download_mbps: number | null;

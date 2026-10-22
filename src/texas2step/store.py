@@ -42,7 +42,11 @@ SUMMARY_COLUMNS = (
 
 # Summary fields read from the saved result itself, so databases from before them need no
 # new column: this computer's own address and a MAC, where the client could tell them.
-PAYLOAD_FIELDS = {"client_local_ip": ("client", "local_ip"), "client_mac": ("client", "mac")}
+PAYLOAD_FIELDS = {
+    "client_local_ip": ("client", "local_ip"),
+    "client_mac": ("client", "mac"),
+    "client_mac_source": ("client", "mac_source"),
+}
 PAYLOAD_SQL = ", ".join(
     f"CASE WHEN json_type(payload, '$.{a}.{b}') = 'text' "
     f"THEN json_extract(payload, '$.{a}.{b}') END AS {name}"

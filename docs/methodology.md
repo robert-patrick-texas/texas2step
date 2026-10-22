@@ -229,6 +229,15 @@ printers, embedded devices and older systems. To find a computer from its local 
 instead, look it up in the site's ARP or DHCP tables, then in the switch's MAC address
 table or the wireless controller's client list.
 
+The CLI needs none of this. `texas2step run` reports this computer's own address on its
+connection to the server, as the connection's socket was bound: the address NAT turned
+into the one the server sees, on whichever interface the system chose. On Linux it also
+reports the MAC address of the NIC the kernel routes that connection out of
+(`ip route get <server> from <address>`); traffic to the computer's own address goes
+over loopback and has none. It prints both, `--save` stores them with the result, and
+`--no-local` leaves them out. A server measuring for `/api/v1/measure/*` keeps its own
+to itself.
+
 ## Known limitations
 
 * The UDP test needs UDP from the client to the server. Set `rtc_port_min` and

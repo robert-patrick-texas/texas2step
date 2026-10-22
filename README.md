@@ -97,6 +97,7 @@ texas2step loss     https://www.example.net/texas2step --packets 1000 --interval
 
 ```
 client 127.0.0.1 (IPv4, HTTP/1.1)
+this computer 127.0.0.1
 
   Latency            1.26 ms   jitter 0.09 ms   (min 1.17 · p90 1.53 · 20 samples)
   Download      6,240.5 Mbps   peak 6,543.6   (2 streams · loaded -0.5 ms)
@@ -104,6 +105,10 @@ client 127.0.0.1 (IPv4, HTTP/1.1)
   Loss                0.00 %   (0/200 lost · ↑ 0.00 % ↓ 0.00 % · UDP RTT 0.92 ms · jitter 0.10 ms)
   Bufferbloat             A+
 ```
+
+`client` is the address the server sees; `this computer` is the CLI's own on that
+connection, before any NAT, with the interface's MAC address on Linux. `--save` stores
+both with the result, and `--no-local` leaves them out.
 
 ## API
 

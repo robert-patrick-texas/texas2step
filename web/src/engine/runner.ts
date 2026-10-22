@@ -27,6 +27,12 @@ export interface RunEvents {
   partial(result: TestResult): void;
 }
 
+/** A result's MAC fields, where `ip` is an EUI-64 IPv6 address. */
+function macFrom(ip: string | undefined): Pick<TestResult["client"], "mac" | "mac_source"> {
+  const mac = eui64Mac(ip);
+  return mac ? { mac, mac_source: "eui64" } : {};
+}
+
 /** This UI's version, written into the page by the server that served it. */
 export const VERSION =
   document.querySelector<HTMLMetaElement>('meta[name="texas2step-version"]')?.content || "dev";
@@ -52,7 +58,7 @@ export class TestRun {
         family: whoami?.family ?? null,
         protocol: whoami?.http_version,
         user_agent: navigator.userAgent,
-        mac: eui64Mac(whoami?.ip) ?? undefined,
+        ...macFrom(whoami?.ip),
       },
       config: {
         streams: config.streams,
@@ -151,7 +157,7 @@ export class TestRun {
           const local = (await probe.path())?.local;
           if (local) {
             this.result.client.local_ip = local;
-            this.result.client.mac ??= eui64Mac(local) ?? undefined;
+            if (!this.result.client.mac) Object.assign(this.result.client, macFrom(local));
           }
           return await measureLossRtc(probe, opts);
         } finally {
