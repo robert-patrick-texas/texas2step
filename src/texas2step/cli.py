@@ -344,10 +344,12 @@ def cmd_update(args: argparse.Namespace) -> None:
     from . import update
     from .config import load_settings
 
-    if args.auto and (args.check or args.release or args.allow_downgrade):
+    if args.auto and (args.check or args.release or args.allow_downgrade or args.source):
         sys.exit("texas2step update: --auto takes no other options")
-    if args.allow_downgrade and not args.release:
-        sys.exit("texas2step update: --allow-downgrade goes with --version")
+    if args.release and args.source:
+        sys.exit("texas2step update: --from installs the release in DIR; leave out --version")
+    if args.allow_downgrade and not (args.release or args.source):
+        sys.exit("texas2step update: --allow-downgrade goes with --version or --from")
     try:
         # A server without a settings file still has update_url's default (or its env).
         settings = load_settings(args.config if os.path.exists(args.config) else None)
@@ -484,7 +486,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Look for a newer texas2step release (at update_url: GitHub, or a "
         "mirror), download its package and setup tool, check both against the SHA-256 "
         "published with it, show the setup tool's plan, then run its install script. "
-        "Needs sudo, except with --check.",
+        "With --from DIR, use a release's package and setup tool already on this server "
+        "instead, without downloading. Needs sudo, except with --check.",
     )
     upd.add_argument(
         "--check", action="store_true", help="only say whether a newer release is out (exit 100)"
@@ -496,7 +499,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="install this release instead of the newest, e.g. 1.2.0",
     )
     upd.add_argument(
-        "--allow-downgrade", action="store_true", help="with --version: install an older release"
+        "--from",
+        dest="source",
+        metavar="DIR",
+        help="install the release whose .deb and texas2step-setup are in DIR, without "
+        "downloading (for a server without internet access)",
+    )
+    upd.add_argument(
+        "--allow-downgrade",
+        action="store_true",
+        help="with --version or --from: install an older release",
     )
     upd.add_argument("-y", "--yes", action="store_true", help="install without asking")
     upd.add_argument(

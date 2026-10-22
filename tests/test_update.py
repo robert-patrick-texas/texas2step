@@ -7,6 +7,7 @@ import shutil
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -257,9 +258,97 @@ def test_releases_without_what_an_update_needs(monkeypatch):
         update.parse_release({"tag_name": "v1.3.0", "assets": [deb, setup]}, "arm64")
 
 
+def stamped(name: str, deb: bytes) -> str:
+    """FAKE_SETUP as a release's setup tool is built: naming its package, with its SHA-256."""
+    return f'DEB_NAME = "{name}"\nDEB_SHA256 = "{hashlib.sha256(deb).hexdigest()}"\n' + FAKE_SETUP
+
+
+@pytest.fixture
+def folder(tmp_path):
+    """What an operator copies to a server without internet access: one release's pair."""
+    path = tmp_path / "from-usb"
+    path.mkdir()
+    (path / "texas2step-1.3.0-1-amd64.deb").write_bytes(DEB)
+    (path / "texas2step-setup").write_text(stamped("texas2step-1.3.0-1-amd64.deb", DEB))
+    return path
+
+
+def run_from(folder, *argv):
+    args = cli.build_parser().parse_args(["update", "--from", str(folder), *argv])
+    # update_url leads nowhere: nothing --from does may reach for it.
+    return update.main(args, Settings(update_url="http://127.0.0.1:9/nowhere"))
+
+
+def test_from_a_folder_installs_without_downloading(folder, host, capfd):
+    assert run_from(folder, "--yes") == 0
+    cache = update.CACHE / "1.3.0-1"
+    deb, setup = cache / "texas2step-1.3.0-1-amd64.deb", cache / "texas2step-setup"
+    assert deb.read_bytes() == DEB and deb.stat().st_mode & 0o777 == 0o644
+    assert setup.stat().st_mode & 0o777 == 0o755
+    assert host["setup"]() == ["--update", "--out", str(cache)]  # the copy runs, not the original
+    assert host["script"] == cache / "texas2step-install.sh"
+    out = capfd.readouterr().out
+    assert f"texas2step 1.2.0 is installed; 1.3.0 is in {folder}/." in out
+    assert "The package matches the SHA-256 its texas2step-setup was built with." in out
+    assert "Will change\n  - upgrade texas2step" in out
+
+
+def test_from_checks_the_two_files_are_a_pair(folder, host, monkeypatch):
+    deb, setup = folder / "texas2step-1.3.0-1-amd64.deb", folder / "texas2step-setup"
+    for broken, said in (
+        (
+            lambda: deb.write_bytes(b"another build"),
+            "doesn't match the SHA-256 its texas2step-setup was built with",
+        ),
+        (deb.unlink, r"built with texas2step-1\.3\.0-1-amd64\.deb, which isn't in"),
+        (setup.unlink, "no texas2step-setup to read in"),
+        (lambda: setup.write_text(FAKE_SETUP), "doesn't name the package it was built with"),
+        (
+            lambda: setup.write_text(stamped("texas2step-1.3.0-1-arm64.deb", DEB)),
+            "is for arm64, not this server's amd64",
+        ),
+    ):
+        broken()
+        with pytest.raises(update.UpdateError, match=said):
+            run_from(folder, "--yes")
+        assert not update.CACHE.exists() and "script" not in host
+        deb.write_bytes(DEB)
+        setup.write_text(stamped(deb.name, DEB))
+
+    # Changed between its check and the copy that runs: not used.
+    monkeypatch.setattr(
+        update.shutil, "copyfile", lambda src, dst: Path(dst).write_bytes(b"swapped")
+    )
+    with pytest.raises(update.UpdateError, match="changed after it was checked"):
+        run_from(folder, "--yes")
+    assert "script" not in host
+
+
+def test_from_compares_versions_as_a_chosen_release(folder, host, monkeypatch, capsys):
+    monkeypatch.setattr(update.os, "geteuid", lambda: 1000)  # anyone can check
+    assert run_from(folder, "--check") == update.AVAILABLE
+    out = capsys.readouterr().out
+    assert f"To install it: sudo texas2step update --from {folder}" in out
+    assert not update.CACHE.exists()  # a check copies nothing
+
+    monkeypatch.setattr(update, "installed_version", lambda: "1.3.0-1")
+    assert run_from(folder, "--check") == 0
+    assert "texas2step 1.3.0 is installed; it would be reinstalled." in capsys.readouterr().out
+
+    monkeypatch.setattr(update, "installed_version", lambda: "1.4.0-1")
+    monkeypatch.setattr(update.os, "geteuid", lambda: 0)
+    with pytest.raises(update.UpdateError, match=r"add --allow-downgrade to install 1\.3\.0"):
+        run_from(folder, "--yes")
+    assert f"1.3.0 in {folder}/ is older." in capsys.readouterr().out
+    assert run_from(folder, "--allow-downgrade", "--yes") == 0
+    assert host["setup"]()[-1] == "--allow-downgrade"
+
+
 def test_command_line_checks():
     for argv, said in (
         (["update", "--auto", "--check"], "--auto takes no other options"),
+        (["update", "--auto", "--from", "/srv/t2s"], "--auto takes no other options"),
+        (["update", "--from", "/srv/t2s", "--version", "1.2.0"], "leave out --version"),
         (["update", "--allow-downgrade"], "--allow-downgrade goes with --version"),
     ):
         with pytest.raises(SystemExit) as exc:

@@ -12,12 +12,16 @@ It takes the steps the install guide's Upgrade section has an operator take by h
 4. run the install script: after asking, at once with ``--yes``, or from the update
    timer (``--auto``) only when the plan changes nothing but the package and settings.
 
-Downloads use the system's trust store and honor ``https_proxy``.
+Downloads use the system's trust store and honor ``https_proxy``. On a server without
+internet access, ``--from DIR`` takes the place of steps 1 and 2: the release is the
+package and setup tool an operator put in DIR, checked as a pair (the setup tool holds
+its package's SHA-256) and copied to CACHE/<version>/, where they are checked again.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import functools
 import hashlib
@@ -54,7 +58,7 @@ class UpdateError(Exception):
 @dataclass
 class Asset:
     name: str
-    url: str
+    url: str  # where it comes from: a download URL, or a path for --from
     sha256: str
     size: int
 
@@ -107,6 +111,43 @@ def parse_release(data: dict, arch: str) -> Release:
         page=str(data.get("html_url") or ""),
         deb=_asset(newest, tag),
         setup=_asset(setup, tag),
+    )
+
+
+def local_release(folder: Path, arch: str) -> Release:
+    """The release whose setup tool and package are in ``folder`` (``--from``): the package
+    the setup tool was built with, which must be there and match the SHA-256 in it."""
+    setup = folder / SETUP
+    try:
+        tool = setup.read_bytes()
+    except OSError as exc:
+        raise UpdateError(f"no {SETUP} to read in {folder}/ ({exc.strerror})") from exc
+    text = tool.decode("utf-8", "replace")
+    name = re.search(r'^DEB_NAME = "([^"]+)"$', text, re.M)
+    sha = re.search(r'^DEB_SHA256 = "([0-9a-f]{64})"$', text, re.M)
+    if not (name and sha):
+        raise UpdateError(f"{setup} doesn't name the package it was built with")
+    deb = re.fullmatch(
+        r"texas2step-([0-9][0-9A-Za-z.+~]*-[0-9A-Za-z.+~]+)-([0-9a-z]+)\.deb", name[1]
+    )
+    if not deb:
+        raise UpdateError(f"{setup} names {name[1]!r}, which isn't a texas2step package")
+    if deb[2] != arch:
+        raise UpdateError(f"{name[1]} is for {deb[2]}, not this server's {arch}")
+    path = folder / name[1]
+    if not path.is_file():
+        raise UpdateError(f"{SETUP} was built with {name[1]}, which isn't in {folder}/")
+    if _sha256(path) != sha[1]:
+        raise UpdateError(
+            f"{name[1]} in {folder}/ doesn't match the SHA-256 its {SETUP} was built with; not used"
+        )
+    return Release(
+        tag=f"v{deb[1].rsplit('-', 1)[0]}",
+        version=deb[1],
+        date="",
+        page="",
+        deb=Asset(name[1], str(path), sha[1], path.stat().st_size),
+        setup=Asset(SETUP, str(setup), hashlib.sha256(tool).hexdigest(), len(tool)),
     )
 
 
@@ -205,6 +246,21 @@ def download(http: httpx.Client, asset: Asset, folder: Path, mode: int) -> Path:
     return path
 
 
+def copy(asset: Asset, folder: Path, mode: int) -> Path:
+    """``asset``'s file copied into ``folder``, checked there against the SHA-256 it had
+    when it was read: what runs as root is what was checked, whoever can write its folder."""
+    path = folder / asset.name
+    if Path(asset.url).resolve() != path.resolve():
+        part = path.with_name(path.name + ".part")
+        shutil.copyfile(asset.url, part)
+        part.replace(path)
+    if _sha256(path) != asset.sha256:
+        path.unlink()
+        raise UpdateError(f"{asset.name} changed after it was checked; not used")
+    path.chmod(mode)
+    return path
+
+
 def lock() -> int:
     """One update at a time: the timer's and a person's could otherwise meet."""
     LOCK.parent.mkdir(parents=True, exist_ok=True)
@@ -260,56 +316,73 @@ def main(args: argparse.Namespace, settings: Settings) -> int:
     if not args.check and os.geteuid() != 0:
         raise UpdateError("installing needs root: sudo texas2step update")
 
-    with client() as http:
-        release = fetch_release(http, settings.update_url, args.release, architecture())
+    # --from: a release already on this server, as a chosen --version is, with no download.
+    source = Path(args.source).resolve() if args.source else None
+    with contextlib.ExitStack() as stack:
+        http: httpx.Client | None = None
+        if source is not None:
+            release = local_release(source, architecture())
+            offered = found = f"in {source}/"
+            at = f" --from {source}"
+        else:
+            http = stack.enter_context(client())
+            release = fetch_release(http, settings.update_url, args.release, architecture())
+            offered, found, at = f"available ({release.date})", f"({release.date})", ""
         old, new = _shown(installed, release.version), _shown(release.version, installed)
         order = compare(installed, release.version)
         if order == "lt":
-            say(f"texas2step {old} is installed; {new} is available ({release.date}).")
+            say(f"texas2step {old} is installed; {new} is {offered}.")
             if release.page:
                 say(f"  Release notes: {release.page}")
-        elif not args.release:
+        elif not (args.release or source):
             newer = "" if order == "eq" else f", newer than the latest release ({new})"
             say(f"texas2step {old} is installed{newer}: up to date.")
             return 0
         elif order == "eq":
             say(f"texas2step {old} is installed; it would be reinstalled.")
         else:
-            say(f"texas2step {old} is installed; {new} ({release.date}) is older.")
+            say(f"texas2step {old} is installed; {new} {found} is older.")
             if not args.allow_downgrade:
                 if args.check:
                     return 0
                 raise UpdateError(f"add --allow-downgrade to install {new}")
         if args.check:
             if order == "lt":
-                say("To install it: sudo texas2step update")
+                say(f"To install it: sudo texas2step update{at}")
             return AVAILABLE if order == "lt" else 0
 
         fd = lock()
         try:
-            return _install(args, http, release, new, say, fd)
+            return _install(args, http, release, new, say, fd, source)
         finally:
             os.close(fd)  # unless the install script took it over
 
 
 def _install(
     args: argparse.Namespace,
-    http: httpx.Client,
+    http: httpx.Client | None,
     release: Release,
     new: str,
     say: Callable[..., None],
     fd: int,
+    source: Path | None = None,
 ) -> int:
     folder = CACHE / release.version
     folder.mkdir(parents=True, exist_ok=True)
-    for kept in CACHE.iterdir():  # earlier downloads
+    if http is None:  # --from: the pair was checked as it was read; copy() checks it again
+        say(f"Copying {release.deb.name} and {SETUP} from {source}/ to {folder}/")
+        copy(release.deb, folder, 0o644)
+        setup = copy(release.setup, folder, 0o755)
+        say(f"The package matches the SHA-256 its {SETUP} was built with.\n")
+    else:
+        mb = f" ({release.deb.size / 1e6:.0f} MB)" if release.deb.size else ""
+        say(f"Downloading {release.deb.name}{mb} and {SETUP} to {folder}/")
+        download(http, release.deb, folder, 0o644)
+        setup = download(http, release.setup, folder, 0o755)
+        say("Both match the SHA-256 published with the release.\n")
+    for kept in CACHE.iterdir():  # earlier downloads and copies
         if kept.is_dir() and kept != folder:
             shutil.rmtree(kept, ignore_errors=True)
-    mb = f" ({release.deb.size / 1e6:.0f} MB)" if release.deb.size else ""
-    say(f"Downloading {release.deb.name}{mb} and {SETUP} to {folder}/")
-    download(http, release.deb, folder, 0o644)
-    setup = download(http, release.setup, folder, 0o755)
-    say("Both match the SHA-256 published with the release.\n")
 
     for stale in (PLAN, SCRIPT):
         (folder / stale).unlink(missing_ok=True)

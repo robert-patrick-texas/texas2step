@@ -420,10 +420,12 @@ The options:
 * `--yes` installs without asking, for scripts and configuration management.
 * `--version <version>` installs that release instead of the newest. Add
   `--allow-downgrade` for an older one, to go back to it.
+* `--from <directory>` installs a release whose two files are already on the server,
+  without downloading anything.
 * Behind a proxy: `sudo https_proxy=http://proxy.example.net:3128 texas2step update`.
 
-Where the server can't reach GitHub, point it at a mirror: see
-[Without access to GitHub](#without-access-to-github). On a server whose texas2step
+Where the server can't reach GitHub, put a release's files on it, or point it at a
+mirror: see [Without access to GitHub](#without-access-to-github). On a server whose texas2step
 doesn't have the command yet, upgrade once [with the setup tool](#with-the-setup-tool-or-by-hand).
 
 ### Unattended updates
@@ -486,8 +488,36 @@ To turn unattended updates off again: `sudo systemctl disable --now texas2step-u
 
 ### Without access to GitHub
 
-The `update_url` setting tells `texas2step update` where to look for releases. For
-GitHub Enterprise, use its API address for your copy of the project, such as
+On a closed network, put each release on the server by hand, or keep a mirror that
+`texas2step update` and the update timer can reach.
+
+**From files on the server.** On a machine that can reach GitHub, download the
+release's two files, `texas2step-<version>-1-amd64.deb` and `texas2step-setup`, and
+compare their SHA-256 with those in its release notes:
+
+```bash
+sha256sum texas2step-<version>-1-amd64.deb texas2step-setup
+```
+
+Copy both into one directory on the server, such as `/root/texas2step-<version>/`, then:
+
+```bash
+texas2step update --check --from /root/texas2step-<version>   # is it newer? exit 100 if so
+sudo texas2step update --from /root/texas2step-<version>
+```
+
+`--from` takes the place of the download. The two files must be a pair: the setup tool
+holds the file name and SHA-256 of the package it was built with, and any other package
+stops the update with nothing installed. Both are copied to
+`/var/cache/texas2step/update/<version>/` and checked again there, so what runs as root
+is what was checked. The update then goes on as from GitHub: the setup tool's plan, the
+question (or `--yes`) and the install script. The same version is reinstalled; an older
+one needs `--allow-downgrade`. The update timer doesn't use `--from`; for unattended
+updates on a closed network, keep a mirror.
+
+**From GitHub Enterprise or a mirror.** The `update_url` setting tells
+`texas2step update` where to look for releases. For GitHub Enterprise, use its API
+address for your copy of the project, such as
 `https://github.example.net/api/v3/repos/example/texas2step`.
 
 Any web server can hold a mirror instead. It must answer

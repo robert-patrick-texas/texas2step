@@ -67,7 +67,9 @@ sudo ./texas2step-install.sh                     # after reading it
 ```
 
 Once installed, `sudo texas2step update` upgrades it to the newest release, and a timer
-can do that unattended. The [install guide](docs/install.md) covers the rest: the setup
+can do that unattended. On a server without internet access,
+`sudo texas2step update --from <directory>` installs a release whose two files you put
+there. The [install guide](docs/install.md) covers the rest: the setup
 tool's options, the optional `/speedtest` address, configuration, the firewall rule for
 the UDP test, updates and removal.
 
