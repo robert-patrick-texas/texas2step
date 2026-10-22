@@ -1980,6 +1980,11 @@ a.brand-org:hover,
   font-weight: 550;
 }
 
+/* A URL or an IPv6 address among the figures wraps rather than widening the page. */
+.details .table td {
+  overflow-wrap: anywhere;
+}
+
 .table.data thead th {
   color: var(--muted);
   font-size: 12px;
@@ -2747,6 +2752,26 @@ a.brand-org:hover,
 
   .compare-sub {
     display: none;
+  }
+
+  /* All measurements: each name above its figures, which get the card's full width. */
+  .details .table,
+  .details .table tbody,
+  .details .table tr {
+    display: block;
+  }
+
+  .details .table tr {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--grid);
+  }
+
+  .details .table th,
+  .details .table td {
+    display: block;
+    width: auto;
+    padding: 0;
+    border: 0;
   }
 }
 
