@@ -143,8 +143,8 @@ export class TestView implements View {
           "div",
           { class: "hero-side" },
           h("div", { class: "hero-head" }, h("h1", {}, "How good is the path between you and this server?"), this.status),
-          this.rail,
-          h("div", { class: "tiles" }, ...Object.values(this.tiles).map((t) => t.el)),
+          h("fieldset", { class: "hero-set" }, h("legend", {}, "Phases"), this.rail),
+          h("fieldset", { class: "hero-set" }, h("legend", {}, "Results"), h("div", { class: "tiles" }, ...Object.values(this.tiles).map((t) => t.el))),
           this.options,
         ),
       ),
@@ -372,9 +372,10 @@ export class TestView implements View {
       clear(this.actions);
       return;
     }
+    // A phase shows its figure while the test runs; once it's done, the results carry it.
     const railValue = (p: Phase, v: string) => {
       const li = this.rail.querySelector<HTMLElement>(`[data-phase=${p}]`)!;
-      setText(li.querySelector(".rail-value"), v);
+      setText(li.querySelector(".rail-value"), partial ? v : v ? "done" : "skipped");
       if (!partial) li.dataset.state = v ? "done" : "skipped";
     };
 
