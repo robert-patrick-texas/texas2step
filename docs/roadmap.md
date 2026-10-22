@@ -48,6 +48,14 @@ links and footer credit. Three places still say texas2step:
   publishes with each release, and `--from` against the digest built into the setup
   tool. Signing each release with a key the servers trust would also guard against a
   tampered mirror or release.
+- [ ] **A mirror in a local directory.** On a closed network, `--from` installs a release
+  that an operator copied to the server, but the update timer can only update unattended
+  from a [mirror](install.md#without-access-to-github) on a web server. `update_url`
+  could also name a directory, such as `file:///var/lib/texas2step/mirror`, laid out like
+  the web mirror: `releases/latest` and `releases/tags/v<version>`, each describing the
+  release with its files' SHA-256 digests, and the files beside them. An operator would
+  drop each new release there, and `--check` and the timer would find it there, its
+  digests checked as from GitHub, with no web server to run.
 
 ### Command line
 
