@@ -642,9 +642,12 @@ sudo apt purge texas2step    # also removes them, and the nginx snippets
 Before purging, take the `include snippets/texas2step*.conf;` lines out of your site,
 otherwise `nginx -t` fails once the snippets are gone.
 
-A [mirror in a directory](#without-access-to-github) under `/opt/texas2step` is kept,
-and with it `/opt/texas2step` (dpkg warns that the directory isn't empty). Remove it yourself
-when it's no longer needed: `sudo rm -r /opt/texas2step`.
+Purging removes the dated backups of your settings too, but keeps what is yours: a file
+you added to `/etc/texas2step`, such as a logo, a
+[mirror in a directory](#without-access-to-github) under `/opt/texas2step`, and the
+copies of your nginx site that the setup tool made in `/var/backups/texas2step/`. dpkg
+warns that a directory holding one of them isn't empty. Remove them yourself once you no
+longer need them, for example `sudo rm -r /opt/texas2step`.
 
 ## Security notes
 
