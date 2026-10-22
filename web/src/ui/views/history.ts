@@ -39,11 +39,11 @@ export class HistoryView implements View {
         "tr",
         {},
         // A saved result opens on the Test page, when this site shows it.
-        h("td", {}, this.app.pages.has("test") ? h("a", { href: appPath(`/r/${r.id}`), "data-link": true }, when(r.created_at)) : when(r.created_at)),
+        h("td", { class: "when" }, this.app.pages.has("test") ? h("a", { href: appPath(`/r/${r.id}`), "data-link": true }, when(r.created_at)) : when(r.created_at)),
         h("td", {}, r.server_id ?? "—"),
-        h("td", { class: "mono" }, r.client_ip ?? "—"),
+        h("td", { class: "mono" }, h("span", { class: "addr" }, r.client_ip ?? "—")),
         // Where the browser revealed it, and a MAC read from an EUI-64 IPv6 address.
-        h("td", { class: "mono" }, r.client_local_ip ?? "—", r.client_mac ? h("span", { class: "cell-sub", title: "MAC, read from the IPv6 address (EUI-64)" }, r.client_mac) : null),
+        h("td", { class: "mono" }, h("span", { class: "addr" }, r.client_local_ip ?? "—"), r.client_mac ? h("span", { class: "cell-sub", title: "MAC, read from the IPv6 address (EUI-64)" }, r.client_mac) : null),
         h("td", { class: "num" }, text(rate(r.download_mbps))),
         h("td", { class: "num" }, text(rate(r.upload_mbps))),
         h("td", { class: "num" }, text(ms(r.latency_ms))),

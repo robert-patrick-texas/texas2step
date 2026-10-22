@@ -15,6 +15,8 @@ export interface ThroughputSeries {
 
 const LABEL: Record<Direction, string> = { download: "Download", upload: "Upload" };
 const COLOR: Record<Direction, string> = { download: "var(--dl)", upload: "var(--ul)" };
+const LABEL_STEP = 15; // baseline to baseline for the 12px direct labels
+const LABEL_TOP = 11; // the highest baseline that keeps a label inside the chart
 
 export class ThroughputChart {
   readonly el: HTMLElement;
@@ -76,6 +78,7 @@ export class ThroughputChart {
       svg.append(s("line", { x1: m.left, x2: W - m.right, y1: y(0), y2: y(0), class: "baseline" }));
     }
 
+    const labels: { dir: Direction; y: number; label: string }[] = [];
     for (const [dir, d] of series) {
       const pts = d.timeline.map((v, i): [number, number] => [x(((i + 0.5) * d.binMs) / 1000), y(v)]);
       if (pts.length) {
@@ -85,9 +88,19 @@ export class ThroughputChart {
       if (d.stable !== null && d.stable > 0) {
         const sy = y(d.stable);
         svg.append(s("line", { x1: x(d.warmupS), x2: W - m.right, y1: sy, y2: sy, class: "ref", style: `stroke:${COLOR[dir]}` }));
-        const label = `${LABEL[dir]} ${text(rate(d.stable))}`;
-        svg.append(s("text", { x: W - m.right - 4, y: sy - 7, class: "direct-label", "text-anchor": "end" }, label));
+        labels.push({ dir, y: sy - 7, label: `${LABEL[dir]} ${text(rate(d.stable))}` });
       }
+    }
+    // Each stable rate is labelled just above its line, Download first. Upload, when its
+    // label would overlap Download's, stacks above it, or below Download's line if the
+    // chart has no room above.
+    const placed: number[] = [];
+    const first = (l: (typeof labels)[number]) => (l.dir === "download" ? 0 : 1);
+    for (const l of labels.sort((a, b) => first(a) - first(b))) {
+      const near = placed.find((p) => Math.abs(l.y - p) < LABEL_STEP);
+      const ly = near === undefined ? l.y : near - LABEL_STEP >= LABEL_TOP ? near - LABEL_STEP : near + LABEL_STEP + 4;
+      placed.push(ly);
+      svg.append(s("text", { x: W - m.right - 4, y: ly, class: "direct-label", "text-anchor": "end" }, l.label));
     }
 
     // Crosshair layer.

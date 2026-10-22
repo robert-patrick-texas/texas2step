@@ -2007,6 +2007,15 @@ a.brand-org:hover,
   color: var(--muted);
 }
 
+.table .when {
+  white-space: nowrap;
+}
+
+/* A long IPv6 address wraps when the table would otherwise outgrow its card. */
+.table .addr {
+  overflow-wrap: anywhere;
+}
+
 .table tbody tr:hover td {
   background: color-mix(in srgb, var(--ink) 2.5%, transparent);
 }
@@ -2754,6 +2763,13 @@ a.brand-org:hover,
     display: none;
   }
 
+  /* History: an IPv6 address takes two lines, not most of the screen. Its column is set
+     by this width, as a phone's table is as narrow as its cells allow. */
+  .table .addr {
+    display: inline-block;
+    width: 20ch;
+  }
+
   /* All measurements: each name above its figures, which get the card's full width. */
   .details .table,
   .details .table tbody,
@@ -2789,6 +2805,31 @@ a.brand-org:hover,
     order: 3;
     width: 100%;
     overflow-x: auto;
+  }
+
+  /* The controls stay beside the brand and give way, the server's name first, so the
+     header keeps to two rows and never runs past the screen. */
+  .topbar-actions {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: flex-end;
+  }
+
+  #server-picker,
+  #server-picker .picker,
+  #server-picker .picker > * {
+    min-width: 0;
+  }
+
+  #server-picker .picker-name,
+  #server-picker .picker-select {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* "Auto" takes the room "Auto" needs, not its longest choice's, where browsers can. */
+  .family-picker .picker-select {
+    field-sizing: content;
   }
 
   .grid {
@@ -2851,6 +2892,12 @@ a.brand-org:hover,
 
   .picker-select {
     max-width: 130px;
+  }
+
+  /* With the IP picker as well, the brand keeps its mark and leaves its name's room to
+     the server's. */
+  .topbar:has(#family-picker .picker) .brand-word {
+    display: none;
   }
 }
 
