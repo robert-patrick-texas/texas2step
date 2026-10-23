@@ -123,6 +123,8 @@ class Settings:
     access_digits: int = 2  # the digits that end a code
     access_pass_hours: float = 12.0  # how long an entered code lets a browser keep testing
     access_key_file: str = "/etc/texas2step/access.key"  # the same key on every server
+    # Standing phrases that always work as codes (texas2step access phrase); none without it.
+    access_phrases_file: str = "/etc/texas2step/access-phrases.toml"
     # The organization's own networks (addresses or CIDR blocks): no code is asked there,
     # and only they get saved results, the API explorer and the server-side measurements.
     internal_networks: list[str] = field(default_factory=list)

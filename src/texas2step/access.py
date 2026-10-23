@@ -13,6 +13,10 @@ that stays fixed. Nothing is shared between servers at run time:
 A code someone types is read with any case and any separators, so ``Maple River 42``
 counts. The previous period's code still works for a day after the change.
 
+A site can also keep standing phrases of its own (``access_phrases_file``), such as one
+the desk gives a VIP from memory. Each works as a code until it is removed, or until the
+end of its ``until`` day, and each use is logged by the phrase's name.
+
 A right code buys a pass: an expiry time signed with the key. The browser sends it as
 ``?pass=`` with every request, to this server and to the others in the picker, which
 check the signature with their copy of the key. A query parameter, not a header: a
@@ -26,11 +30,14 @@ import contextlib
 import hashlib
 import hmac
 import ipaddress
+import json
 import os
 import re
 import secrets
 import time
+import tomllib
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -93,13 +100,17 @@ def read_key(path: str | Path) -> bytes:
 
 
 def write_key(path: str | Path, text: str) -> None:
-    """Replace the key file atomically: readable by root and the service's group only."""
     parse_key(text)
+    write_secret(path, text.strip() + "\n")
+
+
+def write_secret(path: str | Path, text: str) -> None:
+    """Replace the file atomically: readable by root and the service's group only."""
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640)
     try:
-        os.write(fd, (text.strip() + "\n").encode())
+        os.write(fd, text.encode())
         if os.geteuid() == 0:
             import grp
 
@@ -170,6 +181,116 @@ def site_words(path: str | Path) -> list[str]:
     return list(seen)
 
 
+# --- Standing phrases ----------------------------------------------------------------
+
+PHRASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,39}")
+PHRASES_HEADER = """\
+# Standing access phrases for texas2step (docs/access.md). Each works as an access code
+# beside the day's code, until it is removed or until the end of its until day (in
+# access_timezone). Readable by root and the service only. texas2step access phrase add
+# and remove write this file again, keeping these lines but no comments of your own.
+# After a change: sudo systemctl restart texas2step
+#
+# Two examples, commented out. Make up your own: these are published with texas2step.
+#
+# [[phrase]]
+# name = "future"
+# phrase = "2026 the future is bright"
+# until = 2026-12-31                    # works through December 31, 2026
+#
+# [[phrase]]
+# name = "vip"
+# phrase = "vip ticket to ride 1776"    # no until: works until it is removed
+"""
+# Anyone can read the examples, so they never work as phrases.
+EXAMPLE_PHRASES = ("2026 the future is bright", "vip ticket to ride 1776")
+
+
+@dataclass(frozen=True)
+class Phrase:
+    name: str  # what the journal and texas2step access show call it; never the phrase
+    text: str  # as written
+    until: date | None = None  # it works through this day, in access_timezone
+
+    @property
+    def code(self) -> str:
+        return normalize(self.text)
+
+
+def as_day(value: object) -> date | None:
+    """A phrase's until: a TOML date, or one written as text."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        with contextlib.suppress(ValueError):
+            value = date.fromisoformat(value)
+    if isinstance(value, date) and not isinstance(value, datetime):
+        return value
+    raise ValueError("until is a day, such as 2026-12-31")
+
+
+def parse_phrases(text: str, where: str) -> list[Phrase]:
+    """The ``[[phrase]]`` tables of a phrases file, each checked."""
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise AccessError(f"{where}: {exc}") from None
+    entries = data.pop("phrase", [])
+    if data or not isinstance(entries, list):
+        raise AccessError(f"{where}: expected only [[phrase]] tables")
+    phrases: list[Phrase] = []
+    for n, entry in enumerate(entries, 1):
+        if not isinstance(entry, dict):
+            raise AccessError(f"{where}: expected only [[phrase]] tables")
+        name = entry.get("name")
+        at = f"{where}: phrase {name!r}" if isinstance(name, str) else f"{where}: phrase {n}"
+        if unknown := set(entry) - {"name", "phrase", "until"}:
+            raise AccessError(f"{at}: unknown {', '.join(sorted(unknown))}")
+        if not isinstance(name, str) or not PHRASE_NAME.fullmatch(name):
+            raise AccessError(f"{at}: name is up to 40 letters, digits, '-', '_' or '.'")
+        text = entry.get("phrase")
+        if not isinstance(text, str) or not normalize(text):
+            raise AccessError(f"{at}: phrase needs letters or digits")
+        if not text.isascii():
+            raise AccessError(f"{at}: phrase has letters outside ASCII")
+        if normalize(text) in {normalize(example) for example in EXAMPLE_PHRASES}:
+            raise AccessError(f"{at}: that is a published example; make up your own")
+        try:
+            phrase = Phrase(name, text, as_day(entry.get("until")))
+        except ValueError as exc:
+            raise AccessError(f"{at}: {exc}") from None
+        for other in phrases:
+            if other.name.lower() == name.lower():
+                raise AccessError(f"{at}: the name is taken by an earlier phrase")
+            if other.code == phrase.code:
+                raise AccessError(f"{at}: the same phrase as {other.name!r}")
+        phrases.append(phrase)
+    return phrases
+
+
+def read_phrases(path: str | Path) -> list[Phrase]:
+    """The site's standing phrases; none without the file."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise AccessError(f"can't read {path}: {exc.strerror}") from exc
+    except UnicodeDecodeError:
+        raise AccessError(f"{path} isn't UTF-8 text") from None
+    return parse_phrases(text, str(path))
+
+
+def render_phrases(phrases: Sequence[Phrase]) -> str:
+    blocks = [PHRASES_HEADER]
+    for p in phrases:
+        lines = ["[[phrase]]", f"name = {json.dumps(p.name)}", f"phrase = {json.dumps(p.text)}"]
+        if p.until:
+            lines.append(f"until = {p.until.isoformat()}")
+        blocks.append("\n".join(lines) + "\n")
+    return "\n".join(blocks)
+
+
 # --- Codes and passes --------------------------------------------------------------
 
 
@@ -200,6 +321,7 @@ class Codes:
         words: list[str],
         site: bool,
         pass_hours: float,
+        phrases: Sequence[Phrase] = (),
     ) -> None:
         self.key = key
         self.interval = interval
@@ -209,6 +331,7 @@ class Codes:
         self.words = words
         self.site = site
         self.pass_seconds = int(pass_hours * 3600)
+        self.phrases = tuple(phrases)
 
     @classmethod
     def load(cls, settings: Settings, interval: str | None = None) -> Codes | None:
@@ -228,6 +351,7 @@ class Codes:
             words,
             site,
             settings.access_pass_hours,
+            read_phrases(settings.access_phrases_file),
         )
 
     def _mac(self, *parts: str) -> bytes:
@@ -285,6 +409,18 @@ class Codes:
             if code
         )
 
+    def phrase(self, text: str) -> Phrase | None:
+        """The standing phrase ``text`` is, with any case and separators; expired or not."""
+        given = normalize(text).encode()
+        found = None
+        for phrase in self.phrases:  # every one, so the time taken tells nothing
+            if hmac.compare_digest(given, phrase.code.encode()):
+                found = phrase
+        return found
+
+    def expired(self, phrase: Phrase, now: datetime) -> bool:
+        return phrase.until is not None and now.astimezone(self.zone).date() > phrase.until
+
     def fingerprint(self) -> str:
         """The same on every server that would give the same codes; reveals nothing."""
         words = hashlib.sha256("\n".join(self.words).encode()).hexdigest()
@@ -294,6 +430,9 @@ class Codes:
             str(self.digits),
             "site" if self.site else "built-in",
         )
+        if self.phrases:  # without any, as before there were phrases
+            standing = sorted(f"{p.code}|{p.until or ''}" for p in self.phrases)
+            what += (hashlib.sha256("\n".join(standing).encode()).hexdigest(),)
         mac = self._mac("fingerprint", *what, words).hex()
         return f"{mac[0:4]}-{mac[4:8]}-{mac[8:12]}"
 

@@ -64,6 +64,8 @@ results_path = "/var/lib/texas2step/results.db"
 # access_digits = 2                     # digits at the end of a code: 2, 3 or 4
 # access_pass_hours = 12.0              # how long an entered code lets a browser keep testing
 # access_key_file = "/etc/texas2step/access.key"  # copy the same key to every server
+# access_phrases_file = "/etc/texas2step/access-phrases.toml"  # standing phrases:
+#                                       # sudo texas2step access phrase add vip
 # internal_networks = []                # e.g. ["10.0.0.0/8", "198.51.100.0/24"]: no code, and
 #                                       # only they see History, the API tab and saved results
 

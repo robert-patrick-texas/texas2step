@@ -64,12 +64,14 @@ Access codes: daily, changing at midnight, America/New_York.
 Today's code: blunt.ashen.16   (until Fri 2026-10-23 00:00 EDT, in 16 h 1 min)
 Yesterday's:  swore.elude.52   (still works until Fri 2026-10-23 00:00 EDT, in 16 h 1 min)
 Words:        512 drawn from the built-in list by the key
+Phrases:      none
 Key:          /etc/texas2step/access.key
 Fingerprint:  3364-dbda-c7a0   (the same on servers that give the same codes)
 ```
 
 The same fingerprint on every server means the same codes. It is worked out from the
-key, the words and the settings that shape a code, and reveals none of them. It reads
+key, the words, the settings that shape a code and any
+[standing phrases](#standing-phrases), and reveals none of them. It reads
 the key, so it needs `sudo`.
 
 To turn codes off again: `sudo texas2step config set access_code=off --write`, then restart.
@@ -84,6 +86,7 @@ To turn codes off again: `sudo texas2step config set access_code=off --write`, t
 | `access_digits` | `2` | The digits that end a code: 2, 3 or 4 |
 | `access_pass_hours` | `12` | How long an entered code lets a browser keep testing |
 | `access_key_file` | `/etc/texas2step/access.key` | The key |
+| `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | [Standing phrases](#standing-phrases), if the file exists |
 | `internal_networks` | `[]` | Your own networks: no code, and the desk's tools |
 
 **Built-in words.** A code is two words and the digits: `maple.river.42`. The words come
@@ -118,6 +121,91 @@ the new key to the other servers as in step 1, and restart the service on each. 
 
 **Typing it.** Case and separators don't matter: `Maple River 42`, `maple-river-42` and
 `maple.river.42` are the same code, and `7` counts for `07`.
+
+## Standing phrases
+
+The day's code suits most calls. A standing phrase is for the others: a VIP who calls
+while the desk is away from a PC, or a team that needs access for a while. Each phrase
+has a name, and it works as an access code beside the day's code, until you remove it or
+until the end of its `until` day. Case and separators don't matter here either.
+
+```bash
+sudo texas2step access phrase add vip                            # asks for the phrase
+sudo texas2step access phrase add field-team --until 2026-12-31  # works through that day
+sudo texas2step access phrase list
+sudo systemctl restart texas2step
+```
+
+Typing the phrase when asked keeps it out of the shell's history; you can also give it
+after the name, in quotes. `list` shows each one:
+
+```text
+/etc/texas2step/access-phrases.toml:
+  vip          copper lantern harbor violet
+  field-team   maple orbit canyon             until 2026-12-31
+```
+
+**The file.** Phrases live in `/etc/texas2step/access-phrases.toml` (`access_phrases_file`),
+readable only by root and the service, like the key, and kept out of `config.toml`,
+which every user on the server can read. The package makes it when it is installed or
+upgraded, if there is none, holding no phrases: only two examples, commented out.
+
+```toml
+# [[phrase]]
+# name = "future"
+# phrase = "2026 the future is bright"
+# until = 2026-12-31                    # works through December 31, 2026
+#
+# [[phrase]]
+# name = "vip"
+# phrase = "vip ticket to ride 1776"    # no until: works until it is removed
+```
+
+You can edit the file by hand, taking the examples as a pattern. The example phrases
+themselves never work: they are published here, so anyone could enter them, and
+texas2step refuses them, in any case or spacing, as it would any other broken entry.
+
+A name is up to 40 letters, digits, `-`, `_` or `.`, and a phrase is plain letters and
+digits (ASCII) with any spaces or punctuation; no two may share a name or a phrase.
+While access codes are on, texas2step won't start with a file that breaks these rules,
+and says which phrase. `add` and `remove` write the file again, keeping the phrases and
+the examples but not comments of your own. Without the file there are no phrases;
+`sudo texas2step access phrase init` makes it again.
+
+**Every server.** The phrase is checked by the server whose page the visitor opens, so
+copy the file to each server, as you did the key. On each of the others:
+
+```bash
+ssh austin.example.net sudo cat /etc/texas2step/access-phrases.toml | sudo texas2step access phrase import
+sudo systemctl restart texas2step
+```
+
+`import` checks the file before writing it. `sudo texas2step access show` lists the
+phrases by name, and its fingerprint covers them, so servers with the same fingerprint
+take the same codes and phrases.
+
+**Every use is logged** by the phrase's name, never the phrase itself, and so is an
+expired phrase, which counts as a wrong code:
+
+```text
+WARNING:  texas2step.api.access: access phrase vip used from 203.0.113.9
+WARNING:  texas2step.api.access: expired access phrase field-team from 198.51.100.4
+```
+
+```bash
+journalctl -u texas2step --grep 'access phrase'
+```
+
+**Choose phrases outsiders can't guess.** A phrase doesn't change, so a guessable one
+stays guessable: several words that don't belong together, such as
+`copper lantern harbor violet`, rather than `vip access`. texas2step takes any phrase
+you choose. To withdraw one, `sudo texas2step access phrase remove vip` on every server,
+and restart; passes it already bought last until they expire (`access_pass_hours`).
+A new key doesn't change the phrases.
+
+A phrase buys the same pass as the day's code, so the visitor gets what any visitor
+does, and never sees the day's code: only `internal_networks` get that, at the top of
+History. History shows the day's code, never the phrases.
 
 ## For the service desk
 
@@ -207,6 +295,7 @@ many as you need (`results_max_rows`). `sudo texas2step results clear` deletes t
 | | |
 |---|---|
 | `/etc/texas2step/access.key` | Made when the package is installed, kept on upgrades, removed with `apt purge` |
+| `/etc/texas2step/access-phrases.toml` | Made when the package is installed or upgraded, if missing, with two examples commented out; kept on upgrades; removed with `apt purge` |
 | Your `access_words` file | Yours: kept by `apt purge` |
 
 The pass lives in the visitor's browser (local storage) until it expires. Passes are not

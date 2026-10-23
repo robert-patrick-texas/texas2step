@@ -740,6 +740,8 @@ What stays as it is:
   its passes; `sudo texas2step access show` prints the same fingerprint on both. Only a
   clone for another organization needs a key of its own:
   `sudo texas2step access key --new`, then a restart.
+* **The standing phrases**, `/etc/texas2step/access-phrases.toml`, if you made any: the
+  clone takes the same [phrases](access.md#standing-phrases) as the first server.
 * `/etc/default/texas2step`, and the [update timer](#unattended-updates), on or off as on
   the first server. Downloads in `/var/cache/texas2step/update` do no harm; the next
   update removes them.
@@ -762,9 +764,9 @@ sudo apt purge texas2step    # also removes them, and the nginx snippets
 Before purging, take the `include snippets/texas2step*.conf;` lines out of your site,
 otherwise `nginx -t` fails once the snippets are gone.
 
-Purging removes the dated backups of your settings and the
-[access key](access.md) too, but keeps what is yours: a file you added to
-`/etc/texas2step`, such as a logo or a word list, a
+Purging removes the dated backups of your settings, the [access key](access.md) and the
+[standing phrases](access.md#standing-phrases) too, but keeps what is yours: a file you
+added to `/etc/texas2step`, such as a logo or a word list, a
 [mirror in a directory](#without-access-to-github) under `/opt/texas2step`, and the
 copies of your nginx site that the setup tool made in `/var/backups/texas2step/`. dpkg
 warns that a directory holding one of them isn't empty. Remove them yourself once you no

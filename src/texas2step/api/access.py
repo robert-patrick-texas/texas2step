@@ -50,8 +50,9 @@ async def status(
 
 @router.post("", summary="Exchange the access code for a pass")
 async def unlock(request: Request, given: CodeIn) -> dict[str, Any]:
-    """A pass for the current code, valid on every server that holds the same key. Send
-    it as ``?pass=`` with each request. Wrong codes are counted per client address."""
+    """A pass for the current code or a standing phrase, valid on every server that holds
+    the same key. Send it as ``?pass=`` with each request. Wrong codes are counted per
+    client address."""
     codes = request.app.state.codes
     if codes is None:
         raise HTTPException(404, "this server doesn't ask for an access code")
@@ -59,10 +60,18 @@ async def unlock(request: Request, given: CodeIn) -> dict[str, Any]:
     attempts = request.app.state.attempts
     if attempts.blocked(ip):
         raise HTTPException(429, "too many wrong codes; try again in a few minutes")
-    if not codes.check(given.code, datetime.now(UTC)):
-        attempts.failed(ip)
-        log.warning("wrong access code from %s", ip)
-        raise HTTPException(403, "that isn't the current access code")
+    now = datetime.now(UTC)
+    if not codes.check(given.code, now):
+        # A standing phrase: every use is logged by its name, so a leaked one shows.
+        phrase = codes.phrase(given.code)
+        if phrase is None or codes.expired(phrase, now):
+            attempts.failed(ip)
+            if phrase is None:
+                log.warning("wrong access code from %s", ip)
+            else:
+                log.warning("expired access phrase %s from %s", phrase.name, ip)
+            raise HTTPException(403, "that isn't the current access code")
+        log.warning("access phrase %s used from %s", phrase.name, ip)
     token, expires = codes.issue()
     return {"pass": token, "expires": expires}
 

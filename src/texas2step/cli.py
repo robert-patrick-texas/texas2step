@@ -431,8 +431,13 @@ def cmd_access_show(args: argparse.Namespace) -> None:
     words = (
         "from " + settings.access_words if codes.site else "drawn from the built-in list by the key"
     )
+    standing = [
+        p.name + (f" ({_phrase_when(p, settings.access_timezone)})" if p.until else "")
+        for p in codes.phrases
+    ]
     rows += [
         ("Words", f"{len(codes.words)} {words}"),
+        ("Phrases", ", ".join(standing) or "none"),
         ("Key", settings.access_key_file),
         ("Fingerprint", f"{codes.fingerprint()}   (the same on servers that give the same codes)"),
     ]
@@ -488,6 +493,115 @@ def cmd_access_key(args: argparse.Namespace) -> None:
         print("  sudo systemctl restart texas2step")
     elif args.import_:
         print(f"Wrote {path}. Then: sudo systemctl restart texas2step")
+
+
+def _phrase_when(phrase: Any, zone: str) -> str:
+    """A phrase's until day, as "until 2026-12-31" or "expired 2026-12-31"; "" without."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    if phrase.until is None:
+        return ""
+    today = datetime.now(ZoneInfo(zone)).date()
+    return f"{'until' if today <= phrase.until else 'expired'} {phrase.until}"
+
+
+def _read_phrases(path: Path) -> list[Any]:
+    from . import access
+
+    try:
+        return access.read_phrases(path)
+    except access.AccessError as exc:
+        hint = " (try sudo)" if "Permission denied" in str(exc) else ""
+        sys.exit(f"texas2step: {exc}{hint}")
+
+
+def _write_phrases(path: Path, text: str, copy: bool = True) -> None:
+    from . import access
+
+    try:
+        access.write_secret(path, text)
+    except OSError as exc:
+        hint = " (try sudo)" if isinstance(exc, PermissionError) else ""
+        sys.exit(f"texas2step: can't write {path}: {exc.strerror}{hint}")
+    if copy:
+        print(f"Wrote {path}. To copy it to the organization's other servers, on each:")
+        print(f"  ssh <this server> sudo cat {path} | sudo texas2step access phrase import")
+        print("Then restart the service here and on each: sudo systemctl restart texas2step")
+    else:
+        print(f"Wrote {path}. Then: sudo systemctl restart texas2step")
+
+
+def cmd_access_phrase_list(args: argparse.Namespace) -> None:
+    settings = _server_settings(args)
+    path = Path(settings.access_phrases_file)
+    phrases = _read_phrases(path)
+    if not phrases:
+        print(f"No standing phrases in {path}." if path.exists() else f"There is no {path}.")
+        return
+    print(f"{path}:")
+    names = max(len(p.name) for p in phrases) + 3
+    texts = max(len(p.text) for p in phrases) + 3
+    for p in phrases:
+        when = _phrase_when(p, settings.access_timezone)
+        print(f"  {p.name:<{names}}{p.text:<{texts}}{when}".rstrip())
+    if settings.access_code == "off":
+        print('\nAccess codes are off (access_code = "off"), so no visitor is asked for one.')
+
+
+def cmd_access_phrase_add(args: argparse.Namespace) -> None:
+    from . import access
+
+    path = Path(_server_settings(args).access_phrases_file)
+    phrases = _read_phrases(path)
+    if any(p.name.lower() == args.name.lower() for p in phrases):
+        sys.exit(f"texas2step: there is a phrase named {args.name} already; remove it first")
+    text = args.phrase
+    if text is None:  # kept out of the shell's history
+        text = input(f"Phrase for {args.name}: ") if sys.stdin.isatty() else sys.stdin.readline()
+    try:
+        added = access.Phrase(args.name, text.strip(), access.as_day(args.until))
+        checked = access.parse_phrases(access.render_phrases([*phrases, added]), str(path))
+    except (access.AccessError, ValueError) as exc:
+        sys.exit(f"texas2step: {exc}")
+    _write_phrases(path, access.render_phrases(checked))
+
+
+def cmd_access_phrase_remove(args: argparse.Namespace) -> None:
+    from . import access
+
+    path = Path(_server_settings(args).access_phrases_file)
+    phrases = _read_phrases(path)
+    kept = [p for p in phrases if p.name.lower() != args.name.lower()]
+    if len(kept) == len(phrases):
+        sys.exit(f"texas2step: there is no phrase named {args.name} in {path}")
+    _write_phrases(path, access.render_phrases(kept))
+
+
+def cmd_access_phrase_import(args: argparse.Namespace) -> None:
+    from . import access
+
+    path = Path(_server_settings(args).access_phrases_file)
+    text = sys.stdin.read()
+    try:
+        access.parse_phrases(text, "the phrases given")
+    except access.AccessError as exc:
+        sys.exit(f"texas2step: {exc}")
+    _write_phrases(path, text, copy=False)
+
+
+def cmd_access_phrase_init(args: argparse.Namespace) -> None:
+    from . import access
+
+    path = Path(_server_settings(args).access_phrases_file)
+    if path.exists():
+        return  # the package's postinst: an existing file stays
+    try:
+        access.write_secret(path, access.render_phrases([]))
+    except OSError as exc:
+        hint = " (try sudo)" if isinstance(exc, PermissionError) else ""
+        sys.exit(f"texas2step: can't write {path}: {exc.strerror}{hint}")
+    print(f"Wrote {path}, with two examples commented out.")
 
 
 def _results(count: int) -> str:
@@ -746,6 +860,48 @@ def build_parser() -> argparse.ArgumentParser:
     what.add_argument("--init", action="store_true", help="make a key only if there is none")
     key.add_argument("-y", "--yes", action="store_true", help="replace a key without asking")
     key.set_defaults(func=cmd_access_key)
+    phrase = acc_sub.add_parser(
+        "phrase",
+        help="standing phrases, which work as codes until removed",
+        description="Standing phrases, such as one the service desk gives a VIP from memory. "
+        "Each works as an access code until it is removed, or until the end of its until "
+        "day, and each use is logged by its name. They live in access_phrases_file, "
+        "readable by root and the service only (docs/access.md).",
+    )
+    phrase_sub = phrase.add_subparsers(dest="phrase_action", required=True)
+    phrase_list = phrase_sub.add_parser("list", help="the phrases, their names and until days")
+    settings_file(phrase_list)
+    phrase_list.set_defaults(func=cmd_access_phrase_list)
+    phrase_add = phrase_sub.add_parser(
+        "add",
+        help="add a phrase",
+        description="Add a standing phrase. Leave out PHRASE to type it when asked, which "
+        "keeps it out of the shell's history.",
+    )
+    phrase_add.add_argument("name", help="what the journal and access show call it, e.g. vip")
+    phrase_add.add_argument("phrase", nargs="?", help="the phrase; asked for when left out")
+    phrase_add.add_argument(
+        "--until", metavar="YYYY-MM-DD", help="the last day it works, in access_timezone"
+    )
+    settings_file(phrase_add)
+    phrase_add.set_defaults(func=cmd_access_phrase_add)
+    phrase_remove = phrase_sub.add_parser("remove", help="remove a phrase by its name")
+    phrase_remove.add_argument("name")
+    settings_file(phrase_remove)
+    phrase_remove.set_defaults(func=cmd_access_phrase_remove)
+    phrase_import = phrase_sub.add_parser(
+        "import",
+        help="replace the phrases with another server's, from stdin",
+        description="ssh first sudo cat /etc/texas2step/access-phrases.toml "
+        "| sudo texas2step access phrase import",
+    )
+    settings_file(phrase_import)
+    phrase_import.set_defaults(func=cmd_access_phrase_import)
+    phrase_init = phrase_sub.add_parser(
+        "init", help="make the file, with two examples commented out, if there is none"
+    )
+    settings_file(phrase_init)
+    phrase_init.set_defaults(func=cmd_access_phrase_init)
 
     res = sub.add_parser("results", help="the saved results that History shows")
     res_sub = res.add_subparsers(dest="action", required=True)

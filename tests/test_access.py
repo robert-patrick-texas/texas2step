@@ -7,7 +7,8 @@ import stat
 import sys
 import threading
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 import uvicorn
@@ -182,6 +183,108 @@ def test_the_fingerprint_changes_with_anything_that_changes_codes():
         assert other.fingerprint() != print_
 
 
+PHRASES = """
+[[phrase]]
+name = "vip"
+phrase = "Copper Lantern, Harbor Violet"
+
+[[phrase]]
+name = "field-team"
+phrase = "maple orbit"
+until = 2026-12-31
+"""
+PHRASES_LIST = access.parse_phrases(PHRASES, "f")
+
+
+def test_standing_phrases_are_read_and_checked(tmp_path):
+    vip, team = access.parse_phrases(PHRASES, "f")
+    assert (vip.name, vip.code, vip.until) == ("vip", "copper.lantern.harbor.violet", None)
+    assert team.until == date(2026, 12, 31)
+    assert access.parse_phrases(access.render_phrases([vip, team]), "f") == [vip, team]
+    assert access.parse_phrases("", "f") == []
+    assert access.parse_phrases(access.render_phrases([]), "f") == []  # examples commented out
+    assert access.read_phrases(tmp_path / "none.toml") == []  # no file: no phrases
+    text = '[[phrase]]\nname = "a"\nphrase = "b"\nuntil = "2026-01-02"\n'
+    assert access.parse_phrases(text, "f")[0].until == date(2026, 1, 2)
+
+    def entry(**kw):
+        return "[[phrase]]\n" + "".join(f"{k} = {v}\n" for k, v in kw.items())
+
+    for text, said in (
+        ("words = 1", "expected only \\[\\[phrase\\]\\] tables"),
+        ('phrase = ["a"]', "expected only"),
+        ("[[phrase]", "f: "),  # not TOML
+        (entry(name='"vip"', phrase='"a"', note='"x"'), "phrase 'vip': unknown note"),
+        (entry(phrase='"a"'), "phrase 1: name is"),
+        (entry(name='"two words"', phrase='"a"'), "name is up to 40"),
+        (entry(name='"vip"'), "phrase needs letters or digits"),
+        (entry(name='"vip"', phrase='" - "'), "phrase needs letters or digits"),
+        (entry(name='"vip"', phrase='"café au lait"'), "outside ASCII"),
+        (entry(name='"vip"', phrase='"a"', until="2026-12-31T10:00:00"), "until is a day"),
+        (entry(name='"vip"', phrase='"a"', until='"soon"'), "until is a day"),
+        (entry(name='"a"', phrase='"x"') + entry(name='"A"', phrase='"y"'), "name is taken"),
+        (entry(name='"a"', phrase='"x y"') + entry(name='"b"', phrase='"X-Y"'), "same phrase as"),
+    ):
+        with pytest.raises(access.AccessError, match=said):
+            access.parse_phrases(text, "f")
+
+
+def test_the_examples_are_a_pattern_but_never_phrases():
+    header = access.render_phrases([])
+    examples = header[header.index("# [[phrase]]") :]
+    uncommented = "\n".join(line.removeprefix("#").strip() for line in examples.splitlines())
+    # Anyone can read them, so as they are they're refused, in any case and spacing.
+    with pytest.raises(access.AccessError, match="phrase 'future': that is a published example"):
+        access.parse_phrases(uncommented, "f")
+    for example in access.EXAMPLE_PHRASES:
+        assert f'phrase = "{example}"' in header
+        said = example.upper().replace(" ", "-")
+        with pytest.raises(access.AccessError, match="published example; make up your own"):
+            access.parse_phrases(f'[[phrase]]\nname = "x"\nphrase = "{said}"\n', "f")
+    # With phrases of your own in their place, the pattern works.
+    own = uncommented.replace("2026 the future is bright", "fern rocket tundra")
+    own = own.replace("vip ticket to ride 1776", "lantern quiver 4410")
+    future, vip = access.parse_phrases(own, "f")
+    assert (future.name, future.text, future.until) == (
+        "future",
+        "fern rocket tundra",
+        date(2026, 12, 31),
+    )
+    assert (vip.name, vip.text, vip.until) == ("vip", "lantern quiver 4410", None)
+    # Writing phrases keeps the examples, still commented out.
+    written = access.render_phrases(PHRASES_LIST)
+    assert written.startswith(header) and access.parse_phrases(written, "f") == PHRASES_LIST
+
+
+def test_a_standing_phrase_works_until_its_day_ends():
+    c = Codes(KEY, "daily", NYC, 2, access.drawn_words(KEY), False, 12, PHRASES_LIST)
+    vip, team = PHRASES_LIST
+    assert c.phrase("copper lantern harbor violet") == vip
+    assert c.phrase("COPPER-LANTERN-HARBOR-VIOLET") == vip
+    assert c.phrase("copper lantern") is None and c.phrase("") is None
+    assert c.phrase("Maple Orbit") == team
+    # Through the end of 2026-12-31 in New York, which is 05:00 UTC the day after.
+    assert not c.expired(team, datetime(2027, 1, 1, 4, 59, tzinfo=UTC))
+    assert c.expired(team, datetime(2027, 1, 1, 5, 0, tzinfo=UTC))
+    assert not c.expired(vip, datetime(2099, 1, 1, tzinfo=UTC))
+
+
+def test_the_fingerprint_covers_the_phrases():
+    words = access.drawn_words(KEY)
+    plain = Codes(KEY, "daily", NYC, 2, words, False, 12)
+    assert plain.fingerprint() == codes().fingerprint()  # as before there were phrases
+    with_phrases = Codes(KEY, "daily", NYC, 2, words, False, 12, PHRASES_LIST)
+    renamed = [access.Phrase("other", p.text, p.until) for p in PHRASES_LIST]
+    assert with_phrases.fingerprint() != plain.fingerprint()
+    assert Codes(KEY, "daily", NYC, 2, words, False, 12, renamed).fingerprint() == (
+        with_phrases.fingerprint()
+    )
+    later = [PHRASES_LIST[0], access.Phrase("field-team", "maple orbit", date(2027, 1, 1))]
+    assert Codes(KEY, "daily", NYC, 2, words, False, 12, later).fingerprint() != (
+        with_phrases.fingerprint()
+    )
+
+
 def test_passes():
     c = codes()
     token, expires = c.issue(now=1_000_000)
@@ -230,6 +333,7 @@ def gated(tmp_path, key_file, **kw) -> TestClient:
         results_path=str(tmp_path / "r.db"),
         trusted_proxies=["testclient"],  # so X-Forwarded-For names the visitor
         access_key_file=str(key_file),
+        access_phrases_file=str(tmp_path / "access-phrases.toml"),
         **({"access_code": "daily"} | kw),
     )
     return TestClient(create_app(settings))
@@ -280,6 +384,36 @@ def test_loopback_and_internal_networks_need_no_code(tmp_path, key_file):
         assert c.get("/api/v1/info", headers=INSIDE).status_code == 200
         assert c.get("/api/v1/info", headers={"X-Forwarded-For": "127.0.0.1"}).status_code == 200
         assert c.get("/api/v1/info", headers=OUTSIDE).status_code == 401
+
+
+def test_a_standing_phrase_buys_a_pass_and_is_logged(tmp_path, key_file, caplog):
+    yesterday = datetime.now(ZoneInfo(NYC)).date() - timedelta(1)
+    (tmp_path / "access-phrases.toml").write_text(
+        PHRASES + f'\n[[phrase]]\nname = "gala"\nphrase = "spring gala"\nuntil = {yesterday}\n'
+    )
+    with gated(tmp_path, key_file) as c, caplog.at_level(logging.WARNING):
+        r = c.post("/api/v1/access", json={"code": "Copper lantern harbor violet"}, headers=OUTSIDE)
+        assert r.status_code == 200
+        token = r.json()["pass"]
+        assert c.get("/api/v1/info", params={"pass": token}, headers=OUTSIDE).status_code == 200
+        assert "access phrase vip used from 203.0.113.9" in caplog.text
+        r = c.post("/api/v1/access", json={"code": "spring gala"}, headers=OUTSIDE)
+        assert r.status_code == 403 and r.json()["detail"] == "that isn't the current access code"
+        assert "expired access phrase gala from 203.0.113.9" in caplog.text
+        assert c.app.state.attempts.failures["203.0.113.9"]  # it counts as a wrong code
+        unlock(c)  # the day's code still works beside the phrases
+        # A phrase's pass is like the code's: the day's code stays the desk's.
+        r = c.get("/api/v1/access/code", params={"pass": token}, headers=OUTSIDE)
+        assert r.status_code == 404
+    assert "copper" not in caplog.text.lower() and "spring" not in caplog.text
+
+
+def test_a_broken_phrases_file_stops_the_server(tmp_path, key_file):
+    (tmp_path / "access-phrases.toml").write_text('[[phrase]]\nname = "vip"\n')
+    with pytest.raises(ValueError, match="phrase 'vip': phrase needs letters or digits"):
+        gated(tmp_path, key_file)
+    # While access codes are off, the file isn't read.
+    gated(tmp_path, key_file, access_code="off").close()
 
 
 def test_wrong_codes_lock_an_address_out_for_a_while(tmp_path, key_file):
@@ -399,7 +533,12 @@ def test_result_ids_read_well_over_the_phone(tmp_path):
 
 def config_file(tmp_path, key_file, **kw) -> str:
     path = tmp_path / "config.toml"
-    lines = [f'access_key_file = "{key_file}"', *(f"{k} = {v!r}" for k, v in kw.items())]
+    phrases = tmp_path / "access-phrases.toml"
+    lines = [
+        f'access_key_file = "{key_file}"',
+        f'access_phrases_file = "{phrases}"',
+        *(f"{k} = {v!r}" for k, v in kw.items()),
+    ]
     path.write_text("\n".join(lines).replace("'", '"') + "\n")
     return str(path)
 
@@ -444,7 +583,60 @@ def test_access_show_and_words(tmp_path, key_file, capsys):
     assert capsys.readouterr().out.split() == access.drawn_words(access.read_key(key_file))
 
     cli.main(["access", "show", "--config", config_file(tmp_path, key_file)])
-    assert 'Access codes are off (access_code = "off")' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert 'Access codes are off (access_code = "off")' in out
+    assert re.search(r"\nPhrases: +none\n", out)
+
+
+def test_access_phrase_commands(tmp_path, key_file, monkeypatch, capsys):
+    conf = config_file(tmp_path, key_file, access_code="daily")
+    path = tmp_path / "access-phrases.toml"
+
+    def phrase(*args: str) -> None:
+        cli.main(["access", "phrase", *args, "--config", conf])
+
+    phrase("list")
+    assert capsys.readouterr().out == f"There is no {path}.\n"
+    phrase("init")  # as the package does on install
+    assert capsys.readouterr().out == f"Wrote {path}, with two examples commented out.\n"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    phrase("init")  # an existing file stays
+    assert capsys.readouterr().out == ""
+    phrase("list")
+    assert capsys.readouterr().out == f"No standing phrases in {path}.\n"
+    phrase("add", "vip", "copper lantern harbor violet")
+    assert "| sudo texas2step access phrase import" in capsys.readouterr().out
+    assert stat.S_IMODE(path.stat().st_mode) == 0o640
+    monkeypatch.setattr(sys, "stdin", io.StringIO("maple orbit\n"))  # piped in, not typed
+    phrase("add", "field-team", "--until", "2099-12-31")
+    with pytest.raises(SystemExit, match="a phrase named VIP already; remove it first"):
+        phrase("add", "VIP", "something else")
+    with pytest.raises(SystemExit, match="the same phrase as 'vip'"):
+        phrase("add", "other", "Copper-Lantern Harbor-Violet")
+    with pytest.raises(SystemExit, match="until is a day"):
+        phrase("add", "other", "x", "--until", "soon")
+    capsys.readouterr()
+
+    phrase("list")
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0] == f"{path}:"
+    assert lines[1].split() == ["vip", "copper", "lantern", "harbor", "violet"]
+    assert lines[2].split() == ["field-team", "maple", "orbit", "until", "2099-12-31"]
+    cli.main(["access", "show", "--config", conf])
+    assert re.search(r"\nPhrases: +vip, field-team \(until 2099-12-31\)\n", capsys.readouterr().out)
+
+    text = path.read_text()
+    phrase("remove", "vip")
+    assert [p.name for p in access.read_phrases(path)] == ["field-team"]
+    with pytest.raises(SystemExit, match="there is no phrase named vip"):
+        phrase("remove", "vip")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(text))  # another server's file
+    phrase("import")
+    assert path.read_text() == text
+    monkeypatch.setattr(sys, "stdin", io.StringIO('[[phrase]]\nname = "x"\n'))
+    with pytest.raises(SystemExit, match="phrase 'x': phrase needs letters or digits"):
+        phrase("import")
+    assert path.read_text() == text
 
 
 @pytest.fixture

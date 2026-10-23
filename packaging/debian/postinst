@@ -14,6 +14,9 @@ if [ "$1" = "configure" ]; then
     # Readable by root and the service's group only. It stays put on upgrades.
     /opt/texas2step/venv/bin/texas2step access key --init \
         || echo "texas2step: no access key was made; see docs/access.md" >&2
+    # The standing phrases, beside it and as private: none yet, two examples commented out.
+    /opt/texas2step/venv/bin/texas2step access phrase init >/dev/null \
+        || echo "texas2step: no access phrases file was made; see docs/access.md" >&2
 fi
 
 # Enable and (re)start the service, as dh_installsystemd would.
