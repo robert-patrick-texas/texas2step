@@ -55,6 +55,7 @@ CONFIG = "/etc/texas2step/config.toml"
 DEFAULTS = "/etc/default/texas2step"
 NGINX_PREFIX = "/etc/nginx"
 UPSTREAM_CONF = "/etc/nginx/conf.d/texas2step.conf"
+LOG_CONF = "/etc/nginx/conf.d/texas2step-log.conf"
 SNIPPET = "snippets/texas2step.conf"
 PACKAGED_SNIPPET = f"{NGINX_PREFIX}/{SNIPPET}"
 DEFAULT_PATH = "/texas2step"
@@ -65,7 +66,12 @@ INSTALL = "texas2step-install.sh"
 PLAN_JSON = "texas2step-plan.json"
 # The package's own nginx files. When nginx loads one that an upgrade changes, the
 # install script reloads nginx.
-PACKAGED_NGINX = (UPSTREAM_CONF, PACKAGED_SNIPPET, f"{NGINX_PREFIX}/{SPEEDTEST_SNIPPET}")
+PACKAGED_NGINX = (
+    UPSTREAM_CONF,
+    LOG_CONF,
+    PACKAGED_SNIPPET,
+    f"{NGINX_PREFIX}/{SPEEDTEST_SNIPPET}",
+)
 MARK = "# Written by texas2step-setup"
 
 OK, CHANGE, FIX, NOTE = "ok", "change", "fix", "note"

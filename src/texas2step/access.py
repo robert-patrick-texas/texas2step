@@ -36,7 +36,6 @@ import re
 import secrets
 import time
 import tomllib
-from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -477,27 +476,3 @@ def is_internal(ip: str, networks: list[str]) -> bool:
     return addr.is_loopback or any(
         addr in ipaddress.ip_network(net, strict=False) for net in networks
     )
-
-
-class Attempts:
-    """Wrong codes per client address, to slow down guessing (each worker counts its own)."""
-
-    def __init__(self, limit: int = 10, window: float = 600.0) -> None:
-        self.limit = limit
-        self.window = window
-        self.failures: dict[str, deque[float]] = {}
-
-    def blocked(self, ip: str, now: float | None = None) -> bool:
-        now = now if now is not None else time.monotonic()
-        failures = self.failures.get(ip)
-        while failures and failures[0] <= now - self.window:
-            failures.popleft()
-        if failures is not None and not failures:
-            del self.failures[ip]
-        return bool(failures) and len(failures) >= self.limit
-
-    def failed(self, ip: str, now: float | None = None) -> None:
-        now = now if now is not None else time.monotonic()
-        self.failures.setdefault(ip, deque()).append(now)
-        if len(self.failures) > 10_000:  # forget the oldest addresses first
-            del self.failures[next(iter(self.failures))]

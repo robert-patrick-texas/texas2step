@@ -65,6 +65,25 @@ PAYLOAD_SQL = ", ".join(
 )
 
 
+def prepare(db: sqlite3.Connection, path: str, schema: str) -> None:
+    """WAL mode, so several workers may write, and the schema.
+
+    Several uvicorn workers open the file at once. On a new file, SQLite reports "database
+    is locked" immediately, without waiting, to every worker but the one switching it to
+    WAL, so retry briefly.
+    """
+    for attempt in range(100):
+        try:
+            if path != ":memory:":
+                db.execute("PRAGMA journal_mode=WAL")
+            db.executescript(schema)
+            return
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc) or attempt == 99:
+                raise
+            time.sleep(0.05)
+
+
 def _dig(data: Any, *path: str) -> float | None:
     for key in path:
         if not isinstance(data, dict):
@@ -94,19 +113,7 @@ class ResultStore:
             self._setup()
 
     def _setup(self) -> None:
-        # Several uvicorn workers open the file at once. On a new file, SQLite reports
-        # "database is locked" immediately, without waiting, to every worker but the one
-        # switching it to WAL, so retry briefly.
-        for attempt in range(100):
-            try:
-                if self.path != ":memory:":
-                    self._db.execute("PRAGMA journal_mode=WAL")  # several workers may write
-                self._db.executescript(SCHEMA)
-                return
-            except sqlite3.OperationalError as exc:
-                if "locked" not in str(exc) or attempt == 99:
-                    raise
-                time.sleep(0.05)
+        prepare(self._db, self.path, SCHEMA)
 
     def close(self) -> None:
         with self._lock:

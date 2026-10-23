@@ -8,17 +8,22 @@ import sys
 import threading
 import time
 from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
 import uvicorn
 from fastapi.testclient import TestClient
+from starlette.requests import HTTPConnection
 from starlette.websockets import WebSocketDisconnect
 
-from texas2step import access, cli, engine
-from texas2step.access import Attempts, Codes, is_internal, normalize
+from texas2step import __version__, access, cli, engine
+from texas2step.access import Codes, is_internal, normalize
+from texas2step.api import access as access_api
+from texas2step.api.meta import client_address
 from texas2step.app import create_app
 from texas2step.config import Settings
+from texas2step.lockouts import LockoutStore
 from texas2step.store import ID_LETTERS, ResultStore, new_id
 
 KEY = access.parse_key(access.new_key())
@@ -309,15 +314,6 @@ def test_who_is_internal():
     assert not is_internal("unknown", nets)
 
 
-def test_wrong_codes_are_counted_per_address():
-    tries = Attempts(limit=3, window=60)
-    for t in range(3):
-        assert not tries.blocked("a", now=t)
-        tries.failed("a", now=t)
-    assert tries.blocked("a", now=10) and not tries.blocked("b", now=10)
-    assert not tries.blocked("a", now=61)  # the oldest fell out of the window
-
-
 # --- The server --------------------------------------------------------------------
 
 
@@ -334,6 +330,7 @@ def gated(tmp_path, key_file, **kw) -> TestClient:
         trusted_proxies=["testclient"],  # so X-Forwarded-For names the visitor
         access_key_file=str(key_file),
         access_phrases_file=str(tmp_path / "access-phrases.toml"),
+        access_lockouts_file=str(tmp_path / "access.db"),
         **({"access_code": "daily"} | kw),
     )
     return TestClient(create_app(settings))
@@ -349,7 +346,7 @@ def unlock(c: TestClient, headers=OUTSIDE) -> str:
 def test_visitors_need_a_pass_for_tests(tmp_path, key_file, caplog):
     with gated(tmp_path, key_file) as c:
         assert c.get("/api/v1/access", headers=OUTSIDE).json() == {"required": True, "desk": True}
-        for open_path in ("/", "/monitor", "/api/v1/health", "/favicon.svg"):
+        for open_path in ("/", "/api/v1/health", "/favicon.svg"):
             assert c.get(open_path, headers=OUTSIDE).status_code == 200, open_path
         for path in ("/api/v1/info", "/api/v1/locations", "/api/v1/ping", "/api/v1/whoami"):
             assert c.get(path, headers=OUTSIDE).status_code == 401, path
@@ -400,7 +397,7 @@ def test_a_standing_phrase_buys_a_pass_and_is_logged(tmp_path, key_file, caplog)
         r = c.post("/api/v1/access", json={"code": "spring gala"}, headers=OUTSIDE)
         assert r.status_code == 403 and r.json()["detail"] == "that isn't the current access code"
         assert "expired access phrase gala from 203.0.113.9" in caplog.text
-        assert c.app.state.attempts.failures["203.0.113.9"]  # it counts as a wrong code
+        assert c.app.state.lockouts.current() == ([], 1)  # it counts as a wrong code
         unlock(c)  # the day's code still works beside the phrases
         # A phrase's pass is like the code's: the day's code stays the desk's.
         r = c.get("/api/v1/access/code", params={"pass": token}, headers=OUTSIDE)
@@ -416,14 +413,195 @@ def test_a_broken_phrases_file_stops_the_server(tmp_path, key_file):
     gated(tmp_path, key_file, access_code="off").close()
 
 
-def test_wrong_codes_lock_an_address_out_for_a_while(tmp_path, key_file):
-    with gated(tmp_path, key_file) as c:
-        for _ in range(10):
-            r = c.post("/api/v1/access", json={"code": "no"}, headers=OUTSIDE)
+def test_three_wrong_codes_lock_a_network_out_silently(tmp_path, key_file, caplog):
+    with (
+        gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c,
+        caplog.at_level(logging.WARNING),
+    ):
+        code = c.app.state.codes.current(datetime.now(UTC)).code
+        answers = []
+        # Three addresses of one /24: they count together.
+        for last in (9, 10, 11, 12):
+            ip = {"X-Forwarded-For": f"203.0.113.{last}"}
+            r = c.post("/api/v1/access", json={"code": "wrong.words.00"}, headers=ip)
+            answers.append((r.status_code, r.json()))
+        # Locked out: the right code gets the same answer as a wrong one, unread.
+        r = c.post("/api/v1/access", json={"code": code}, headers=OUTSIDE)
+        answers.append((r.status_code, r.json()))
+        assert set(map(str, answers)) == {str((403, {"detail": access_api.WRONG}))}
+        assert "203.0.113.0/24 locked out after 3 wrong access codes in a row" in caplog.text
+        assert "access code from 203.0.113.12 ignored: 203.0.113.0/24 is locked out" in caplog.text
+        assert "access code from 203.0.113.9 ignored" in caplog.text
+        assert code not in caplog.text
+        # Another network, and the desk, are not affected.
+        unlock(c, {"X-Forwarded-For": "198.51.100.9"})
+        for _ in range(5):
+            r = c.post("/api/v1/access", json={"code": "no"}, headers=INSIDE)
             assert r.status_code == 403
-        r = c.post("/api/v1/access", json={"code": "no"}, headers=OUTSIDE)
-        assert r.status_code == 429
-        assert c.post("/api/v1/access", json={"code": "no"}, headers=INSIDE).status_code == 403
+        unlock(c, INSIDE)
+        # IPv6: the whole /48.
+        for host in ("2001:db8:5:1::1", "2001:db8:5:2::1", "2001:db8:5:ffff::9"):
+            c.post("/api/v1/access", json={"code": "no"}, headers={"X-Forwarded-For": host})
+        r = c.post(
+            "/api/v1/access", json={"code": code}, headers={"X-Forwarded-For": "2001:db8:5::7"}
+        )
+        assert r.status_code == 403
+        unlock(c, {"X-Forwarded-For": "2001:db8:6::7"})
+        locked, counting = c.app.state.lockouts.current()
+        assert [x.network for x in locked] == ["203.0.113.0/24", "2001:db8:5::/48"]
+        assert counting == 0
+
+
+def test_the_desk_blocks_networks_through_the_api(tmp_path, key_file, caplog):
+    with (
+        gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c,
+        caplog.at_level(logging.WARNING),
+    ):
+        token = unlock(c)
+        for headers, params in ((OUTSIDE, {}), (OUTSIDE, {"pass": token})):
+            assert c.get("/api/v1/access/blocks", headers=headers, params=params).status_code == 404
+            r = c.post(
+                "/api/v1/access/blocks", json={"network": "198.51.100.0/24"}, headers=headers
+            )
+            assert r.status_code == 404
+        r = c.post(
+            "/api/v1/access/blocks", json={"network": "198.51.100.7", "minutes": 60}, headers=INSIDE
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert (
+            body["network"] == "198.51.100.7/32"
+            and body["source"] == "blocked by the API from 10.1.2.3"
+        )
+        assert "198.51.100.7/32 blocked until" in caplog.text
+        # The blocked address can't enter the right code; its neighbour can.
+        code = c.app.state.codes.current(datetime.now(UTC)).code
+        r = c.post(
+            "/api/v1/access", json={"code": code}, headers={"X-Forwarded-For": "198.51.100.7"}
+        )
+        assert r.status_code == 403
+        unlock(c, {"X-Forwarded-For": "198.51.100.8"})
+        listed = c.get("/api/v1/access/blocks", headers=INSIDE).json()
+        assert [x["network"] for x in listed["lockouts"]] == ["198.51.100.7/32"]
+        for bad, said in (
+            ("10.9.0.0/16", "overlaps 10.0.0.0/8"),
+            ("127.0.0.1", "overlaps 127.0.0.0/8"),
+            ("0.0.0.0/0", "overlaps"),
+            ("nowhere", "isn't an address or a network"),
+        ):
+            r = c.post("/api/v1/access/blocks", json={"network": bad}, headers=INSIDE)
+            assert r.status_code == 400 and said in r.json()["detail"], bad
+        r = c.delete("/api/v1/access/blocks", params={"network": "198.51.100.0/24"}, headers=INSIDE)
+        assert r.json() == {"cleared": ["198.51.100.7/32"]}
+        unlock(c, {"X-Forwarded-For": "198.51.100.7"})
+        # The server itself counts as inside, for automation run there.
+        loop = {"X-Forwarded-For": "127.0.0.1"}
+        r = c.post("/api/v1/access/blocks", json={"network": "2001:db8:9::/48"}, headers=loop)
+        assert r.status_code == 200
+        r = c.delete("/api/v1/access/blocks", params={"network": "all"}, headers=loop)
+        assert r.json() == {"cleared": ["2001:db8:9::/48"]}
+
+
+def test_pages_need_a_pass_from_outside(tmp_path, key_file):
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        for page in ("/monitor", "/diag"):
+            r = c.get(page, headers=OUTSIDE, follow_redirects=False)
+            assert r.status_code == 303 and r.headers["location"] == "/", page
+            assert c.get(page, headers=INSIDE, follow_redirects=False).status_code == 200
+        r = c.post(
+            "/api/v1/access",
+            json={"code": c.app.state.codes.current(datetime.now(UTC)).code},
+            headers=OUTSIDE,
+        )
+        cookie = r.headers["set-cookie"]
+        assert cookie.startswith(f"{access_api.PASS_COOKIE}={r.json()['pass']};")
+        for part in ("HttpOnly", "Max-Age=43200", "Path=/", "SameSite=strict"):
+            assert part in cookie, part
+        assert "Secure" not in cookie  # plain HTTP here; behind nginx's HTTPS it is Secure
+        for page in ("/monitor", "/diag"):  # the cookie now goes with each page load
+            assert c.get(page, headers=OUTSIDE, follow_redirects=False).status_code == 200
+        assert c.get("/history", headers=OUTSIDE, follow_redirects=False).status_code == 404
+        c.cookies.clear()
+        r = c.get("/monitor", headers=OUTSIDE, follow_redirects=False)
+        assert r.status_code == 303
+        # Without internal_networks, the desk's pages are every pass holder's, and only theirs.
+    with gated(tmp_path, key_file) as c:
+        for page in ("/history", "/r/k7q2-m9xd", "/api/docs", "/api/openapi.json"):
+            r = c.get(page, headers=OUTSIDE, follow_redirects=False)
+            assert r.status_code == 303, page
+        token = unlock(c)
+        c.cookies.clear()
+        r = c.get("/history", params={"pass": token}, headers=OUTSIDE, follow_redirects=False)
+        assert r.status_code == 200
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        prefix = OUTSIDE | {"X-Forwarded-Prefix": "/texas2step", "X-Forwarded-Proto": "https"}
+        r = c.get("/monitor", headers=prefix, follow_redirects=False)
+        assert r.headers["location"] == "/texas2step/"
+        r = c.post("/api/v1/access", json={"code": "x"}, headers=prefix)
+        code = c.app.state.codes.current(datetime.now(UTC)).code
+        r = c.post("/api/v1/access", json={"code": code}, headers=prefix)
+        assert (
+            "Path=/texas2step/" in r.headers["set-cookie"] and "Secure" in r.headers["set-cookie"]
+        )
+
+
+def test_the_version_stays_inside(tmp_path, key_file):
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        assert c.get("/api/v1/health", headers=OUTSIDE).json() == {"status": "ok"}
+        assert c.get("/api/v1/health", headers=INSIDE).json()["version"] == __version__
+        meta = f'<meta name="texas2step-version" content="{__version__}" />'
+        assert meta not in c.get("/", headers=OUTSIDE).text
+        assert meta in c.get("/", headers=INSIDE).text
+        unlock(c)  # with the pass cookie, the page has it
+        assert meta in c.get("/", headers=OUTSIDE).text
+    # Without codes, nothing asks visitors who they are: the version is everyone's.
+    with gated(tmp_path, key_file, access_code="off") as c:
+        assert c.get("/api/v1/health", headers=OUTSIDE).json()["version"] == __version__
+
+
+def test_a_proxy_without_the_visitors_address_counts_as_outside(tmp_path, key_file):
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        # A hand-written nginx location that forgets X-Forwarded-For: not loopback.
+        lost = {"X-Forwarded-Proto": "https"}
+        assert c.get("/api/v1/access/code", headers=lost).status_code == 404
+        assert c.get("/api/v1/info", headers=lost).status_code == 401
+        assert c.get("/api/v1/whoami", headers=INSIDE).json()["ip"] == "10.1.2.3"
+
+        # On the server itself, without a proxy, it's loopback as before.
+        def peer(headers: dict[str, str]) -> str:
+            raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+            app = SimpleNamespace(state=SimpleNamespace(settings=Settings()))  # trusts 127.0.0.1
+            scope = {"type": "http", "client": ("127.0.0.1", 5000), "headers": raw, "app": app}
+            return client_address(HTTPConnection(scope))[0]
+
+        assert peer({}) == "127.0.0.1"
+        assert peer({"X-Forwarded-For": "203.0.113.9"}) == "203.0.113.9"
+        for header in ("X-Forwarded-Proto", "X-Forwarded-Prefix", "X-Forwarded-Host", "Forwarded"):
+            assert peer({header: "x"}) == "unknown", header
+
+
+def test_request_bodies_are_capped_before_they_are_read(tmp_path, key_file):
+    with gated(tmp_path, key_file) as c:
+        r = c.post("/api/v1/access", content=b"x" * 5000, headers=OUTSIDE)
+        assert r.status_code == 413 and "up to 1024 bytes" in r.json()["detail"]
+
+        def chunks():  # no Content-Length: read only until the cap
+            for _ in range(100):
+                yield b"x" * 1000
+
+        r = c.post("/api/v1/access", content=chunks(), headers=OUTSIDE)
+        assert r.status_code == 413
+        r = c.post("/api/v1/access", json={"code": "wrong.words.00"}, headers=OUTSIDE)
+        assert r.status_code == 403  # a normal one still gets through
+        token = unlock(c)
+        big = {"version": 1, "pad": "x" * (2 << 20)}
+        r = c.post("/api/v1/results", params={"pass": token}, json=big, headers=OUTSIDE)
+        assert r.status_code == 413
+        r = c.post("/api/v1/results", params={"pass": token}, json={"version": 1}, headers=OUTSIDE)
+        assert r.status_code == 201
+        # The upload test takes any size.
+        r = c.post("/api/v1/up", params={"pass": token}, content=b"x" * (3 << 20), headers=OUTSIDE)
+        assert r.status_code == 200
 
 
 def test_the_desk_reads_the_code(tmp_path, key_file):
@@ -588,6 +766,43 @@ def test_access_show_and_words(tmp_path, key_file, capsys):
     assert re.search(r"\nPhrases: +none\n", out)
 
 
+def test_access_lockout_commands(tmp_path, key_file, capsys):
+    db = tmp_path / "access.db"
+    conf = config_file(tmp_path, key_file, access_code="daily", internal_networks=["10.0.0.0/8"])
+    with open(conf, "a") as f:
+        f.write(f'access_lockouts_file = "{db}"\n')
+
+    def access_cli(*args: str) -> str:
+        cli.main(["access", *args, "--config", conf])
+        return capsys.readouterr().out
+
+    assert access_cli("lockouts") == "No networks are locked out.\n"
+    assert not db.exists()  # listing doesn't make the file
+    out = access_cli("block", "203.0.113.7/24", "--minutes", "90")
+    assert out.startswith("203.0.113.0/24 is locked out until ")
+    with pytest.raises(SystemExit, match=re.escape("10.9.0.0/16 overlaps 10.0.0.0/8")):
+        access_cli("block", "10.9.0.0/16")
+    with pytest.raises(SystemExit, match="'here' isn't an address or a network"):
+        access_cli("block", "here")
+    with pytest.raises(SystemExit, match="--minutes: expected more than 0"):
+        access_cli("block", "203.0.113.0/24", "--minutes", "0")
+    store = LockoutStore(db)
+    for ip in ("198.51.100.1", "198.51.100.2", "198.51.100.3", "192.0.2.1"):
+        store.submit(ip, lambda: (False, "wrong access code"))
+    store.close()
+    lines = access_cli("lockouts").splitlines()
+    assert lines[0].startswith("Locked out (the right code is refused too")
+    assert lines[1].split()[:4] == ["Network", "Since", "Until", "Why"]
+    assert lines[2].split()[0] == "203.0.113.0/24"
+    assert lines[2].endswith("blocked from the command line")
+    assert lines[3].split()[0] == "198.51.100.0/24" and lines[3].endswith("3 wrong codes in a row")
+    assert lines[4] == "1 more network with wrong codes in a row."
+    assert access_cli("lockouts", "--clear", "198.51.100.200") == "Ended: 198.51.100.0/24.\n"
+    assert access_cli("lockouts", "--clear", "198.51.100.0/24") == "No lockout overlaps that.\n"
+    assert access_cli("lockouts", "--clear", "all") == "Ended: 192.0.2.0/24, 203.0.113.0/24.\n"
+    assert access_cli("lockouts") == "No networks are locked out.\n"
+
+
 def test_access_phrase_commands(tmp_path, key_file, monkeypatch, capsys):
     conf = config_file(tmp_path, key_file, access_code="daily")
     path = tmp_path / "access-phrases.toml"
@@ -647,6 +862,8 @@ def gated_server(tmp_path, key_file):
         results_path=str(tmp_path / "r.db"),
         access_code="daily",
         access_key_file=str(key_file),
+        access_phrases_file=str(tmp_path / "access-phrases.toml"),
+        access_lockouts_file=str(tmp_path / "access.db"),
         internal_networks=["10.0.0.0/8"],
         trusted_proxies=[],  # loopback stays loopback: the test marks itself outside below
     )

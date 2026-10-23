@@ -159,9 +159,10 @@ What the package installs:
 | `/etc/texas2step/config.toml` | Settings; see [Configuration](configuration.md) |
 | `/etc/default/texas2step` | Listen address and number of worker processes |
 | `/etc/nginx/conf.d/texas2step.conf` | nginx upstream definition, which does nothing until a site includes the snippet |
+| `/etc/nginx/conf.d/texas2step-log.conf` | The snippets' log format: nginx's usual one, without query strings, which can hold an access pass |
 | `/etc/nginx/snippets/texas2step.conf` | The `/texas2step/` location for your site |
 | `/etc/nginx/snippets/texas2step-speedtest.conf` | Optional `/speedtest` redirect |
-| `/var/lib/texas2step/` | Saved results (SQLite); [`texas2step results clear`](#clear-saved-results) deletes them |
+| `/var/lib/texas2step/` | Saved results (SQLite); [`texas2step results clear`](#clear-saved-results) deletes them. With access codes on, also the [lockouts](access.md#lockouts-and-blocks) (`access.db`) |
 
 Files under `/etc` are conffiles: upgrades keep your edits.
 
@@ -742,6 +743,8 @@ What stays as it is:
   `sudo texas2step access key --new`, then a restart.
 * **The standing phrases**, `/etc/texas2step/access-phrases.toml`, if you made any: the
   clone takes the same [phrases](access.md#standing-phrases) as the first server.
+* The first server's [lockouts](access.md#lockouts-and-blocks), which end by themselves;
+  `sudo texas2step access lockouts --clear all` ends them now.
 * `/etc/default/texas2step`, and the [update timer](#unattended-updates), on or off as on
   the first server. Downloads in `/var/cache/texas2step/update` do no harm; the next
   update removes them.
@@ -783,7 +786,18 @@ longer need them, for example `sudo rm -r /opt/texas2step`.
 * Keep `allow_any_target = false` unless the server is on an isolated management
   network. Otherwise anyone can use the server to make requests to other hosts.
 * `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Prefix` are believed only
-  from `trusted_proxies` (by default, nginx on the same host).
+  from `trusted_proxies` (by default, nginx on the same host). A request from a trusted
+  proxy that names no visitor address counts as outside, not as the proxy's loopback.
+* For a server open to the Internet, turn on [access codes](access.md) and set
+  `internal_networks`. Then a visitor from outside gets only the page that asks for the
+  code until they enter it, with no version number, and [three wrong codes in a
+  row](access.md#lockouts-and-blocks) lock their /24 or /48 out. Use `access_digits = 4`
+  there.
+* Request bodies are capped by endpoint (a code 1 KB, a saved result 2 MB, others
+  64 KB) before they are read; only the upload test takes any size, and with access
+  codes on it needs a pass.
+* nginx logs texas2step's requests to `/var/log/nginx/access.log` without their query
+  strings, so the log never holds an access pass.
 * The service runs as the unprivileged `texas2step` user, under systemd sandboxing
   (`ProtectSystem=strict`, `NoNewPrivileges` and more). It can write only to
   `/var/lib/texas2step`.

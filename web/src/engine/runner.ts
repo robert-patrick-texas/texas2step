@@ -33,9 +33,11 @@ function macFrom(ip: string | undefined): Pick<TestResult["client"], "mac" | "ma
   return mac ? { mac, mac_source: "eui64" } : {};
 }
 
-/** This UI's version, written into the page by the server that served it. */
-export const VERSION =
-  document.querySelector<HTMLMetaElement>('meta[name="texas2step-version"]')?.content || "dev";
+/** This UI's version, written into the page by the server that served it. A visitor who
+ * has to enter the access code gets the page without it, and the app fills it in after. */
+export function uiVersion(): string {
+  return document.querySelector<HTMLMetaElement>('meta[name="texas2step-version"]')?.content || "dev";
+}
 
 export class TestRun {
   private ctrl = new AbortController();
@@ -50,7 +52,7 @@ export class TestRun {
   ) {
     this.result = {
       version: 1,
-      tool: `texas2step-web/${VERSION}`,
+      tool: `texas2step-web/${uiVersion()}`,
       started_at: new Date().toISOString(),
       server: { ...info.server, url: ep.base, version: info.version },
       client: {

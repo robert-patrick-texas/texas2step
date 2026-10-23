@@ -125,6 +125,11 @@ class Settings:
     access_key_file: str = "/etc/texas2step/access.key"  # the same key on every server
     # Standing phrases that always work as codes (texas2step access phrase); none without it.
     access_phrases_file: str = "/etc/texas2step/access-phrases.toml"
+    # Wrong codes count against the visitor's /24 or /48; this many in a row lock it out
+    # until no code has come from it for access_lockout_minutes (texas2step access lockouts).
+    access_lockout_after: int = 3
+    access_lockout_minutes: float = 30.0
+    access_lockouts_file: str = "/var/lib/texas2step/access.db"  # shared by the workers
     # The organization's own networks (addresses or CIDR blocks): no code is asked there,
     # and only they get saved results, the API explorer and the server-side measurements.
     internal_networks: list[str] = field(default_factory=list)
@@ -172,6 +177,10 @@ class Settings:
             raise ValueError("access_digits: expected 2, 3 or 4")
         if not 1 <= self.access_pass_hours <= 168:
             raise ValueError("access_pass_hours: expected 1 to 168 hours")
+        if not 1 <= self.access_lockout_after <= 100:
+            raise ValueError("access_lockout_after: expected 1 to 100 wrong codes")
+        if not 1 <= self.access_lockout_minutes <= 10080:
+            raise ValueError("access_lockout_minutes: expected 1 to 10080 minutes (a week)")
         for net in self.internal_networks:
             try:
                 ipaddress.ip_network(net.strip(), strict=False)

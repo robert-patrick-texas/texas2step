@@ -66,6 +66,9 @@ results_path = "/var/lib/texas2step/results.db"
 # access_key_file = "/etc/texas2step/access.key"  # copy the same key to every server
 # access_phrases_file = "/etc/texas2step/access-phrases.toml"  # standing phrases:
 #                                       # sudo texas2step access phrase add vip
+# access_lockout_after = 3              # wrong codes in a row that lock out a /24 or /48
+# access_lockout_minutes = 30           # until this long passes with no code from it
+# access_lockouts_file = "/var/lib/texas2step/access.db"  # sudo texas2step access lockouts
 # internal_networks = []                # e.g. ["10.0.0.0/8", "198.51.100.0/24"]: no code, and
 #                                       # only they see History, the API tab and saved results
 

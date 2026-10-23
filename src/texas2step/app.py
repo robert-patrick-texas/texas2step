@@ -8,21 +8,25 @@ import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import ClassVar
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
 from . import __version__, page
-from .access import Attempts, Codes, is_internal
+from .access import Codes, is_internal
 from .api import routers
-from .api.meta import client_address, http_version
+from .api.access import PASS_COOKIE
+from .api.meta import client_address, http_version, shows_version
+from .api.results import MAX_RESULT_BYTES
 from .config import Settings, load_settings
+from .lockouts import LockoutStore
 from .rtc import RtcEcho
 from .store import ResultStore
 
@@ -107,7 +111,17 @@ class AccessGate:
     """
 
     PUBLIC = ("/api/v1/health", "/api/v1/access")
-    DESK_PAGES = ("/history", "/api", "/api/docs", "/api/openapi.json", "/api/v1/access/code")
+    DESK_PAGES = (
+        "/history",
+        "/api",
+        "/api/docs",
+        "/api/openapi.json",
+        "/api/v1/access/code",
+        "/api/v1/access/blocks",
+    )
+    # Pages besides /, which asks for the code: from outside, only with a pass. A page
+    # load can't carry ?pass=, so the pass comes as the cookie POST /access sets too.
+    PAGES = ("/monitor", "/diag", "/history", "/api", "/api/docs", "/api/openapi.json")
 
     def __init__(self, app: ASGIApp, settings: Settings) -> None:
         self.app = app
@@ -136,6 +150,10 @@ class AccessGate:
         if networks and not inside and self.desk_only(scope.get("method", "GET"), path):
             await self._refuse(scope, receive, send, 404, "Not Found")
             return
+        page = path in self.PAGES or path.startswith("/r/")
+        if codes and not inside and page and not held(codes, conn):
+            await self._home(scope, receive, send, root)
+            return
         needs_pass = (
             codes and not inside and path.startswith("/api/v1/") and path not in self.PUBLIC
         )
@@ -145,12 +163,88 @@ class AccessGate:
         await self.app(scope, receive, send)
 
     @staticmethod
+    async def _home(scope: Scope, receive: Receive, send: Send, root: str) -> None:
+        """To the page that asks for the code."""
+        if scope["type"] == "websocket":
+            await WebSocketClose(code=1008, reason="access code required")(scope, receive, send)
+            return
+        headers = {"Location": f"{root}/", "Cache-Control": "no-store"}
+        await Response(status_code=303, headers=headers)(scope, receive, send)
+
+    @staticmethod
     async def _refuse(scope: Scope, receive: Receive, send: Send, status: int, why: str) -> None:
         if scope["type"] == "websocket":
             await WebSocketClose(code=1008, reason=why)(scope, receive, send)
             return
         response = JSONResponse({"detail": why}, status, headers={"Cache-Control": "no-store"})
         await response(scope, receive, send)
+
+
+def held(codes: Codes, conn: HTTPConnection) -> bool:
+    """Whether a page load comes with a current pass, in its cookie (or ?pass=)."""
+    token = conn.cookies.get(PASS_COOKIE) or conn.query_params.get("pass", "")
+    return codes.pass_expires(token) is not None
+
+
+class BodyLimit:
+    """Refuses a request body larger than its endpoint takes (413), before it is read.
+
+    Only the upload test takes any size. Without this, a body of hundreds of megabytes
+    sent to POST /api/v1/access, which needs no code, would sit in the worker's memory.
+    The bodies it allows are small, so it reads them whole, then hands them on.
+    """
+
+    UNLIMITED = ("/api/v1/up",)
+    LIMITS: ClassVar[dict[str, int]] = {
+        "/api/v1/access": 1024,
+        "/api/v1/access/blocks": 1024,
+        "/api/v1/results": MAX_RESULT_BYTES,
+    }
+    DEFAULT = 64 * 1024
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["method"] in ("GET", "HEAD", "OPTIONS"):
+            await self.app(scope, receive, send)
+            return
+        path, root = scope["path"], scope.get("root_path", "")
+        if root and path.startswith(root):
+            path = path[len(root) :] or "/"
+        if path in self.UNLIMITED:
+            await self.app(scope, receive, send)
+            return
+        limit = self.LIMITS.get(path, self.DEFAULT)
+        length = dict(scope["headers"]).get(b"content-length", b"0")
+        if not length.isdigit() or int(length) > limit:
+            await self._too_large(scope, receive, send, limit)
+            return
+        body, more = b"", True
+        while more:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            body += message.get("body", b"")
+            more = message.get("more_body", False)
+            if len(body) > limit:
+                await self._too_large(scope, receive, send, limit)
+                return
+        sent = False
+
+        async def replay() -> Message:
+            nonlocal sent
+            if sent:
+                return await receive()
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        await self.app(scope, replay, send)
+
+    @staticmethod
+    async def _too_large(scope: Scope, receive: Receive, send: Send, limit: int) -> None:
+        why = f"request body too large: this endpoint takes up to {limit} bytes"
+        await JSONResponse({"detail": why}, 413)(scope, receive, send)
 
 
 class RequestLog:
@@ -218,6 +312,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await app.state.rtc.stop()
         if app.state.store is not None:
             app.state.store.close()
+        if app.state.lockouts is not None:
+            app.state.lockouts.close()
 
     app = FastAPI(
         title="texas2step",
@@ -230,7 +326,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.codes = Codes.load(settings)
-    app.state.attempts = Attempts()
+    app.state.lockouts = None
+    if app.state.codes is not None:  # opened here, so a file that can't be used stops the start
+        app.state.lockouts = LockoutStore(
+            settings.access_lockouts_file,
+            settings.access_lockout_after,
+            settings.access_lockout_minutes,
+        )
     app.state.store = None
     app.state.rtc = RtcEcho(
         settings.ice_servers,
@@ -240,11 +342,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         port_range=settings.rtc_ports,
     )
 
+    app.add_middleware(BodyLimit)  # inside the gate: a refused request is never read
     app.add_middleware(AccessGate, settings=settings)  # inside CORS: its refusals get CORS headers
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
         allow_headers=["*"],
         expose_headers=["Server-Timing", "Content-Length"],
         max_age=600,
@@ -267,7 +370,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         outside = settings.internal_networks and not is_internal(ip, settings.internal_networks)
         hide = page.DESK_PAGES if outside else frozenset()
         root = request.scope.get("root_path", "")
-        body = shell.render(index.read_text(), root, __version__, hide)
+        codes = request.app.state.codes
+        # Not the version for a visitor who hasn't entered the code: it would tell an
+        # attacker which flaws to try. The page gets it from /api/v1/info once in.
+        known = shows_version(request) or held(codes, request)
+        body = shell.render(index.read_text(), root, __version__ if known else "", hide)
         return HTMLResponse(body, headers={"Cache-Control": "no-cache"})
 
     for route in SPA_ROUTES:

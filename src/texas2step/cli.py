@@ -590,6 +590,90 @@ def cmd_access_phrase_import(args: argparse.Namespace) -> None:
     _write_phrases(path, text, copy=False)
 
 
+def _lockouts(settings: Any) -> Any:
+    """The service's lockout file; it is made, as the service's, if there is none yet."""
+    import sqlite3
+
+    from .lockouts import LockoutStore
+
+    path = Path(settings.access_lockouts_file)
+    try:
+        return LockoutStore(path, settings.access_lockout_after, settings.access_lockout_minutes)
+    except (OSError, sqlite3.Error) as exc:
+        denied = isinstance(exc, PermissionError) or "readonly" in str(exc) or "open" in str(exc)
+        sys.exit(f"texas2step: can't use {path}: {exc}" + (" (try sudo)" if denied else ""))
+
+
+def _moment(stamp: float, zone: str) -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return f"{datetime.fromtimestamp(stamp, ZoneInfo(zone)):%Y-%m-%d %H:%M %Z}"
+
+
+def cmd_access_lockouts(args: argparse.Namespace) -> None:
+    from .lockouts import WRONG_CODES, parse_network
+
+    settings = _server_settings(args)
+    if args.clear:
+        try:
+            target = None if args.clear == "all" else str(parse_network(args.clear))
+        except ValueError as exc:
+            sys.exit(f"texas2step: {exc}")
+        store = _lockouts(settings)
+        cleared = store.clear(target)
+        store.close()
+        print(f"Ended: {', '.join(cleared)}." if cleared else "No lockout overlaps that.")
+        return
+    if not Path(settings.access_lockouts_file).exists():
+        print("No networks are locked out.")
+        return
+    store = _lockouts(settings)
+    locked, counting = store.current()
+    store.close()
+    zone = settings.access_timezone
+    if not locked:
+        print("No networks are locked out.")
+    else:
+        print("Locked out (the right code is refused too, until the end, which each try moves):")
+        rows = []
+        for x in locked:
+            why = f"{x.failures} wrong codes in a row" if x.source == WRONG_CODES else x.source
+            rows.append((x.network, _moment(x.locked_at, zone), _moment(x.expires, zone), why))
+        widths = [max(len(row[i]) for row in rows) for i in range(3)]
+        print(f"  {'Network':<{widths[0]}}   {'Since':<{widths[1]}}   {'Until':<{widths[2]}}   Why")
+        for row in rows:
+            print(
+                "  " + "   ".join(f"{cell:<{w}}" for cell, w in zip(row, [*widths, 0], strict=True))
+            )
+    if counting:
+        print(f"{counting} more network{'s' if counting > 1 else ''} with wrong codes in a row.")
+    if settings.access_code == "off":
+        print('Access codes are off (access_code = "off"), so lockouts have no effect.')
+
+
+def cmd_access_block(args: argparse.Namespace) -> None:
+    from .lockouts import inside_of, parse_network
+
+    settings = _server_settings(args)
+    try:
+        net = parse_network(args.network)
+    except ValueError as exc:
+        sys.exit(f"texas2step: {exc}")
+    if inside := inside_of(net, settings.internal_networks):
+        sys.exit(f"texas2step: {net} overlaps {inside}, which is never locked out")
+    if args.minutes is not None and not 0 < args.minutes <= 525_600:
+        sys.exit("texas2step: --minutes: expected more than 0, up to 525600 (a year)")
+    minutes = args.minutes or settings.access_lockout_minutes
+    store = _lockouts(settings)
+    block = store.block(str(net), minutes, "blocked from the command line")
+    store.close()
+    until = _moment(block.expires, settings.access_timezone)
+    print(f"{net} is locked out until {until}, longer if it keeps trying.")
+    if settings.access_code == "off":
+        print('Access codes are off (access_code = "off"), so it has no effect until they are on.')
+
+
 def cmd_access_phrase_init(args: argparse.Namespace) -> None:
     from . import access
 
@@ -902,6 +986,31 @@ def build_parser() -> argparse.ArgumentParser:
     )
     settings_file(phrase_init)
     phrase_init.set_defaults(func=cmd_access_phrase_init)
+    lockouts = acc_sub.add_parser(
+        "lockouts",
+        help="networks locked out after wrong codes, and blocks",
+        description="List the networks locked out of entering codes: after "
+        "access_lockout_after wrong codes in a row from one /24 or /48, or blocked by hand. "
+        "While locked out, every code from the network is refused, the right one too, until "
+        "access_lockout_minutes pass without one (docs/access.md).",
+    )
+    lockouts.add_argument(
+        "--clear", metavar="NETWORK", help="end the lockouts that overlap NETWORK; 'all' ends all"
+    )
+    settings_file(lockouts)
+    lockouts.set_defaults(func=cmd_access_lockouts)
+    block = acc_sub.add_parser(
+        "block",
+        help="lock a network out of entering codes",
+        description="Lock an address or network out of entering codes, as if it had entered "
+        "too many wrong ones, or keep its lockout going. It can't overlap internal_networks.",
+    )
+    block.add_argument("network", help="e.g. 203.0.113.0/24, 2001:db8:5::/48 or 203.0.113.7")
+    block.add_argument(
+        "--minutes", type=float, help="how long, at least (default: access_lockout_minutes)"
+    )
+    settings_file(block)
+    block.set_defaults(func=cmd_access_block)
 
     res = sub.add_parser("results", help="the saved results that History shows")
     res_sub = res.add_subparsers(dest="action", required=True)

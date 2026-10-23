@@ -89,11 +89,11 @@ function ask(origin: Endpoint, again: boolean): Promise<void> {
           resolve();
         } catch (err) {
           const why = err instanceof Error ? err.message : String(err);
+          // After too many wrong codes the server refuses every code the same way, the right
+          // one too, so this message stands for that as well.
           error.textContent = why.startsWith("403")
             ? "That isn't the current code. Check it with the service desk."
-            : why.startsWith("429")
-              ? "Too many wrong codes. Wait a few minutes, then try again."
-              : `The server didn't answer: ${why}`;
+            : `The server didn't answer: ${why}`;
           input.select();
         } finally {
           button.disabled = false;

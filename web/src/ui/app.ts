@@ -61,6 +61,15 @@ export class App {
       window.location.reload();
     });
     this.desk = (await admit(this.origin))?.desk ?? true;
+    // The page leaves out its version until the code is in (it would help an attacker).
+    const version = document.querySelector<HTMLMetaElement>('meta[name="texas2step-version"]');
+    if (version && !version.content) {
+      try {
+        version.content = (await this.origin.json<ServerInfo>("/info")).version;
+      } catch {
+        /* the results then say "dev" */
+      }
+    }
     this.fitHeader(); // the tabs are back
     document.addEventListener("click", (ev) => {
       const a = (ev.target as Element).closest<HTMLAnchorElement>("a[data-link]");

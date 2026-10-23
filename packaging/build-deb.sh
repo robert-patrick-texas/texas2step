@@ -57,6 +57,7 @@ install -Dm644 deploy/texas2step-update.timer "$stage/usr/lib/systemd/system/tex
 install -Dm644 deploy/texas2step.default "$stage/etc/default/texas2step"
 install -Dm644 src/texas2step/config_template.toml "$stage/etc/texas2step/config.toml"
 install -Dm644 deploy/nginx/texas2step-http.conf "$stage/etc/nginx/conf.d/texas2step.conf"
+install -Dm644 deploy/nginx/texas2step-log.conf "$stage/etc/nginx/conf.d/texas2step-log.conf"
 install -Dm644 deploy/nginx/texas2step.conf "$stage/etc/nginx/snippets/texas2step.conf"
 install -Dm644 deploy/nginx/texas2step-speedtest.conf \
     "$stage/etc/nginx/snippets/texas2step-speedtest.conf"

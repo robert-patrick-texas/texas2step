@@ -61,7 +61,7 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |
-| GET | `/api/v1/health` | `{"status": "ok", "version": …}` |
+| GET | `/api/v1/health` | `{"status": "ok", "version": …}`; without the version for clients that need an [access code](#access-codes) |
 
 `GET /api/v1/diag/http` answers once per request, uncached, for the Diag tab:
 
@@ -117,13 +117,17 @@ On a server with `access_code` on ([Access codes](access.md)), a client from out
 `internal_networks` sends a pass as `?pass=<pass>` with each request under `/api/v1/`
 (except `/health` and `/access`); without a valid one it gets `401`. The WebSocket takes
 it the same way. With `internal_networks` set, clients from outside them get `404` for
-reading results, `/api/v1/measure/*`, `/api/docs` and `/api/openapi.json`.
+reading results, `/api/v1/measure/*`, `/api/docs`, `/api/openapi.json`, the current code and
+the lockouts. `/api/v1/health` leaves out the version for clients that would need a pass.
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/v1/access?pass=<pass>` | `{"required", "desk"}`: whether this client needs a pass, and gets the desk's functions; with `pass`, also whether that pass is valid and when it expires |
-| POST | `/api/v1/access` | `{"code": "maple.river.42"}` (any case and separators) returns `{"pass", "expires"}`. A wrong code is `403`; 10 in 10 minutes from one address, `429` |
+| POST | `/api/v1/access` | `{"code": "maple.river.42"}` (any case and separators, or a standing phrase) returns `{"pass", "expires"}`, and sets the pass as a cookie for this server's pages. A wrong code is `403`. After `access_lockout_after` wrong codes in a row from one /24 or /48, every code from it gets that same `403`, unread, until `access_lockout_minutes` pass without one ([Lockouts and blocks](access.md#lockouts-and-blocks)). A body over 1 KB is `413` |
 | GET | `/api/v1/access/code` | The current code, when it changes, and the previous one while it still works; only from `internal_networks` |
+| GET | `/api/v1/access/blocks` | `{"lockouts": [{"network", "source", "wrong_codes", "since", "until"}], "counting"}`; only from `internal_networks` and the server itself |
+| POST | `/api/v1/access/blocks` | `{"network": "198.51.100.0/24", "minutes": 120}` locks a network out by hand, or keeps its lockout going; `minutes` defaults to `access_lockout_minutes`. One that overlaps `internal_networks` is `400` |
+| DELETE | `/api/v1/access/blocks?network=<network>` | Ends the lockouts that overlap it (`all`: every one); returns `{"cleared": [...]}` |
 
 ```bash
 pass=$(curl -s -X POST https://speedtest.example.net/texas2step/api/v1/access \

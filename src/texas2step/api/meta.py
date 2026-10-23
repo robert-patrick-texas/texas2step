@@ -12,8 +12,13 @@ from fastapi.responses import JSONResponse
 from starlette.requests import HTTPConnection
 
 from .. import __version__, rtc
+from ..access import is_internal
 
 router = APIRouter(prefix="/api/v1", tags=["meta"])
+
+# Headers only a proxy adds. A trusted proxy that sends one of them but not the visitor's
+# address has lost it, so the request mustn't count as the proxy's own, local, address.
+PROXY_HEADERS = ("x-forwarded-proto", "x-forwarded-prefix", "x-forwarded-host", "forwarded")
 
 
 def client_address(request: HTTPConnection) -> tuple[str, int | None]:
@@ -27,6 +32,8 @@ def client_address(request: HTTPConnection) -> tuple[str, int | None]:
             return forwarded.split(",")[0].strip(), None
         if real:
             return real.strip(), None
+        if any(name in request.headers for name in PROXY_HEADERS):
+            return "unknown", None
     return host, port
 
 
@@ -178,5 +185,17 @@ async def locations(request: Request) -> dict[str, Any]:
 
 
 @router.get("/health", summary="Liveness check")
-async def health() -> dict[str, str]:
-    return {"status": "ok", "version": __version__}
+async def health(request: Request) -> dict[str, str]:
+    """The version too, except to visitors who would need an access code."""
+    if shows_version(request):
+        return {"status": "ok", "version": __version__}
+    return {"status": "ok"}
+
+
+def shows_version(request: HTTPConnection) -> bool:
+    """Whether this client may see the version: not one that needs an access code first.
+    Knowing it would tell an attacker which flaws to try."""
+    if request.app.state.codes is None:
+        return True
+    ip, _ = client_address(request)
+    return is_internal(ip, request.app.state.settings.internal_networks)

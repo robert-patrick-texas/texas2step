@@ -103,7 +103,7 @@ which line. Spaces and dashes in an entry become dots. Copy the file to every se
 
 A list of a few hundred names gives far fewer codes than the built-in words: 100 entries
 and two digits make 10,000. Names that outsiders could guess, such as cities, shrink that
-further. Wrong codes are limited (see below), and a guessed code gets nothing more than
+further. Wrong codes lock a network out ([below](#lockouts-and-blocks)), and a guessed code gets nothing more than
 tests until it changes, but for a short list, or a `fixed` code, consider
 `access_digits = 3` or `4`.
 
@@ -230,13 +230,27 @@ texas2step run https://speedtest.example.net/texas2step --code maple.river.42
 
 | | Needs |
 |---|---|
-| The page itself, `/api/v1/health` (for load balancers), `/api/v1/access` | Nothing |
-| The tests: Test, Monitor and Diag, and saving a result | A pass, or an address in `internal_networks` |
-| History, the API tab, `/r/<id>`, reading saved results, `/api/docs`, `/api/openapi.json`, `/api/v1/measure/*`, the current code | An address in `internal_networks`; others get 404 |
+| The page at `/`, which asks for the code; its scripts, styles and logo; `/api/v1/health` (for load balancers, without the version); `/api/v1/access` | Nothing |
+| The Monitor and Diag pages, the tests, and saving a result | A pass, or an address in `internal_networks`. Without a pass, `/monitor` and `/diag` send the visitor to `/`. |
+| History, the API tab, `/r/<id>`, reading saved results, `/api/docs`, `/api/openapi.json`, `/api/v1/measure/*`, the current code, [lockouts and blocks](#lockouts-and-blocks) | An address in `internal_networks`; others get 404 |
+
+The pass goes with every request the page makes, as `?pass=`. A page load can't carry
+that, so a right code also sets the pass as a cookie for the server's own pages:
+`HttpOnly`, `Secure` over HTTPS, `SameSite=Strict`, gone when the pass expires.
+
+Until a visitor enters a code, nothing tells them the version: the page leaves it out and
+`/api/v1/health` answers only `{"status":"ok"}`. Inside `internal_networks`, and once in,
+it is there as before. This slows an attacker down rather than stopping one: the page's
+scripts are those of a published release.
 
 Loopback addresses are always inside, so commands on the server itself need no code. The
-service sees each visitor's address through nginx (`trusted_proxies`). If anything else
-sits in front of nginx and hides visitors' addresses, set nginx's
+service sees each visitor's address through nginx (`trusted_proxies`), which the packaged
+snippets send as `X-Forwarded-For`, replacing any the visitor sent. A request that comes
+through a proxy (it has `X-Forwarded-Proto`, `X-Forwarded-Prefix`, `X-Forwarded-Host` or
+`Forwarded`) without the visitor's address counts as outside, not as the proxy's own
+loopback address, so a hand-written nginx location that forgets
+`proxy_set_header X-Forwarded-For $remote_addr;` fails closed. If anything else sits in
+front of nginx and hides visitors' addresses, set nginx's
 [real IP](https://nginx.org/en/docs/http/ngx_http_realip_module.html) from it, and never
 list that device's addresses in `internal_networks`: every visitor would then count as
 inside.
@@ -244,21 +258,97 @@ inside.
 Without `internal_networks`, every visitor needs a code, and anyone with one can read the
 saved results. `texas2step access show` warns about that.
 
-## Wrong codes and other limits
+## Lockouts and blocks
 
-Each address gets 10 wrong codes in 10 minutes; then the server answers `429` for a
-while. Each wrong code is a warning in the journal:
+Wrong codes count against the visitor's network, its IPv4 /24 or IPv6 /48, not its
+address alone: one host can take a new IPv6 address for every guess. After three wrong
+codes in a row from a network, it is locked out:
+
+* Every code from it is refused unread, **the right one too**, with the same answer as a
+  wrong code. Nothing tells the visitor they are locked out.
+* Each code sent while locked out moves the end of the lockout to 30 minutes after it. A
+  network that keeps trying, even once every 10 minutes, stays locked out; one that stops
+  for 30 minutes is let go.
+* A network quiet for 30 minutes starts counting again from nothing, and so does one that
+  enters a right code.
+* Visitors from `internal_networks` and loopback need no code, so they are never counted
+  or locked out. Passes already given keep working.
+
+| Setting | Default | |
+|---|---|---|
+| `access_lockout_after` | `3` | Wrong codes in a row that lock a network out (1 to 100) |
+| `access_lockout_minutes` | `30` | How long a lockout lasts after the last code from it (1 to 10080) |
+| `access_lockouts_file` | `/var/lib/texas2step/access.db` | Where the counts and lockouts are kept |
+
+The counts live in a small SQLite file that the service's workers and the command line
+share, so each worker sees the same counts and a lockout outlasts a restart. Checking a
+code and counting it happen together, so however many guesses a network sends at once,
+only three are read. Each step is a warning in the journal:
 
 ```text
 WARNING:  texas2step.api.access: wrong access code from 203.0.113.9
+WARNING:  texas2step.api.access: 203.0.113.0/24 locked out after 3 wrong access codes in a row, until 2026-10-23 14:04 EDT
+WARNING:  texas2step.api.access: access code from 203.0.113.12 ignored: 203.0.113.0/24 is locked out until 2026-10-23 14:31 EDT
 ```
 
 ```bash
-journalctl -u texas2step --grep 'wrong access code'
+journalctl -u texas2step --grep 'access code'
 ```
 
-A tool such as fail2ban can block addresses that keep trying. The counts are kept per
-worker process, in memory.
+**From the command line.** `sudo texas2step access lockouts` lists the networks locked out
+now, when each began and when it ends:
+
+```text
+Locked out (the right code is refused too, until the end, which each try moves):
+  Network           Since                  Until                  Why
+  203.0.113.0/24    2026-10-23 13:37 EDT   2026-10-23 14:07 EDT   3 wrong codes in a row
+  198.51.100.0/24   2026-10-23 13:37 EDT   2026-10-23 15:37 EDT   blocked from the command line
+1 more network with wrong codes in a row.
+```
+
+```bash
+sudo texas2step access lockouts --clear 203.0.113.77   # ends the lockout that holds it
+sudo texas2step access lockouts --clear all
+sudo texas2step access block 198.51.100.0/24 --minutes 120
+```
+
+`--clear` lets in at once a caller whose office mistyped the code, or whose network shares
+a /24 with someone who did. `block` locks out an address or network by hand, as if it had
+entered too many wrong codes, for `--minutes` (`access_lockout_minutes` if left out), and
+longer if it keeps trying; blocking it again keeps it going. A block can't overlap
+`internal_networks` or loopback. Both take effect at once, with no restart.
+
+**From automation.** The same, as an API that answers only `internal_networks` and the
+server itself, so a script can carry a block from the server that saw an attack to all
+the others, and renew it there:
+
+```bash
+curl -s https://dallas.example.net/texas2step/api/v1/access/blocks                # list
+curl -s -X POST https://houston.example.net/texas2step/api/v1/access/blocks \
+     -H 'Content-Type: application/json' -d '{"network": "198.51.100.0/24", "minutes": 120}'
+curl -s -X DELETE 'https://houston.example.net/texas2step/api/v1/access/blocks?network=198.51.100.0/24'
+```
+
+A list gives each lockout's `network`, `source`, `wrong_codes`, `since` and `until`, and
+`counting`, the networks with wrong codes in a row. A block that overlaps
+`internal_networks` is refused with `400`.
+
+**How strong is a code, then?** A daily code always has two codes that work (yesterday's
+is still good), so an attacker's chance in a day is about twice their guesses over the
+codes there are. With lockouts, each network an attacker controls gets three guesses
+every 30 minutes. One with 10,000 networks gets about 1.4 million a day:
+
+| Code | Codes there are | Chance in a day, 10,000 networks |
+|---|---|---|
+| Built-in words, `access_digits = 2` | 26 million | about 11% |
+| Built-in words, `access_digits = 3` | 262 million | about 1% |
+| Built-in words, `access_digits = 4` | 2.6 billion | about 0.1% |
+| A site list of 100 entries, 2 digits | 10,000 | certain |
+
+For a server open to the Internet, use `access_digits = 4`, and standing phrases of
+several unrelated words.
+
+## Other limits
 
 A test moves as much data as the path allows, through the same Internet link your users
 share. nginx can cap the connections each visitor, and each server, may hold. In a file
@@ -280,7 +370,13 @@ Over HTTP/2, each request counts as a connection. Then `sudo nginx -t && sudo sy
 reload nginx`.
 
 Open only what the tests need: TCP 443 (and 80, to redirect), and the UDP probe's ports
-([Pinning the UDP ports](install.md#pinning-the-udp-ports)).
+([Pinning the UDP ports](install.md#pinning-the-udp-ports)). Nothing listens on those UDP
+ports between tests: a test's port opens when its pass-holding browser asks for one,
+takes only packets carrying that test's own credentials, and closes when the test ends.
+
+Requests that need no code are kept small: a code (`/api/v1/access`) takes up to 1 KB,
+a saved result 2 MB, and the other requests 64 KB, refused with `413` before they are
+read. Only the upload test takes any size, and it needs a pass.
 
 ## Privacy
 
@@ -297,6 +393,10 @@ many as you need (`results_max_rows`). `sudo texas2step results clear` deletes t
 | `/etc/texas2step/access.key` | Made when the package is installed, kept on upgrades, removed with `apt purge` |
 | `/etc/texas2step/access-phrases.toml` | Made when the package is installed or upgraded, if missing, with two examples commented out; kept on upgrades; removed with `apt purge` |
 | Your `access_words` file | Yours: kept by `apt purge` |
+| `/var/lib/texas2step/access.db` | Wrong codes, lockouts and blocks; made by the service when access codes are on; removed with `apt purge` |
 
-The pass lives in the visitor's browser (local storage) until it expires. Passes are not
-written to the journal: the request log shows `pass=*` in their place.
+The pass lives in the visitor's browser (local storage, and the cookie for this server's
+pages) until it expires. Passes are not written to the journal: the request log shows
+`pass=*` in their place. nginx's access log doesn't have them either: the packaged
+snippets log texas2step's requests to `/var/log/nginx/access.log` without their query
+strings (the `texas2step` log format, in `/etc/nginx/conf.d/texas2step-log.conf`).
