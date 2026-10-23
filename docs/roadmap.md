@@ -72,6 +72,23 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [1.9.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v1.9.0) (2026-10-23)
+
+- [x] Traffic limits for servers whose traffic is billed: a daily and a monthly cap on
+  what the tests move, counting what the server sends, receives or both, with
+  `internal_networks` counted or not; past it, new tests get the site's message and an
+  optional link elsewhere, and running ones finish ([Traffic limits](traffic.md)).
+- [x] `texas2step traffic` and `traffic allow`; History's Traffic column.
+- [x] Lockouts: three wrong codes in a row from a /24 or /48 lock it out until it stops
+  trying for 30 minutes; `texas2step access lockouts` and `block`, and an API for
+  `internal_networks` to carry blocks between servers.
+- [x] Standing access phrases beside the day's code, for the service desk away from a PC
+  (`texas2step access phrase`).
+- [x] Hardening for servers on the Internet: a pass cookie for page loads, request
+  bodies capped before they are read, the version hidden from outsiders, and no passes
+  in nginx's access log.
+- [x] `texas2step results clear` starts History over; [Clone a server](install.md#clone-a-server).
+
 ### [1.8.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v1.8.0) (2026-10-22)
 
 - [x] Access codes for servers open to the Internet: the service desk reads callers a
