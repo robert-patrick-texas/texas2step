@@ -36,7 +36,8 @@ head -c 500000000 /dev/urandom | curl -s -X POST --data-binary @- https://www.ex
 
 On a server with a [traffic limit](traffic.md), `/down` and `/up` answer `503` once the
 limit is reached, with the site's `traffic_message` and `traffic_url` (`null` when not
-set), and both together in `detail`:
+set). The Test page shows the message, then "Click here to continue." linking to the URL;
+`detail` puts both in plain text, for clients that can't show a link:
 
 ```json
 {

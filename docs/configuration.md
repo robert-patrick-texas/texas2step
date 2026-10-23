@@ -57,7 +57,7 @@ file up to date with the new version's template and keeps your values; see
 | `traffic_count_internal` | `true` | `false`: tests from `internal_networks` neither count nor are refused |
 | `traffic_file` | `/var/lib/texas2step/traffic.db` | The figures, shared by the workers and `texas2step traffic`; used only while a limit is set |
 | `traffic_message` | `Testing temporarily disabled.` | What a visitor refused by a traffic limit reads |
-| `traffic_url` | `""` | If set, the message goes on "Click here to continue:" and this link: another texas2step server, another provider's test, the service desk's page |
+| `traffic_url` | `""` | If set, the message is followed by "Click here to continue.", linking here: another texas2step server, another provider's test, the service desk's page |
 | `brand_name` | `texas2step` | Name in the header and the browser tab |
 | `brand_organization` | `""` | Organization shown beside the name and in the footer |
 | `brand_url` | `""` | The organization's website; the organization name links to it |

@@ -46,17 +46,18 @@ Then `sudo systemctl restart texas2step`.
   nor are refused.
 * **`traffic_message`**: what a refused visitor reads; by default "Testing temporarily
   disabled."
-* **`traffic_url`**: if set, the message goes on "Click here to continue:" and this link,
-  such as another texas2step server, another provider's test, or the service desk's page.
-  It starts with `https://`, `http://`, `mailto:` or `tel:`.
+* **`traffic_url`**: if set, the message is followed by "Click here to continue.", a link
+  to this address: another texas2step server, another provider's test, or the service
+  desk's page. It starts with `https://`, `http://`, `mailto:` or `tel:`.
 
 Without a limit, nothing is counted and no file is kept.
 
 ## At the limit
 
 * **New tests are refused.** Their download and upload requests get `503`, and the Test
-  page and the command line show `traffic_message`, with the link if `traffic_url` is
-  set: "Testing temporarily disabled. Click here to continue:
+  page shows `traffic_message` and, if `traffic_url` is set, "Click here to continue." as
+  a link to it. The command line, which can't show a link, spells the address out:
+  "Testing temporarily disabled. Click here to continue:
   https://houston.example.net/texas2step/". Visitors aren't told when tests start again,
   and no countdown is shown; the desk sees it with `texas2step traffic`.
 * **Running tests finish.** The browser and the command line mark each test's requests
@@ -104,7 +105,7 @@ are open." gives way to why, when tests start again, and what visitors read:
 
 ```text
 New tests are refused: Today's allowance is used up; tests start again at midnight (America/New_York).
-Visitors read: Testing temporarily disabled. Click here to continue: https://houston.example.net/texas2step/
+Visitors read: Testing temporarily disabled. Click here to continue. (links to https://houston.example.net/texas2step/)
 ```
 
 When a test must run after the day's limit is reached, let more through:

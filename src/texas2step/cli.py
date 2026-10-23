@@ -728,7 +728,8 @@ def _state(refusal: Any, settings: Any) -> str:
     """Whether tests are refused, why and until when, and what visitors read."""
     if refusal is None:
         return "Tests are open."
-    link = f" Click here to continue: {settings.traffic_url}" if settings.traffic_url else ""
+    url = settings.traffic_url
+    link = f" Click here to continue. (links to {url})" if url else ""
     return (
         f"New tests are refused: {refusal.reason}.\nVisitors read: {settings.traffic_message}{link}"
     )

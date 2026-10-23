@@ -305,7 +305,8 @@ class TrafficMeter:
 
     def notice(self) -> dict[str, Any]:
         """What a refused visitor is told: the site's message and link, never when tests
-        start again."""
+        start again. The page makes "Click here to continue." the link; ``detail``, for
+        the command line and scripts, spells the address out."""
         link = f" Click here to continue: {self.url}" if self.url else ""
         return {"detail": self.message + link, "message": self.message, "url": self.url or None}
 

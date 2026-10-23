@@ -138,7 +138,8 @@ class Settings:
     # A cap on the traffic tests move, for servers whose traffic is billed (docs/traffic.md):
     # gigabytes (10^9 bytes) a day and a month, 0 for none. Days begin at midnight in
     # access_timezone. Reached, it refuses new tests until the day or month is over, with
-    # traffic_message and, if set, a link to traffic_url; running tests finish.
+    # traffic_message and, if traffic_url is set, "Click here to continue." linking to it;
+    # running tests finish.
     # texas2step traffic shows the figures.
     traffic_day_gb: float = 0.0
     traffic_month_gb: float = 0.0

@@ -226,7 +226,7 @@ export class TestView implements View {
   private refused(message: string | null, url: string | null): void {
     clear(this.status);
     this.status.append(message ?? REFUSED);
-    if (url) this.status.append(" Click here to continue: ", h("a", { href: url }, url));
+    if (url) this.status.append(" ", h("a", { href: url }, "Click here to continue."));
     this.trafficNoted = true;
   }
 

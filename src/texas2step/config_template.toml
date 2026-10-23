@@ -79,7 +79,7 @@ results_path = "/var/lib/texas2step/results.db"
 # traffic_count_internal = true         # false: internal_networks test without counting
 # traffic_file = "/var/lib/texas2step/traffic.db"  # sudo texas2step traffic
 # traffic_message = "Testing temporarily disabled."  # what refused visitors read
-# traffic_url = ""                      # and "Click here to continue:" this link, if set, such
+# traffic_url = ""                      # if set, "Click here to continue." links here, such
 #                                       # as another texas2step server or the desk's page
 
 # --- Branding and themes -------------------------------------------------------------------

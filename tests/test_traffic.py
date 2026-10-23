@@ -253,7 +253,7 @@ def test_traffic_command(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Traffic limit: 10 GB a day, no monthly limit." in out
     assert "New tests are refused: Today's allowance is used up; tests start again at" in out
-    link = "Click here to continue: https://desk.example.net/speedtest"
+    link = "Click here to continue. (links to https://desk.example.net/speedtest)"
     assert f"Visitors read: {MESSAGE} {link}\n" in out
     cli.main(["traffic", "allow", "5", "--config", str(config)])
     out = capsys.readouterr().out
