@@ -94,6 +94,9 @@ export interface ServerInfo {
   limits: { max_download_bytes: number; max_upload_bytes: number; max_stream_seconds: number };
   ice_servers: RTCIceServer[];
   defaults: { streams: number; seconds: number; packets: number };
+  /** With a traffic limit: whether this visitor may start a test; if not, the site's
+   * message, and a link to continue elsewhere if it gave one. */
+  traffic?: { open: boolean; message: string | null; url: string | null };
 }
 
 /** /api/v1/diag/http: what the server saw of one HTTPS request, and its clock. */
@@ -140,6 +143,7 @@ export interface ResultSummary {
   latency_ms: number | null;
   jitter_ms: number | null;
   loss_pct: number | null;
+  traffic_bytes: number | null; // download plus upload, as the client counted them
 }
 
 /** GET /api/v1/access: whether this visitor needs a code, and gets the desk's functions. */

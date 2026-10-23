@@ -101,6 +101,28 @@ export class Endpoint {
   }
 }
 
+export const REFUSED = "Testing temporarily disabled.";
+
+/** A server's traffic limit refused the test: the site's message, and its link if any. */
+export class Refused extends Error {
+  readonly url: string | null;
+
+  constructor(message: string, url: string | null = null) {
+    super(message);
+    this.url = url;
+  }
+}
+
+/** The refusal a traffic limit's 503 body describes. */
+export function refusal(body: string): Refused {
+  try {
+    const answer = JSON.parse(body) as { message?: string; url?: string | null };
+    return new Refused(answer.message ?? REFUSED, answer.url ?? null);
+  } catch {
+    return new Refused(REFUSED);
+  }
+}
+
 export function nonce(): string {
   return Math.random().toString(36).slice(2, 10);
 }

@@ -378,6 +378,9 @@ Requests that need no code are kept small: a code (`/api/v1/access`) takes up to
 a saved result 2 MB, and the other requests 64 KB, refused with `413` before they are
 read. Only the upload test takes any size, and it needs a pass.
 
+Where the server's traffic is billed, a [traffic limit](traffic.md) caps what the tests
+move in a day or a month.
+
 ## Privacy
 
 A saved result holds the public address the caller tested from, often their home's,

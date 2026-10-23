@@ -29,6 +29,7 @@ THEMES = ("system", "light", "dark", "america", "energy", "federal", "military",
 # Branding URLs end up in href attributes, so only these schemes are accepted.
 LINK_SCHEMES = ("https://", "http://", "mailto:", "tel:")
 CREDITS = ("link", "text", "none")  # brand_credit
+TRAFFIC_COUNTS = ("sent", "received", "both")
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,19 @@ class Settings:
     # and only they get saved results, the API explorer and the server-side measurements.
     internal_networks: list[str] = field(default_factory=list)
 
+    # A cap on the traffic tests move, for servers whose traffic is billed (docs/traffic.md):
+    # gigabytes (10^9 bytes) a day and a month, 0 for none. Days begin at midnight in
+    # access_timezone. Reached, it refuses new tests until the day or month is over, with
+    # traffic_message and, if set, a link to traffic_url; running tests finish.
+    # texas2step traffic shows the figures.
+    traffic_day_gb: float = 0.0
+    traffic_month_gb: float = 0.0
+    traffic_counts: str = "both"  # what counts: "sent", "received" or "both"
+    traffic_count_internal: bool = True  # false: internal_networks test without counting
+    traffic_file: str = "/var/lib/texas2step/traffic.db"  # shared by the workers
+    traffic_message: str = "Testing temporarily disabled."
+    traffic_url: str = ""  # such as another texas2step server, or the service desk's page
+
     # Other servers offered in the location picker (this server is always first).
     locations: list[Location] = field(default_factory=list)
 
@@ -193,9 +207,18 @@ class Settings:
                 "internal_networks: keep page_test, page_monitor or page_diag shown, "
                 "for visitors from outside them"
             )
+        for name in ("traffic_day_gb", "traffic_month_gb"):
+            if not 0 <= getattr(self, name) <= 1_000_000:
+                raise ValueError(f"{name}: expected 0 (no limit) to 1000000 gigabytes")
+        if self.traffic_counts not in TRAFFIC_COUNTS:
+            raise ValueError(f"traffic_counts: expected one of {', '.join(TRAFFIC_COUNTS)}")
+        if not self.traffic_message.strip():
+            raise ValueError("traffic_message: must not be empty")
         if not self.brand_name.strip():
             raise ValueError("brand_name: must not be empty")
         urls = [("brand_url", self.brand_url)] if self.brand_url else []
+        if self.traffic_url:
+            urls.append(("traffic_url", self.traffic_url))
         for link in self.brand_links:
             if not link.label.strip():
                 raise ValueError("brand_links: every link needs a label")
@@ -203,6 +226,10 @@ class Settings:
         for name, url in urls:
             if not url.lower().startswith(LINK_SCHEMES):
                 raise ValueError(f"{name}: URL must start with {', '.join(LINK_SCHEMES)}")
+
+    @property
+    def traffic_limited(self) -> bool:
+        return bool(self.traffic_day_gb or self.traffic_month_gb)
 
     @property
     def pages(self) -> list[str]:

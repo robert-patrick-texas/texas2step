@@ -51,6 +51,13 @@ file up to date with the new version's template and keeps your values; see
 | `access_lockout_minutes` | 30 | How long a lockout lasts after the last code from the network |
 | `access_lockouts_file` | `/var/lib/texas2step/access.db` | The counts, lockouts and blocks, shared by the workers and `texas2step access lockouts` |
 | `internal_networks` | `[]` | Your own networks, as addresses or CIDR blocks: no code is asked there, and only they get History, the API tab, saved results, the API explorer and `/api/v1/measure/*` |
+| `traffic_day_gb` | 0 | Gigabytes (10^9 bytes) the tests may move in a day before new tests are refused until midnight in `access_timezone`; 0 for no limit. See [Traffic limits](traffic.md). |
+| `traffic_month_gb` | 0 | The same for a calendar month |
+| `traffic_counts` | `both` | What counts: `sent` (the visitors' downloads, which clouds such as AWS, Azure and Google Cloud bill), `received` (their uploads) or `both` |
+| `traffic_count_internal` | `true` | `false`: tests from `internal_networks` neither count nor are refused |
+| `traffic_file` | `/var/lib/texas2step/traffic.db` | The figures, shared by the workers and `texas2step traffic`; used only while a limit is set |
+| `traffic_message` | `Testing temporarily disabled.` | What a visitor refused by a traffic limit reads |
+| `traffic_url` | `""` | If set, the message goes on "Click here to continue:" and this link: another texas2step server, another provider's test, the service desk's page |
 | `brand_name` | `texas2step` | Name in the header and the browser tab |
 | `brand_organization` | `""` | Organization shown beside the name and in the footer |
 | `brand_url` | `""` | The organization's website; the organization name links to it |

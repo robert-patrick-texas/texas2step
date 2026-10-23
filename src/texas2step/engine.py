@@ -12,6 +12,7 @@ import contextlib
 import contextvars
 import itertools
 import json
+import secrets
 import struct
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -32,6 +33,9 @@ USER_AGENT = f"texas2step-engine/{__version__}"
 Progress = Callable[[str, dict[str, Any]], Awaitable[None] | None]
 # An access pass (docs/access.md), sent as ?pass= with every request; see unlock().
 PASS: contextvars.ContextVar[str] = contextvars.ContextVar("texas2step_pass", default="")
+# The test the download and upload requests belong to, sent as ?test=: a traffic limit the
+# server reaches while it runs doesn't stop it (docs/traffic.md). run_all sets one.
+TEST: contextvars.ContextVar[str] = contextvars.ContextVar("texas2step_test", default="")
 
 
 def _base(url: str) -> str:
@@ -181,6 +185,7 @@ async def _throughput(
     per_stream = [0] * streams
     stop = asyncio.Event()
     prober = _WsProber(base) if loaded_latency else None
+    test = TEST.get() or secrets.token_hex(8)
 
     async with _client(streams, timeout=seconds + 10) as client:
         await client.get(f"{base}{API}/ping")
@@ -194,7 +199,10 @@ async def _throughput(
         async def download(i: int) -> None:
             while time.perf_counter() < deadline:
                 url = f"{base}{API}/down"
-                async with client.stream("GET", url, params={"bytes": cap}) as r:
+                async with client.stream("GET", url, params={"bytes": cap, "test": test}) as r:
+                    if r.is_error:  # such as 503 from a traffic limit: not test data
+                        await r.aread()
+                        r.raise_for_status()
                     async for data in r.aiter_raw():
                         now = time.perf_counter()
                         if now >= deadline:
@@ -217,7 +225,7 @@ async def _throughput(
 
         async def upload(i: int) -> None:
             while time.perf_counter() < deadline:
-                r = await client.post(f"{base}{API}/up", content=body(i))
+                r = await client.post(f"{base}{API}/up", params={"test": test}, content=body(i))
                 r.raise_for_status()
 
         async def ticker() -> None:
@@ -460,8 +468,12 @@ async def run_all(
         if mac := await asyncio.to_thread(iface.mac_of, mine[0], theirs[0] if theirs else None):
             result["client"] |= {"mac": mac, "mac_source": "nic"}
     result["latency"] = await measure_latency(base, progress=progress)
-    result["download"] = await measure_download(base, seconds, streams, progress=progress)
-    result["upload"] = await measure_upload(base, seconds, streams, progress=progress)
+    test = TEST.set(secrets.token_hex(8))  # one test: the upload goes on if the download did
+    try:
+        result["download"] = await measure_download(base, seconds, streams, progress=progress)
+        result["upload"] = await measure_upload(base, seconds, streams, progress=progress)
+    finally:
+        TEST.reset(test)
     if loss and info.get("capabilities", {}).get("webrtc"):
         try:
             result["loss"] = await measure_loss(base, packets, interval_ms, progress=progress)

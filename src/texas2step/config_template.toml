@@ -72,6 +72,16 @@ results_path = "/var/lib/texas2step/results.db"
 # internal_networks = []                # e.g. ["10.0.0.0/8", "198.51.100.0/24"]: no code, and
 #                                       # only they see History, the API tab and saved results
 
+# --- Traffic limit, for servers whose traffic is billed (docs/traffic.md) ------------------
+# traffic_day_gb = 0.0                  # gigabytes (10^9 bytes) tests may move a day; 0 = no limit
+# traffic_month_gb = 0.0                # and a month; both begin at midnight in access_timezone
+# traffic_counts = "both"               # "sent" (what most clouds bill), "received" or "both"
+# traffic_count_internal = true         # false: internal_networks test without counting
+# traffic_file = "/var/lib/texas2step/traffic.db"  # sudo texas2step traffic
+# traffic_message = "Testing temporarily disabled."  # what refused visitors read
+# traffic_url = ""                      # and "Click here to continue:" this link, if set, such
+#                                       # as another texas2step server or the desk's page
+
 # --- Branding and themes -------------------------------------------------------------------
 # brand_name = "texas2step"             # header and browser tab
 # brand_organization = ""               # shown beside the name and in the footer

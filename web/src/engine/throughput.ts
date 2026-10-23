@@ -1,7 +1,7 @@
 // Time-boxed, multi-stream throughput. Bytes are credited to 100 ms bins as they are
 // observed (download: as the body reader yields; upload: as XHR progress reports), so
 // the timeline shows ramp-up and the stable figure can exclude it.
-import { type Endpoint, linked, nonce } from "./net";
+import { type Endpoint, linked, nonce, Refused, refusal } from "./net";
 
 export const BIN_MS = 100;
 
@@ -9,6 +9,7 @@ export interface ThroughputOptions {
   seconds: number;
   streams: number;
   maxBytes: number;
+  test: string; // the test's id: a server's traffic limit lets a test it let in finish
   signal: AbortSignal;
   onTick?: (live: LiveThroughput) => void;
 }
@@ -86,10 +87,11 @@ export async function measureDownload(ep: Endpoint, opts: ThroughputOptions): Pr
     while (performance.now() < meter.deadline && !opts.signal.aborted) {
       const ctrl = linked(opts.signal);
       try {
-        const res = await fetch(ep.url("/down", { bytes: opts.maxBytes, r: nonce() }), {
+        const res = await fetch(ep.url("/down", { bytes: opts.maxBytes, test: opts.test, r: nonce() }), {
           cache: "no-store",
           signal: ctrl.signal,
         });
+        if (res.status === 503) throw refusal(await res.text());
         if (!res.ok || !res.body) throw new Error(`download failed: ${res.status}`);
         const reader = res.body.getReader();
         for (;;) {
@@ -102,7 +104,8 @@ export async function measureDownload(ep: Endpoint, opts: ThroughputOptions): Pr
           }
           meter.add(i, value.byteLength, now);
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof Refused) throw err;
         if (opts.signal.aborted || performance.now() >= meter.deadline) return;
         errors++;
         await new Promise((r) => setTimeout(r, 100));
@@ -138,13 +141,14 @@ function payload(size: number): Blob {
   return blob;
 }
 
+/** Whether the upload went through; a traffic limit's refusal rejects with Refused. */
 function xhrUpload(
   url: string,
   body: Blob,
   onBytes: (n: number) => void,
   signal: AbortSignal,
 ): Promise<boolean> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     let reported = 0;
     const abort = () => xhr.abort();
@@ -161,6 +165,11 @@ function xhrUpload(
       }
     };
     xhr.onload = () => {
+      if (xhr.status === 503) {
+        signal.removeEventListener("abort", abort);
+        reject(refusal(xhr.responseText));
+        return;
+      }
       // Small bodies may complete without any progress event.
       if (xhr.status < 300 && body.size > reported) onBytes(body.size - reported);
       settle(xhr.status < 300);
@@ -186,7 +195,7 @@ export async function measureUpload(ep: Endpoint, opts: ThroughputOptions): Prom
     while (performance.now() < meter.deadline && !ctrl.signal.aborted) {
       const t0 = performance.now();
       const ok = await xhrUpload(
-        ep.url("/up", { r: nonce() }),
+        ep.url("/up", { test: opts.test, r: nonce() }),
         payload(size),
         (n) => meter.add(i, n),
         ctrl.signal,

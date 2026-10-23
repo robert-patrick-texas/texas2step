@@ -138,6 +138,8 @@ For servers open to the Internet, see [Access codes](docs/access.md).
 * [Configuration](docs/configuration.md): every setting.
 * [Access codes](docs/access.md): servers open to the Internet, a code from the service
   desk, and the desk's tools kept to your networks.
+* [Traffic limits](docs/traffic.md): a daily and monthly cap on what the tests move,
+  for servers whose traffic is billed.
 * [Methodology](docs/methodology.md): what is measured, and how.
 * [API](docs/api.md): endpoints and the UDP probe protocol.
 * [Development](docs/development.md): running from source, tests, docs site, packaging,

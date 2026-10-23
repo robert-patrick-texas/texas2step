@@ -16,7 +16,6 @@ transaction, so guesses sent all at once can't slip past the count.
 from __future__ import annotations
 
 import ipaddress
-import os
 import sqlite3
 import threading
 import time
@@ -26,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from .access import address
-from .store import prepare
+from .store import create_owned, prepare
 
 V4_PREFIX = 24
 V6_PREFIX = 48
@@ -124,7 +123,7 @@ class LockoutStore:
         self.seconds = minutes * 60
         self._lock = threading.Lock()
         if self.path != ":memory:":
-            _create(Path(self.path))
+            create_owned(Path(self.path))
         # Autocommit: each method takes its own BEGIN IMMEDIATE, the write lock every
         # worker and the command line wait for.
         self._db = sqlite3.connect(
@@ -254,17 +253,3 @@ class LockoutStore:
 
 def _lockout(row: sqlite3.Row) -> Lockout:
     return Lockout(row["network"], row["failures"], row["locked_at"], row["expires"], row["source"])
-
-
-def _create(path: Path) -> None:
-    """A new file belongs to the service, as its folder does, even when root makes it."""
-    if path.exists():
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640)
-    try:
-        if os.geteuid() == 0:
-            folder = path.parent.stat()
-            os.fchown(fd, folder.st_uid, folder.st_gid)
-    finally:
-        os.close(fd)

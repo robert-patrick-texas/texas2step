@@ -162,7 +162,7 @@ What the package installs:
 | `/etc/nginx/conf.d/texas2step-log.conf` | The snippets' log format: nginx's usual one, without query strings, which can hold an access pass |
 | `/etc/nginx/snippets/texas2step.conf` | The `/texas2step/` location for your site |
 | `/etc/nginx/snippets/texas2step-speedtest.conf` | Optional `/speedtest` redirect |
-| `/var/lib/texas2step/` | Saved results (SQLite); [`texas2step results clear`](#clear-saved-results) deletes them. With access codes on, also the [lockouts](access.md#lockouts-and-blocks) (`access.db`) |
+| `/var/lib/texas2step/` | Saved results (SQLite); [`texas2step results clear`](#clear-saved-results) deletes them. With access codes on, also the [lockouts](access.md#lockouts-and-blocks) (`access.db`); with a traffic limit, the [traffic figures](traffic.md) (`traffic.db`) |
 
 Files under `/etc` are conffiles: upgrades keep your edits.
 
@@ -711,7 +711,15 @@ On the clone:
 
 3. **Start History over**: the clone holds the first server's saved results, with its
    visitors' addresses. `sudo texas2step results clear`, as
-   [above](#clear-saved-results).
+   [above](#clear-saved-results). With a [traffic limit](traffic.md), it also holds the
+   first server's traffic figures, which would count against its own day and month.
+   Delete them with the service stopped:
+
+   ```bash
+   sudo systemctl stop texas2step
+   sudo rm -f /var/lib/texas2step/traffic.db*
+   sudo systemctl start texas2step
+   ```
 
 4. **Give it its own names and certificate**, outside texas2step: DNS records for its
    names, including the IPv4-only and IPv6-only ones; `server_name` in its nginx site;

@@ -3,7 +3,7 @@ import type { Direction, LatencyStats, ServerInfo, TestResult, ThroughputResult,
 import { eui64Mac } from "./addr";
 import { measureHttpLatency, probeWhile, WsProber } from "./latency";
 import { measureLossRtc, measureLossWs, RtcProbe } from "./loss";
-import { clearTimings, type Endpoint } from "./net";
+import { clearTimings, type Endpoint, nonce } from "./net";
 import { bufferbloat, readiness } from "./scores";
 import { summarize, summarizeThroughput } from "./stats";
 import { BIN_MS, type LiveThroughput, measureDownload, measureUpload } from "./throughput";
@@ -41,6 +41,7 @@ export function uiVersion(): string {
 
 export class TestRun {
   private ctrl = new AbortController();
+  private readonly test = nonce(); // sent with each transfer, so a traffic limit lets it finish
   readonly result: TestResult;
 
   constructor(
@@ -127,6 +128,7 @@ export class TestRun {
       seconds,
       streams,
       maxBytes: direction === "download" ? limits.max_download_bytes : limits.max_upload_bytes,
+      test: this.test,
       signal,
       onTick: (live) => this.on.throughput(direction, live),
     });

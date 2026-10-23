@@ -34,6 +34,23 @@ curl -o /dev/null 'https://www.example.net/texas2step/api/v1/down?seconds=30'
 head -c 500000000 /dev/urandom | curl -s -X POST --data-binary @- https://www.example.net/texas2step/api/v1/up
 ```
 
+On a server with a [traffic limit](traffic.md), `/down` and `/up` answer `503` once the
+limit is reached, with the site's `traffic_message` and `traffic_url` (`null` when not
+set), and both together in `detail`:
+
+```json
+{
+  "detail": "Testing temporarily disabled. Click here to continue: https://houston.example.net/texas2step/",
+  "message": "Testing temporarily disabled.",
+  "url": "https://houston.example.net/texas2step/"
+}
+```
+
+They don't say when tests start again. Add `?test=<id>` (up to 64 letters, digits, `-`
+and `_`) to every request of one test: once the server has let a test in, it lets the
+rest of it in for up to 10 minutes, so a running test finishes. The browser and the
+command line do this.
+
 ### UDP probe protocol
 
 `POST /api/v1/rtc/offer` with `{"sdp": "<offer>", "type": "offer"}` returns
@@ -57,11 +74,36 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/v1/info` | name, version, server identity, capabilities, limits, ICE servers, UI defaults |
+| GET | `/api/v1/info` | name, version, server identity, capabilities, limits, ICE servers, UI defaults; with a [traffic limit](traffic.md), `traffic` (below) |
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |
 | GET | `/api/v1/health` | `{"status": "ok", "version": …}`; without the version for clients that need an [access code](#access-codes) |
+
+With a traffic limit, `traffic` says whether this client may start a test, and if not,
+what it is told:
+
+```json
+{"open": false, "message": "Testing temporarily disabled.", "url": null}
+```
+
+Clients in `internal_networks` also get when tests start again and why, and the figures
+in bytes (`allowance` is `null` without that period's limit). With
+`traffic_count_internal = false`, `open` is `true` for them even past the limit:
+
+```json
+{
+  "open": false,
+  "message": "Testing temporarily disabled.",
+  "url": null,
+  "until": "2026-10-24T00:00:00-04:00",
+  "reason": "Today's allowance is used up; tests start again at midnight (America/New_York)",
+  "counts": "sent",
+  "count_internal": true,
+  "today": {"counted": 50210000000, "allowance": 50000000000},
+  "month": {"counted": 539100000000, "allowance": 1000000000000}
+}
+```
 
 `GET /api/v1/diag/http` answers once per request, uncached, for the Diag tab:
 
@@ -87,7 +129,9 @@ TCP times are `null`. `time_ms` is the server's clock, in milliseconds since the
 
 The server runs the Python engine **toward another texas2step server** and returns the
 result. `target` must be a configured location URL unless `allow_any_target` is set.
-At most two run at once per worker; extra requests get `429`.
+At most two run at once per worker; extra requests get `429`. A
+[traffic limit](traffic.md) refuses download, upload and full ones with `503`, and counts
+this server's side of them.
 
 | Method | Path | Body (defaults) |
 |---|---|---|
@@ -168,4 +212,5 @@ its connection. `client.mac` is the MAC address of the NIC the CLI's connection 
 (`mac_source` `"nic"`, on Linux) or one read from an EUI-64 IPv6 address (`"eui64"`); see
 [This computer's address](methodology.md#this-computers-address). Each is left out when
 unknown, and `/measure/full` leaves them out. Summaries carry them as `client_local_ip`,
-`client_mac` and `client_mac_source`.
+`client_mac` and `client_mac_source`, and `traffic_bytes`: `download.bytes` plus
+`upload.bytes`, what the test moved as the client counted it (`null` without either).

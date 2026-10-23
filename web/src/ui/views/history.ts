@@ -4,8 +4,10 @@ import type { AccessCode, ResultSummary } from "../../types";
 import type { App, View } from "../app";
 import { axisX, gridY, legend, linear, linePath } from "../charts/common";
 import { clear, h, onResize, pointerIn, s } from "../dom";
-import { mbpsTick, ms, pct, rate, text, when } from "../format";
+import { bytes, mbpsTick, ms, pct, rate, text, when } from "../format";
 import { hideTip, showTip } from "../tooltip";
+
+const TRAFFIC_NOTE = "The bytes the test downloaded and uploaded, as the client counted them. The network carried a few percent more in packet headers.";
 
 export class HistoryView implements View {
   constructor(private readonly app: App) {}
@@ -85,6 +87,7 @@ export class HistoryView implements View {
         h("td", { class: "num" }, text(ms(r.latency_ms))),
         h("td", { class: "num" }, text(ms(r.jitter_ms))),
         h("td", { class: "num" }, text(pct(r.loss_pct))),
+        h("td", { class: "num" }, r.traffic_bytes === null || r.traffic_bytes === undefined ? "—" : bytes(r.traffic_bytes)),
         h("td", {}, (r.source ?? "").replace(/\/.*/, "").replace("texas2step-", "")),
       ),
     );
@@ -98,7 +101,7 @@ export class HistoryView implements View {
           h(
             "table",
             { class: "table data" },
-            h("thead", {}, h("tr", {}, ...["When", "Server", "Client", "Local", "Download", "Upload", "Latency", "Jitter", "Loss", "Via"].map((c, i) => h("th", { scope: "col", class: i >= 4 && i <= 8 ? "num" : "" }, c)))),
+            h("thead", {}, h("tr", {}, ...["When", "Server", "Client", "Local", "Download", "Upload", "Latency", "Jitter", "Loss", "Traffic", "Via"].map((c, i) => h("th", { scope: "col", class: i >= 4 && i <= 9 ? "num" : "", title: c === "Traffic" ? TRAFFIC_NOTE : null }, c)))),
             h("tbody", {}, ...rows),
           ),
         ),

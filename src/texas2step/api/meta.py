@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import re
 import time
@@ -63,7 +64,7 @@ def address_family(ip: str) -> str | None:
 @router.get("/info", summary="Server identity, capabilities and limits")
 async def info(request: Request) -> dict[str, Any]:
     s = request.app.state.settings
-    return {
+    out = {
         "name": "texas2step",
         "version": __version__,
         "server": {"id": s.server_id, "name": s.server_name, "location": s.server_location},
@@ -85,6 +86,11 @@ async def info(request: Request) -> dict[str, Any]:
             "packets": s.default_packets,
         },
     }
+    if (meter := request.app.state.traffic) is not None:
+        # Whether a traffic limit lets this client test; for the desk, how much is left.
+        kind = meter.kind(client_address(request)[0])
+        out["traffic"] = await asyncio.to_thread(meter.public, kind)
+    return out
 
 
 @router.get("/whoami", summary="The client as this server sees it")

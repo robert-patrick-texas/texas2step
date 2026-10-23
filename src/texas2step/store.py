@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import secrets
 import sqlite3
@@ -63,6 +64,17 @@ PAYLOAD_SQL = ", ".join(
     f"THEN json_extract(payload, '$.{a}.{b}') END AS {name}"
     for name, (a, b) in PAYLOAD_FIELDS.items()
 )
+# And the bytes the test moved, download plus upload, as the client counted them.
+DIRECTIONS = ("download", "upload")
+_NUMBER = "json_type(payload, '$.{}.bytes') IN ('integer', 'real')"
+TRAFFIC_SQL = (
+    f"CASE WHEN {' OR '.join(_NUMBER.format(d) for d in DIRECTIONS)} THEN "
+    + " + ".join(
+        f"(CASE WHEN {_NUMBER.format(d)} THEN json_extract(payload, '$.{d}.bytes') ELSE 0 END)"
+        for d in DIRECTIONS
+    )
+    + " END AS traffic_bytes"
+)
 
 
 def prepare(db: sqlite3.Connection, path: str, schema: str) -> None:
@@ -84,12 +96,31 @@ def prepare(db: sqlite3.Connection, path: str, schema: str) -> None:
             time.sleep(0.05)
 
 
+def create_owned(path: Path) -> None:
+    """A new file belongs to the service, as its folder does, even when root makes it."""
+    if path.exists():
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640)
+    try:
+        if os.geteuid() == 0:
+            folder = path.parent.stat()
+            os.fchown(fd, folder.st_uid, folder.st_gid)
+    finally:
+        os.close(fd)
+
+
 def _dig(data: Any, *path: str) -> float | None:
     for key in path:
         if not isinstance(data, dict):
             return None
         data = data.get(key)
     return float(data) if isinstance(data, int | float) and not isinstance(data, bool) else None
+
+
+def _traffic(result: dict[str, Any]) -> int | None:
+    found = [n for d in DIRECTIONS if (n := _dig(result, d, "bytes")) is not None]
+    return round(sum(found)) if found else None
 
 
 def _text(data: Any, *path: str) -> str | None:
@@ -144,10 +175,11 @@ class ResultStore:
                 (self.max_rows,),
             )
         summary = dict(zip(SUMMARY_COLUMNS, row[:-1], strict=True))
-        return summary | {name: _text(result, *path) for name, path in PAYLOAD_FIELDS.items()}
+        summary |= {name: _text(result, *path) for name, path in PAYLOAD_FIELDS.items()}
+        return summary | {"traffic_bytes": _traffic(result)}
 
     def recent(self, limit: int = 50, before: float | None = None) -> list[dict[str, Any]]:
-        sql = f"SELECT {', '.join(SUMMARY_COLUMNS)}, {PAYLOAD_SQL} FROM results"
+        sql = f"SELECT {', '.join(SUMMARY_COLUMNS)}, {PAYLOAD_SQL}, {TRAFFIC_SQL} FROM results"
         args: list[Any] = []
         if before is not None:
             sql += " WHERE created_at < ?"

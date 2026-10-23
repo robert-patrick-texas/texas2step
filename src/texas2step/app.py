@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import logging
 import re
@@ -19,7 +21,7 @@ from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
-from . import __version__, page
+from . import __version__, page, traffic
 from .access import Codes, is_internal
 from .api import routers
 from .api.access import PASS_COOKIE
@@ -29,6 +31,7 @@ from .config import Settings, load_settings
 from .lockouts import LockoutStore
 from .rtc import RtcEcho
 from .store import ResultStore
+from .traffic import TrafficMeter
 
 log = logging.getLogger(__name__)
 access = logging.getLogger("texas2step.access")
@@ -308,12 +311,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.rtc.start()
         if settings.results_enabled:
             app.state.store = ResultStore(settings.results_path, settings.results_max_rows)
+        meter = app.state.traffic
+        flushing = asyncio.create_task(traffic.keep(meter)) if meter is not None else None
         yield
         await app.state.rtc.stop()
         if app.state.store is not None:
             app.state.store.close()
         if app.state.lockouts is not None:
             app.state.lockouts.close()
+        if flushing is not None:
+            flushing.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await flushing
+            meter.flush()
+            meter.close()
 
     app = FastAPI(
         title="texas2step",
@@ -333,6 +344,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings.access_lockout_after,
             settings.access_lockout_minutes,
         )
+    app.state.traffic = TrafficMeter.load(settings)
     app.state.store = None
     app.state.rtc = RtcEcho(
         settings.ice_servers,
@@ -341,6 +353,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         enabled=settings.webrtc_enabled,
         port_range=settings.rtc_ports,
     )
+
+    @app.exception_handler(traffic.Closed)
+    async def closed(request: Request, exc: traffic.Closed) -> JSONResponse:
+        # A traffic limit: the site's message and link, and not when tests start again.
+        return JSONResponse(exc.notice, 503, headers={"Cache-Control": "no-store"})
 
     app.add_middleware(BodyLimit)  # inside the gate: a refused request is never read
     app.add_middleware(AccessGate, settings=settings)  # inside CORS: its refusals get CORS headers

@@ -996,6 +996,11 @@ a.brand-org:hover,
   min-height: 1.5em;
 }
 
+/* A traffic limit's link (traffic_url) may be a long URL: let it break on a phone. */
+.status a {
+  overflow-wrap: anywhere;
+}
+
 /* Gauge */
 
 .gauge {

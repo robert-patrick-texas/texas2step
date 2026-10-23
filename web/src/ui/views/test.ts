@@ -1,5 +1,5 @@
 // The main view: run a test (or show a saved one) with live instruments and charts.
-import { appPath, routeOf } from "../../engine/net";
+import { appPath, Refused, REFUSED, routeOf } from "../../engine/net";
 import { type Phase, PHASES, type RunEvents, TestRun } from "../../engine/runner";
 import type { Direction, Level, Readiness, TestResult, ThroughputResult } from "../../types";
 import type { App, Settings, View } from "../app";
@@ -101,6 +101,7 @@ export class TestView implements View {
   private result: TestResult | null = null;
   /** Whether the page shows a saved result (/r/<id>) rather than a test from this visit. */
   private showingSaved = false;
+  private trafficNoted = false; // the status line says the server's traffic limit is reached
   private off: (() => void) | null = null;
 
   constructor(private readonly app: App) {}
@@ -163,8 +164,12 @@ export class TestView implements View {
       ),
     );
 
-    this.off = this.app.onServer(() => this.describeEndpoints());
+    this.off = this.app.onServer(() => {
+      this.describeEndpoints();
+      this.noteTraffic();
+    });
     this.describeEndpoints();
+    this.noteTraffic();
     this.renderResult(null);
     if (params.rid) void this.load(params.rid);
   }
@@ -206,6 +211,25 @@ export class TestView implements View {
     );
   }
 
+  /** A server whose traffic limit is reached says so before a test is tried. */
+  private noteTraffic(): void {
+    if (this.run || this.showingSaved) return;
+    const traffic = this.app.info?.traffic;
+    if (traffic?.open === false) this.refused(traffic.message, traffic.url);
+    else if (this.trafficNoted) {
+      setText(this.status, "Ready when you are.");
+      this.trafficNoted = false;
+    }
+  }
+
+  /** The site's message for a reached traffic limit, and its link to continue elsewhere. */
+  private refused(message: string | null, url: string | null): void {
+    clear(this.status);
+    this.status.append(message ?? REFUSED);
+    if (url) this.status.append(" Click here to continue: ", h("a", { href: url }, url));
+    this.trafficNoted = true;
+  }
+
   private describeEndpoints(): void {
     const { info, whoami } = this.app;
     // A saved result's own two ends; otherwise the server the next test goes to, which
@@ -240,6 +264,13 @@ export class TestView implements View {
       setText(this.status, "That server isn't answering. Check the address or pick another server.");
       return;
     }
+    // Its traffic limit may have been reached since the page loaded.
+    const traffic = (await app.ep.info().catch(() => null))?.traffic;
+    if (traffic?.open === false) {
+      this.refused(traffic.message, traffic.url);
+      return;
+    }
+    this.trafficNoted = false;
     // Leave a saved-result URL without re-routing (that would unmount this view).
     if (routeOf(window.location.pathname) !== "/") history.replaceState(null, "", appPath("/"));
     this.banner.hidden = true;
@@ -287,7 +318,9 @@ export class TestView implements View {
     try {
       result = await this.run.run();
     } catch (err) {
-      if (!this.run.aborted) {
+      if (err instanceof Refused) {
+        this.refused(err.message, err.url);
+      } else if (!this.run.aborted) {
         console.error(err);
         setText(this.status, `The test stopped unexpectedly: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -297,12 +330,11 @@ export class TestView implements View {
     this.gauge.setRunning(false, true);
     this.gauge.button.removeAttribute("aria-label");
     this.link.setMode("idle");
-    if (aborted) {
-      setText(this.status, "Stopped. Partial results are shown below.");
+    if (aborted) setText(this.status, "Stopped. Partial results are shown below.");
+    if (aborted || !result) {
       for (const li of this.rail.querySelectorAll<HTMLElement>("[data-state=active]")) li.dataset.state = "pending";
       return;
     }
-    if (!result) return;
     this.result = result;
     this.describeEndpoints();
     this.renderResult(result);

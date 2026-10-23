@@ -7,7 +7,9 @@ server processing time from their round-trip measurements.
 
 from __future__ import annotations
 
+import asyncio
 import time
+from collections.abc import AsyncIterator
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -17,6 +19,8 @@ from starlette.requests import ClientDisconnect
 
 from .. import payload
 from ..rtc import RtcBusy, RtcUnavailable
+from ..traffic import Closed, TrafficMeter
+from .meta import client_address
 
 router = APIRouter(prefix="/api/v1", tags=["wire"])
 
@@ -38,6 +42,44 @@ async def ping() -> Response:
     )
 
 
+TestId = Annotated[
+    str | None,
+    Query(
+        alias="test",
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="The test this request belongs to: once a test is let in, a traffic "
+        "limit reached while it runs doesn't stop it (docs/traffic.md).",
+    ),
+]
+
+
+async def _admit(request: Request, test: str | None) -> tuple[TrafficMeter, str] | None:
+    """The meter and whose traffic this is, or 503 if a traffic limit refuses the test."""
+    meter: TrafficMeter | None = request.app.state.traffic
+    if meter is None:
+        return None
+    kind = meter.kind(client_address(request)[0])
+    if await asyncio.to_thread(meter.admit, test, kind):
+        raise Closed(meter.notice())
+    return meter, kind
+
+
+async def _metered(
+    body: AsyncIterator[bytes], meter: TrafficMeter, kind: str
+) -> AsyncIterator[bytes]:
+    """Counts each chunk once the server has taken it, and ends with the client.
+
+    Once the client is gone, uvicorn drops what is sent without pausing, and the payload
+    never pauses either, so nothing would let Starlette's disconnect watch end the
+    response: the rest of it would be counted, and never sent. Pausing here lets it.
+    """
+    async for chunk in body:
+        yield chunk
+        await asyncio.sleep(0)
+        meter.add(kind, sent=len(chunk))
+
+
 @router.get("/down", summary="Stream incompressible bytes (download test)")
 async def down(
     request: Request,
@@ -48,10 +90,12 @@ async def down(
         float | None,
         Query(gt=0, description="Stream for this long instead (chunked, not byte-capped)."),
     ] = None,
+    test: TestId = None,
 ) -> Response:
     """``curl -o /dev/null 'https://host/api/v1/down?bytes=1000000000'`` or ``?seconds=10``."""
     t0 = time.perf_counter()
     settings = request.app.state.settings
+    metered = await _admit(request, test)
     headers = {**NO_STORE, "Content-Type": "application/octet-stream"}
     if seconds is not None:
         body = payload.stream_for(min(seconds, settings.max_stream_seconds))
@@ -62,18 +106,21 @@ async def down(
             return Response(b"", headers=headers)
         body = payload.stream_bytes(n)
         headers["Content-Length"] = str(n)
+    if metered:
+        body = _metered(body, *metered)
     headers["Server-Timing"] = _timing(app=(time.perf_counter() - t0) * 1000)
     return StreamingResponse(body, headers=headers)
 
 
 @router.post("/up", summary="Receive and discard a request body (upload test)")
-async def up(request: Request) -> Response:
+async def up(request: Request, test: TestId = None) -> Response:
     """Reads the body as it arrives (no buffering, no disk) and reports what it saw.
 
     ``rx_ms`` spans first to last body chunk, so ``mbps`` is the server-observed
     upload rate excluding request setup.
     """
     limit = request.app.state.settings.max_upload_bytes
+    metered = await _admit(request, test)
     total = first_len = 0
     first = last = None
     try:
@@ -85,6 +132,8 @@ async def up(request: Request) -> Response:
                 first, first_len = now, len(data)
             last = now
             total += len(data)
+            if metered:
+                metered[0].add(metered[1], received=len(data))
             if total > limit:
                 raise HTTPException(413, f"upload exceeds {limit} bytes")
     except ClientDisconnect:

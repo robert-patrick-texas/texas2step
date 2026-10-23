@@ -688,6 +688,119 @@ def cmd_access_phrase_init(args: argparse.Namespace) -> None:
     print(f"Wrote {path}, with two examples commented out.")
 
 
+def _traffic(settings: Any) -> Any:
+    """The service's traffic file; it is made, as the service's, if there is none yet."""
+    import sqlite3
+
+    from .traffic import TrafficMeter
+
+    try:
+        return TrafficMeter.of(settings)
+    except (OSError, sqlite3.Error) as exc:
+        denied = isinstance(exc, PermissionError) or "readonly" in str(exc) or "open" in str(exc)
+        sys.exit(
+            f"texas2step: can't use {settings.traffic_file}: {exc}"
+            + (" (try sudo)" if denied else "")
+        )
+
+
+def _left(periods: Any) -> list[str]:
+    """Today's and this month's figures, as lines of a table."""
+    from .traffic import size
+
+    rows = [("", "Counted", "Allowed", "Left")]
+    for name, p in zip(("Today", "This month"), periods, strict=True):
+        if p.allowance is None:
+            rows.append((name, size(p.counted), "no limit", ""))
+        else:
+            left = p.allowance - p.counted
+            rows.append(
+                (name, size(p.counted), size(p.allowance), size(left) if left > 0 else "none")
+            )
+    widths = [max(len(row[i]) for row in rows) for i in range(4)]
+    return [
+        "  " + "   ".join(f"{c:<{w}}" for c, w in zip(row, widths, strict=True)).rstrip()
+        for row in rows
+    ]
+
+
+def _state(refusal: Any, settings: Any) -> str:
+    """Whether tests are refused, why and until when, and what visitors read."""
+    if refusal is None:
+        return "Tests are open."
+    link = f" Click here to continue: {settings.traffic_url}" if settings.traffic_url else ""
+    return (
+        f"New tests are refused: {refusal.reason}.\nVisitors read: {settings.traffic_message}{link}"
+    )
+
+
+def cmd_traffic(args: argparse.Namespace) -> None:
+    from .traffic import size
+
+    settings = _server_settings(args)
+    limited = settings.traffic_limited
+    if not limited:
+        print("No traffic limit is set (traffic_day_gb, traffic_month_gb), so nothing is counted.")
+        if not Path(settings.traffic_file).exists():
+            return
+    meter = _traffic(settings)
+    try:
+        periods = meter.periods()
+        refusal = meter.refusal(*periods)
+        days = meter.days(args.days)
+    finally:
+        meter.close()
+    zone = settings.access_timezone
+    if limited:
+        day_gb, month_gb = settings.traffic_day_gb, settings.traffic_month_gb
+        day = f"{day_gb:,g} GB a day" if day_gb else "no daily limit"
+        month = f"{month_gb:,g} GB a month" if month_gb else "no monthly limit"
+        what = {"sent": "what the server sends", "received": "what it receives"}
+        counts = what.get(settings.traffic_counts, "what the server sends and receives")
+        inside = "included" if settings.traffic_count_internal else "not counted"
+        print(f"Traffic limit: {day}, {month}.")
+        print(f"It counts {counts}; internal_networks {inside}.")
+        print(f"Days and months begin at midnight in {zone}.")
+        print()
+        print("\n".join(_left(periods)))
+        print()
+        print(_state(refusal, settings))
+    if not days:
+        return
+    print()
+    rows = [("Day", "Sent", "Received", "Internal sent", "Internal received", "Allowed by hand")]
+    for key, u in days:
+        figures = (u.sent, u.received, u.inside_sent, u.inside_received)
+        rows.append((key, *(size(n) for n in figures), size(u.extra) if u.extra else ""))
+    if not any(row[5] for row in rows[1:]):
+        rows = [row[:5] for row in rows]
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    for row in rows:
+        print("  " + "   ".join(f"{c:<{w}}" for c, w in zip(row, widths, strict=True)).rstrip())
+
+
+def cmd_traffic_allow(args: argparse.Namespace) -> None:
+    from .traffic import size
+
+    settings = _server_settings(args)
+    if not settings.traffic_limited:
+        sys.exit("texas2step: no traffic limit is set (traffic_day_gb, traffic_month_gb)")
+    if not args.gb or abs(args.gb) > 1_000_000:
+        sys.exit("texas2step: expected a number of gigabytes, such as 5, or -5 to take it back")
+    meter = _traffic(settings)
+    try:
+        periods = meter.allow(args.gb)
+        refusal = meter.refusal(*periods)
+    finally:
+        meter.close()
+    more = "more" if args.gb > 0 else "less"
+    print(f"Allowed {size(abs(args.gb) * 1e9)} {more} today, and so this month.")
+    print()
+    print("\n".join(_left(periods)))
+    print()
+    print(_state(refusal, settings))
+
+
 def _results(count: int) -> str:
     return f"{count} saved result{'' if count == 1 else 's'}"
 
@@ -1024,6 +1137,27 @@ def build_parser() -> argparse.ArgumentParser:
     settings_file(clear)
     clear.add_argument("-y", "--yes", action="store_true", help="delete them without asking")
     clear.set_defaults(func=cmd_results_clear)
+
+    tr = sub.add_parser(
+        "traffic",
+        help="the traffic tests moved, against traffic_day_gb and traffic_month_gb",
+        description="Show the traffic the tests moved today and this month, against the "
+        "limits, and per day (docs/traffic.md).",
+    )
+    settings_file(tr)
+    tr.add_argument("--days", type=int, default=30, help="days to list (default: 30)")
+    tr.set_defaults(func=cmd_traffic)
+    tr_sub = tr.add_subparsers(dest="action")
+    allow = tr_sub.add_parser(
+        "allow",
+        help="let more traffic through today",
+        description="Add to today's traffic allowance, and so to this month's: such as when "
+        "the day's limit is reached and a test must still run. A negative number takes it "
+        "back. The running service sees it at once.",
+    )
+    settings_file(allow)
+    allow.add_argument("gb", type=float, help="gigabytes (10^9 bytes), such as 5")
+    allow.set_defaults(func=cmd_traffic_allow)
 
     def target(p: argparse.ArgumentParser) -> None:
         p.add_argument("url", help="base URL of a texas2step server")
