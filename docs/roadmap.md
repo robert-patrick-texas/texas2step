@@ -72,6 +72,20 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.0.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.0.0) (2026-10-23)
+
+- [x] Servers that defend together: a lockout on one server is a block on every server
+  in the picker at once, sent signed (HMAC-SHA-256, with a key derived from the shared
+  access key) and taken only from `access_peer_networks`
+  ([Servers that defend together](access.md#servers-that-defend-together)).
+- [x] `texas2step access peers` checks that each server takes them; `access block` and
+  `access lockouts --clear` reach every server.
+- [x] `access_lockout_hook` runs a program on each lockout, block and clear.
+- [x] Blocks by hand are at most a /16 or a /32.
+- [x] [Security](security.md): the security controls in one place, and post-quantum key
+  exchange (ML-KEM-768 with X25519) for nginx in the install guide.
+- [x] On PyPI: `uv tool install texas2step` or `pipx install texas2step`.
+
 ### [1.9.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v1.9.0) (2026-10-23)
 
 - [x] Traffic limits for servers whose traffic is billed: a daily and a monthly cap on
