@@ -1,18 +1,19 @@
 [project]
 name = "texas2step"
-dynamic = ["version"]
+dynamic = ["version", "readme"]
 description = "Web-centric throughput, latency, jitter and packet-loss measurement between endpoints."
-readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE.md"]
 authors = [{ name = "Robert Patrick" }]
 keywords = ["speedtest", "network", "latency", "jitter", "packet-loss", "webrtc"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Web Environment",
     "Framework :: FastAPI",
     "Intended Audience :: System Administrators",
     "Intended Audience :: Telecommunications Industry",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Topic :: System :: Networking :: Monitoring",
 ]
@@ -52,8 +53,23 @@ default-groups = ["dev", "docs"]
 cache-keys = [{ file = "pyproject.toml" }, { file = "src/texas2step/__init__.py" }]
 
 [build-system]
-requires = ["hatchling>=1.27"]
+requires = ["hatchling>=1.27", "hatch-fancy-pypi-readme>=24"]
 build-backend = "hatchling.build"
+
+# PyPI's copy of the README, with its links to the documentation and pictures made absolute.
+[tool.hatch.metadata.hooks.fancy-pypi-readme]
+content-type = "text/markdown"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.fragments]]
+path = "README.md"
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '!\[(.*?)\]\((?!https?://)(.*?)\)'
+replacement = '![\1](https://raw.githubusercontent.com/robert-patrick-texas/texas2step/main/\2)'
+
+[[tool.hatch.metadata.hooks.fancy-pypi-readme.substitutions]]
+pattern = '\]\((?!https?://|#)(.*?)\)'
+replacement = '](https://github.com/robert-patrick-texas/texas2step/blob/main/\1)'
 
 [tool.hatch.version]
 path = "src/texas2step/__init__.py"  # the one place the version is set

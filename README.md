@@ -85,8 +85,8 @@ Building, testing, the docs site and packaging are covered in
 ## Command line
 
 The CLI runs the same engine from any host toward a texas2step server. The package
-installs it as `/usr/bin/texas2step`; elsewhere,
-`uv tool install git+https://github.com/robert-patrick-texas/texas2step` installs it.
+installs it as `/usr/bin/texas2step`; elsewhere, `uv tool install texas2step` (or
+`pipx install texas2step`) installs it from PyPI.
 
 ```bash
 texas2step run https://www.example.net/texas2step              # full test, human-readable

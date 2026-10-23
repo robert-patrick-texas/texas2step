@@ -218,6 +218,18 @@ gh release create "v$v" "dist/texas2step-$v-1-amd64.deb" dist/texas2step-setup \
     --title "texas2step $v" --generate-notes
 ```
 
+6. Publish the Python package to [PyPI](https://pypi.org/project/texas2step/), for
+   `uv tool install texas2step` and `pipx install texas2step`, with a PyPI API token:
+
+```bash
+uv build --out-dir build/pypi
+UV_PUBLISH_TOKEN=<token> uv publish build/pypi/*
+rm -rf build/pypi
+```
+
+PyPI's copy of the README has its links made absolute, to GitHub, by
+`hatch-fancy-pypi-readme` (`pyproject.toml`). A version can be uploaded to PyPI only once.
+
 `texas2step update` finds the two files on the release by their names
 (`texas2step-<version>-<revision>-<arch>.deb` and `texas2step-setup`) and checks each
 against the SHA-256 GitHub records for it, so attach them under exactly those names. It
