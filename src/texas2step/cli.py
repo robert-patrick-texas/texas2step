@@ -367,7 +367,7 @@ def cmd_update(args: argparse.Namespace) -> None:
         sys.exit(130)
 
 
-def _access_settings(args: argparse.Namespace) -> Any:
+def _server_settings(args: argparse.Namespace) -> Any:
     from .config import load_settings
 
     try:
@@ -401,7 +401,7 @@ def _when(moment: Any) -> str:
 def cmd_access_show(args: argparse.Namespace) -> None:
     from datetime import UTC, datetime
 
-    settings = _access_settings(args)
+    settings = _server_settings(args)
     codes = _access_codes(settings)
     current = codes.current(datetime.now(UTC))
     this, last = {
@@ -447,14 +447,14 @@ def cmd_access_show(args: argparse.Namespace) -> None:
 
 
 def cmd_access_words(args: argparse.Namespace) -> None:
-    codes = _access_codes(_access_settings(args))
+    codes = _access_codes(_server_settings(args))
     print("\n".join(codes.words))
 
 
 def cmd_access_key(args: argparse.Namespace) -> None:
     from . import access
 
-    path = Path(_access_settings(args).access_key_file)
+    path = Path(_server_settings(args).access_key_file)
     if not (args.new or args.init or args.import_):
         try:
             print(path.read_text().strip())
@@ -488,6 +488,49 @@ def cmd_access_key(args: argparse.Namespace) -> None:
         print("  sudo systemctl restart texas2step")
     elif args.import_:
         print(f"Wrote {path}. Then: sudo systemctl restart texas2step")
+
+
+def _results(count: int) -> str:
+    return f"{count} saved result{'' if count == 1 else 's'}"
+
+
+def cmd_results_clear(args: argparse.Namespace) -> None:
+    import sqlite3
+    from datetime import datetime
+
+    from .store import ResultStore
+
+    path = Path(_server_settings(args).results_path).absolute()
+    if not path.exists():
+        print(f"No saved results: there is no {path}.")
+        return
+    # The service keeps the file open and writes beside it (-wal, -shm), as its own user.
+    if not (os.access(path, os.W_OK) and os.access(path.parent, os.W_OK)):
+        hint = "" if os.name == "posix" and os.geteuid() == 0 else " (try sudo)"
+        sys.exit(f"texas2step: can't change {path}{hint}")
+    try:
+        store = ResultStore(path)
+        try:
+            count, first, last, servers = store.tally()
+            if not count:
+                print(f"{path} holds no saved results.")
+                return
+            days = [f"{datetime.fromtimestamp(t).astimezone():%Y-%m-%d}" for t in (first, last)]
+            span = f"on {days[0]}" if days[0] == days[1] else f"from {days[0]} to {days[1]}"
+            print(f"{path} holds {_results(count)}, {span}.")
+            print("By server id: " + ", ".join(f"{s or 'none'} {n}" for s, n in servers.items()))
+            if not args.yes:
+                if not sys.stdin.isatty():
+                    sys.exit("texas2step: no terminal to ask on; add --yes to delete them")
+                answer = input("Delete them all? Links to them stop working. [y/N] ")
+                if answer.strip().lower() not in {"y", "yes"}:
+                    sys.exit("Nothing changed.")
+            deleted = store.clear()
+        finally:
+            store.close()
+    except sqlite3.Error as exc:
+        sys.exit(f"texas2step: {path}: {exc}")
+    print(f"Deleted {_results(deleted)}. History starts over with the next test saved.")
 
 
 async def _save(target: str, result: dict[str, Any]) -> dict[str, Any]:
@@ -703,6 +746,19 @@ def build_parser() -> argparse.ArgumentParser:
     what.add_argument("--init", action="store_true", help="make a key only if there is none")
     key.add_argument("-y", "--yes", action="store_true", help="replace a key without asking")
     key.set_defaults(func=cmd_access_key)
+
+    res = sub.add_parser("results", help="the saved results that History shows")
+    res_sub = res.add_subparsers(dest="action", required=True)
+    clear = res_sub.add_parser(
+        "clear",
+        help="delete every saved result, to start History over",
+        description="Delete every saved result, for a fresh start or on a server cloned "
+        "from another (docs/install.md). It shows what it would delete and asks first. The "
+        "service keeps running.",
+    )
+    settings_file(clear)
+    clear.add_argument("-y", "--yes", action="store_true", help="delete them without asking")
+    clear.set_defaults(func=cmd_results_clear)
 
     def target(p: argparse.ArgumentParser) -> None:
         p.add_argument("url", help="base URL of a texas2step server")

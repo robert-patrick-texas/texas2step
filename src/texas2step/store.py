@@ -150,6 +150,33 @@ class ResultStore:
         with self._lock:
             return [dict(r) for r in self._db.execute(sql, args)]
 
+    def tally(self) -> tuple[int, float, float, dict[str | None, int]]:
+        """The number of results, the first and last one's time (0 without), and per server."""
+        with self._lock:
+            count, first, last = self._db.execute(
+                "SELECT count(*), coalesce(min(created_at), 0), coalesce(max(created_at), 0) "
+                "FROM results"
+            ).fetchone()
+            servers = self._db.execute(
+                "SELECT server_id, count(*) AS n FROM results "
+                "GROUP BY server_id ORDER BY n DESC, server_id"
+            ).fetchall()
+        return count, first, last, {row[0]: row[1] for row in servers}
+
+    def clear(self) -> int:
+        """Delete every result, and leave none of them in the file or its WAL.
+
+        secure_delete overwrites what the rows held, VACUUM shrinks the file, and the
+        checkpoint empties the WAL. Other connections, the service's, carry on.
+        """
+        with self._lock:
+            self._db.execute("PRAGMA secure_delete = ON")
+            with self._db:
+                deleted = self._db.execute("DELETE FROM results").rowcount
+            self._db.execute("VACUUM")
+            self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return deleted
+
     def get(self, rid: str) -> dict[str, Any] | None:
         """A result by its ID, as given, or as read out over the phone (see new_id)."""
         ids = [rid]

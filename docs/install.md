@@ -125,6 +125,9 @@ works once the CA is installed with `update-ca-certificates`. If the server can'
 reached yet, give `--id`, `--name` and `--location` (and `--url-v4`, `--url-v6`)
 yourself.
 
+To make the second server by cloning the first's virtual machine instead, see
+[Clone a server](#clone-a-server).
+
 ## 1. Install the package
 
 Download the newest `.deb` from the
@@ -158,7 +161,7 @@ What the package installs:
 | `/etc/nginx/conf.d/texas2step.conf` | nginx upstream definition, which does nothing until a site includes the snippet |
 | `/etc/nginx/snippets/texas2step.conf` | The `/texas2step/` location for your site |
 | `/etc/nginx/snippets/texas2step-speedtest.conf` | Optional `/speedtest` redirect |
-| `/var/lib/texas2step/` | Saved results (SQLite) |
+| `/var/lib/texas2step/` | Saved results (SQLite); [`texas2step results clear`](#clear-saved-results) deletes them |
 
 Files under `/etc` are conffiles: upgrades keep your edits.
 
@@ -632,6 +635,123 @@ to both merge commands to put your values back. To skip the question on future
 upgrades, add `-o Dpkg::Options::=--force-confold` to the `apt install` command; it
 always keeps your file.
 
+## Clear saved results
+
+`texas2step results clear` deletes every saved result: History starts over, and links to
+the old results stop working. Use it for a fresh start, or on a server
+[cloned from another](#clone-a-server). The service keeps running, so there is nothing to
+restart. It shows what it would delete, then asks:
+
+```text
+$ sudo texas2step results clear
+/var/lib/texas2step/results.db holds 27 saved results, from 2026-10-18 to 2026-10-21.
+By server id: dallas 15, local 8, houston 4
+Delete them all? Links to them stop working. [y/N] y
+Deleted 27 saved results. History starts over with the next test saved.
+```
+
+The server id is the server each test ran against; the dates are in the server's time
+zone.
+
+* **Without a terminal to ask on**, such as a script or `ssh` with a command, it shows
+  the same summary and stops without deleting anything. Add `--yes` (`-y`) to delete
+  without asking.
+* **It needs `sudo`**: the file belongs to the service's `texas2step` user, and stays
+  theirs.
+* **What is left on disk**: `/var/lib/texas2step/results.db`, empty and a few kilobytes
+  in size, and beside it, while the service runs, its `-wal` and `-shm` files. The
+  deleted results are overwritten, not only marked as free space, so nothing of them
+  stays in the file. Copies made earlier, such as backups or snapshots of the server,
+  keep what they hold, and so does the journal, which names visitors' addresses on
+  failed requests, and on every request with `debug` on
+  ([Logging](configuration.md#logging)).
+* `--config FILE` clears the `results_path` that settings file names. It works whether
+  `results_enabled` is on or off.
+
+| Exit status | Meaning |
+|---|---|
+| 0 | It deleted the results, or there were none |
+| 1 | It deleted nothing: you answered no, there was no terminal to ask on, or it couldn't change the file; the message says which |
+
+To keep fewer results from now on, lower `results_max_rows`; to keep none, set
+`results_enabled = false` (see [Configuration](configuration.md)).
+
+## Clone a server
+
+A virtual machine cloned from a texas2step server runs texas2step straight away, as a
+copy of the first server: the same id, names and links, the same picker, and the first
+server's History. These steps make it a server of its own. They call the first server
+`dallas` and the clone `houston`.
+
+On the clone:
+
+1. **Give it its own identity.** Every server needs its own `server_id`: the picker
+   leaves out the entry with the server's own id, so two servers sharing one would hide
+   each other, and History tells servers apart by it. Change `server_url_v4` and
+   `server_url_v6` too, or empty them (`server_url_v4=`) if the clone has no
+   single-family names: until then, the clone's IPv4/IPv6 switch sends tests to the
+   first server.
+
+   ```bash
+   sudo texas2step config set server_id=houston server_name=houston.example.net \
+       "server_location=Houston, TX" \
+       server_url_v4=https://v4.houston.example.net/texas2step \
+       server_url_v6=https://v6.houston.example.net/texas2step    # then again with --write
+   ```
+
+2. **List the first server in its picker.** The clone has the first server's
+   `[[locations]]`, which never lists the first server itself. Then restart, which
+   applies both steps:
+
+   ```bash
+   sudo texas2step config add-location https://dallas.example.net/texas2step --write
+   sudo systemctl restart texas2step
+   ```
+
+3. **Start History over**: the clone holds the first server's saved results, with its
+   visitors' addresses. `sudo texas2step results clear`, as
+   [above](#clear-saved-results).
+
+4. **Give it its own names and certificate**, outside texas2step: DNS records for its
+   names, including the IPv4-only and IPv6-only ones; `server_name` in its nginx site;
+   and a TLS certificate for them. The first server's certificate came with the clone.
+   Once nginx uses the clone's own, remove the first server's from the clone so only the
+   first server renews it, with certbot `sudo certbot delete --cert-name dallas.example.net`.
+
+5. **Check the firewall in front of it.** The server's own rules came with the clone,
+   UDP range included. Open that range for the clone's addresses in any cloud security
+   group or network firewall in front of it too. If the clone is on another network,
+   check `internal_networks` and `trusted_proxies`.
+
+Then, on the first server and every other server whose picker should offer the clone:
+
+```bash
+sudo texas2step config add-location https://houston.example.net/texas2step --write
+sudo systemctl restart texas2step
+```
+
+`add-location` asks the clone for its id, name and location, so run it once the clone
+answers at its new address with its new identity.
+
+What stays as it is:
+
+* **The access key**, `/etc/texas2step/access.key`. An organization's servers share one,
+  so the clone gives the same [access codes](access.md) as the first server and accepts
+  its passes; `sudo texas2step access show` prints the same fingerprint on both. Only a
+  clone for another organization needs a key of its own:
+  `sudo texas2step access key --new`, then a restart.
+* `/etc/default/texas2step`, and the [update timer](#unattended-updates), on or off as on
+  the first server. Downloads in `/var/cache/texas2step/update` do no harm; the next
+  update removes them.
+* The first server's dated settings backups, `/etc/texas2step/config.toml.*.bak`. Delete
+  them if you like.
+
+The usual steps for any cloned machine apply as well, though texas2step relies on none
+of them: a new `/etc/machine-id` and SSH host keys, and its own hostname and addresses
+(`virt-sysprep` and cloud-init can do these). The journal came with the clone too, and
+names the first server's visitors as described above;
+`sudo journalctl --rotate && sudo journalctl --vacuum-time=1s` empties the whole journal.
+
 ## Remove
 
 ```bash
@@ -656,7 +776,8 @@ longer need them, for example `sudo rm -r /opt/texas2step`.
   bytes. Expose texas2step to networks whose users you would let run a speed test.
   Rate-limit in nginx if needed.
 * `/api/v1/results` lists saved results, including client IP addresses, to anyone who
-  can reach the server. Set `results_enabled = false` if that's unwanted.
+  can reach the server. Set `results_enabled = false` if that's unwanted, and
+  [`sudo texas2step results clear`](#clear-saved-results) deletes those already saved.
 * Keep `allow_any_target = false` unless the server is on an isolated management
   network. Otherwise anyone can use the server to make requests to other hosts.
 * `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Prefix` are believed only

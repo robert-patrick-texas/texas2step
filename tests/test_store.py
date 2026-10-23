@@ -52,3 +52,35 @@ def test_summaries_carry_the_local_address_and_mac(tmp_path):
     for summary in (plain, odd, listed[plain["id"]], listed[odd["id"]]):
         assert fields(summary) == (None, None, None)
     store.close()
+
+
+def test_clear_leaves_nothing_on_disk(tmp_path):
+    path = tmp_path / "r.db"
+    service = ResultStore(path)  # the running service, which keeps its connection open
+    for n in range(50):
+        if n == 25:  # the first half in the file itself, the rest still in its WAL
+            service.close()
+            service = ResultStore(path)
+        client = {"ip": "198.51.100.77", "user_agent": f"visitor-{n:02d}-browser"}
+        service.add({"version": 1, "server": {"id": "dallas"}, "client": client}, client["ip"])
+    assert b"visitor-00" in path.read_bytes()
+    assert b"visitor-49" in (tmp_path / "r.db-wal").read_bytes()
+    service.add({"version": 1, "server": {"id": "austin"}}, None)
+    service.add({"version": 1}, None)
+
+    admin = ResultStore(path)  # texas2step results clear
+    count, first, last, servers = admin.tally()
+    assert count == 52 and 0 < first <= last
+    assert servers == {"dallas": 50, None: 1, "austin": 1}
+    assert admin.clear() == 52
+    assert admin.tally() == (0, 0, 0, {})
+    admin.close()
+
+    for left in (path, tmp_path / "r.db-wal"):
+        data = left.read_bytes() if left.exists() else b""
+        assert b"visitor-" not in data and b"198.51.100.77" not in data
+    # The service carries on with the emptied file.
+    assert service.recent(10) == []
+    saved = service.add({"version": 1}, "192.0.2.1")
+    assert [r["id"] for r in service.recent(10)] == [saved["id"]]
+    service.close()

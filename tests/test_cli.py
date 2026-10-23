@@ -1,6 +1,12 @@
-"""The CLI's human-readable report."""
+"""The command line: its human-readable report, and results clear."""
+
+import io
+import sys
+
+import pytest
 
 from texas2step import cli
+from texas2step.store import ResultStore
 
 RESULT = {
     "server": {
@@ -27,3 +33,39 @@ def test_report_without_this_computer():
     assert "this computer" not in cli._report(RESULT)
     no_mac = {**RESULT, "client": {**RESULT["client"], "local_ip": "10.8.0.2"}}
     assert "this computer 10.8.0.2" in cli._report(no_mac).splitlines()
+
+
+def test_results_clear(tmp_path, monkeypatch, capsys):
+    db = tmp_path / "results.db"
+    conf = tmp_path / "config.toml"
+    conf.write_text(f'results_path = "{db}"\n')
+    clear = ["results", "clear", "--config", str(conf)]
+
+    cli.main(clear)
+    assert capsys.readouterr().out == f"No saved results: there is no {db}.\n"
+
+    store = ResultStore(db)
+    for server in ("dallas", "dallas", "austin"):
+        store.add({"version": 1, "server": {"id": server}}, "192.0.2.1")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))  # no terminal to ask on
+    with pytest.raises(SystemExit, match="no terminal to ask on; add --yes"):
+        cli.main(clear)
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith(f"{db} holds 3 saved results, on 20")
+    assert out[1] == "By server id: dallas 2, austin 1"
+
+    answer = io.StringIO("n\n")
+    answer.isatty = lambda: True
+    monkeypatch.setattr(sys, "stdin", answer)
+    with pytest.raises(SystemExit, match="Nothing changed"):
+        cli.main(clear)
+    assert store.tally()[0] == 3
+
+    cli.main([*clear, "--yes"])
+    assert capsys.readouterr().out.endswith(
+        "Deleted 3 saved results. History starts over with the next test saved.\n"
+    )
+    assert store.tally()[0] == 0
+    cli.main(clear)
+    assert capsys.readouterr().out == f"{db} holds no saved results.\n"
+    store.close()

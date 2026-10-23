@@ -71,7 +71,7 @@ can do that unattended. On a server without internet access,
 `sudo texas2step update --from <directory>` installs a release whose two files you put
 there. The [install guide](docs/install.md) covers the rest: the setup
 tool's options, the optional `/speedtest` address, configuration, the firewall rule for
-the UDP test, updates and removal.
+the UDP test, updates, clearing saved results, cloning a server and removal.
 
 To run it from source instead:
 

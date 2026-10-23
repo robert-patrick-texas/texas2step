@@ -199,7 +199,8 @@ Open only what the tests need: TCP 443 (and 80, to redirect), and the UDP probe'
 A saved result holds the public address the caller tested from, often their home's,
 and, where the browser or the command line can tell, their computer's own address and a
 MAC address. Keep `internal_networks` set, so only the desk reads them, and keep only as
-many as you need (`results_max_rows`).
+many as you need (`results_max_rows`). `sudo texas2step results clear` deletes them all
+([Clear saved results](install.md#clear-saved-results)).
 
 ## On disk
 

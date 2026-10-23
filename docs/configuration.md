@@ -29,7 +29,7 @@ file up to date with the new version's template and keeps your values; see
 | `max_rtc_sessions` | 32 | Concurrent UDP probe sessions per worker |
 | `rtc_session_timeout` | 120 | Seconds of inactivity before a session is closed |
 | `rtc_port_min` / `rtc_port_max` | 0 / 0 | Inclusive UDP port range for the probe's server sockets, so a firewall can open just that range. Both 0 lets the OS pick ports. See [Pinning the UDP ports](install.md#pinning-the-udp-ports). |
-| `results_enabled` | `true` | Store results and serve History |
+| `results_enabled` | `true` | Store results and serve History. `sudo texas2step results clear` deletes those saved; see [Clear saved results](install.md#clear-saved-results). |
 | `results_path` | `texas2step.db` | SQLite file (relative to the working directory) |
 | `results_max_rows` | 10000 | Oldest results are pruned beyond this |
 | `measure_enabled` | `true` | Enable `/api/v1/measure/*` |
