@@ -131,6 +131,15 @@ class Settings:
     access_lockout_after: int = 3
     access_lockout_minutes: float = 30.0
     access_lockouts_file: str = "/var/lib/texas2step/access.db"  # shared by the workers
+    # Servers that defend together: a lockout here, texas2step access block and access
+    # lockouts --clear go to every server in [[locations]]. Each takes them only from
+    # access_peer_networks (the other servers' addresses), signed with a key derived from
+    # the shared access key.
+    access_share_lockouts: bool = False
+    access_peer_networks: list[str] = field(default_factory=list)
+    # A program run on each lockout, block and clear here: EVENT NETWORK UNTIL, as the
+    # service's user. Such as to tell a SIEM or a firewall's API.
+    access_lockout_hook: str = ""
     # The organization's own networks (addresses or CIDR blocks): no code is asked there,
     # and only they get saved results, the API explorer and the server-side measurements.
     internal_networks: list[str] = field(default_factory=list)
@@ -203,6 +212,22 @@ class Settings:
                 raise ValueError(
                     f"internal_networks: {net!r} isn't an address or a network such as 10.0.0.0/8"
                 ) from None
+        for net in self.access_peer_networks:
+            try:
+                ipaddress.ip_network(net.strip(), strict=False)
+            except ValueError:
+                raise ValueError(
+                    f"access_peer_networks: {net!r} isn't an address or a network"
+                ) from None
+        if self.access_share_lockouts and self.access_code == "off":
+            raise ValueError("access_share_lockouts: needs access codes on (access_code)")
+        if self.access_share_lockouts and not self.access_peer_networks:
+            raise ValueError(
+                "access_share_lockouts: list the other servers' addresses in "
+                "access_peer_networks; their blocks are taken only from there"
+            )
+        if self.access_lockout_hook and not self.access_lockout_hook.startswith("/"):
+            raise ValueError("access_lockout_hook: give the program's full path")
         if self.internal_networks and not {"test", "monitor", "diag"} & set(self.pages):
             raise ValueError(
                 "internal_networks: keep page_test, page_monitor or page_diag shown, "

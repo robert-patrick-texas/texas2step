@@ -113,7 +113,9 @@ class AccessGate:
     another server can read the refusal. Raw ASGI, like TimingAllowOrigin.
     """
 
-    PUBLIC = ("/api/v1/health", "/api/v1/access")
+    # /access/peer checks its caller itself: an address in access_peer_networks and a
+    # signature from the cluster's key (cluster.py).
+    PUBLIC = ("/api/v1/health", "/api/v1/access", "/api/v1/access/peer")
     DESK_PAGES = (
         "/history",
         "/api",
@@ -201,6 +203,7 @@ class BodyLimit:
     LIMITS: ClassVar[dict[str, int]] = {
         "/api/v1/access": 1024,
         "/api/v1/access/blocks": 1024,
+        "/api/v1/access/peer": 1024,
         "/api/v1/results": MAX_RESULT_BYTES,
     }
     DEFAULT = 64 * 1024
@@ -345,6 +348,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings.access_lockout_minutes,
         )
     app.state.traffic = TrafficMeter.load(settings)
+    app.state.tasks = set()  # sharing lockouts and running the hook, in the background
     app.state.store = None
     app.state.rtc = RtcEcho(
         settings.ice_servers,

@@ -623,7 +623,11 @@ def cmd_access_lockouts(args: argparse.Namespace) -> None:
         store = _lockouts(settings)
         cleared = store.clear(target)
         store.close()
-        print(f"Ended: {', '.join(cleared)}." if cleared else "No lockout overlaps that.")
+        here = " here" if settings.access_share_lockouts else ""
+        print(f"Ended: {', '.join(cleared)}." if cleared else f"No lockout{here} overlaps that.")
+        _share(settings, "clear", target or "all")
+        if cleared:
+            _hook(settings, "clear", target or "all", None, "ended from the command line")
         return
     if not Path(settings.access_lockouts_file).exists():
         print("No networks are locked out.")
@@ -652,7 +656,29 @@ def cmd_access_lockouts(args: argparse.Namespace) -> None:
         print('Access codes are off (access_code = "off"), so lockouts have no effect.')
 
 
+def _share(settings: Any, action: str, network: str, minutes: float = 0) -> None:
+    """Send a block or a clear to the other servers too, with access_share_lockouts on."""
+    from . import cluster
+
+    if not settings.access_share_lockouts:
+        return
+    key = cluster.peer_key(_access_codes(settings).key)
+    results = _run(cluster.send(settings, key, action, network, minutes))
+    print(f"Other servers: {cluster.summary(results)}.")
+
+
+def _hook(settings: Any, event: str, network: str, until: Any, why: str) -> None:
+    from . import cluster
+
+    if said := cluster.run_hook_now(settings, event, network, until, why):
+        print(said + ".")
+
+
 def cmd_access_block(args: argparse.Namespace) -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from . import cluster
     from .lockouts import inside_of, parse_network
 
     settings = _server_settings(args)
@@ -662,16 +688,46 @@ def cmd_access_block(args: argparse.Namespace) -> None:
         sys.exit(f"texas2step: {exc}")
     if inside := inside_of(net, settings.internal_networks):
         sys.exit(f"texas2step: {net} overlaps {inside}, which is never locked out")
+    if wide := cluster.too_wide(net, cluster.WIDEST_BY_HAND):
+        sys.exit(f"texas2step: {wide}; block smaller networks")
     if args.minutes is not None and not 0 < args.minutes <= 525_600:
         sys.exit("texas2step: --minutes: expected more than 0, up to 525600 (a year)")
     minutes = args.minutes or settings.access_lockout_minutes
     store = _lockouts(settings)
-    block = store.block(str(net), minutes, "blocked from the command line")
+    why = "blocked from the command line"
+    block = store.block(str(net), minutes, why)
     store.close()
     until = _moment(block.expires, settings.access_timezone)
     print(f"{net} is locked out until {until}, longer if it keeps trying.")
     if settings.access_code == "off":
         print('Access codes are off (access_code = "off"), so it has no effect until they are on.')
+    if settings.access_share_lockouts and (wide := cluster.too_wide(net, cluster.WIDEST)):
+        print(f"Not sent to the other servers: {wide}, the most they take.")
+    else:
+        _share(settings, "block", str(net), min(minutes, cluster.MOST_MINUTES))
+    ends = datetime.fromtimestamp(block.expires, ZoneInfo(settings.access_timezone))
+    _hook(settings, "block", str(net), ends, why)
+
+
+def cmd_access_peers(args: argparse.Namespace) -> None:
+    from . import cluster
+
+    settings = _server_settings(args)
+    state = "on" if settings.access_share_lockouts else "off (access_share_lockouts = false)"
+    print(f"Sharing lockouts: {state}.")
+    takes = ", ".join(settings.access_peer_networks) or "nowhere (access_peer_networks is empty)"
+    print(f"Takes them from: {takes}.")
+    if not any(loc.url for loc in settings.locations):
+        print("No other servers in [[locations]] to check.")
+        return
+    key = cluster.peer_key(_access_codes(settings).key)
+    results = _run(cluster.send(settings, key, "check", ""))
+    print("A signed check, which changes nothing, to each server in [[locations]]:")
+    width = max(len(peer) for peer, _ in results)
+    for peer, why in results:
+        print(f"  {peer:<{width}}   {'takes them from this server' if why is None else why}")
+    if any(why for _, why in results):
+        sys.exit(1)
 
 
 def cmd_access_phrase_init(args: argparse.Namespace) -> None:
@@ -1125,6 +1181,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     settings_file(block)
     block.set_defaults(func=cmd_access_block)
+    peers = acc_sub.add_parser(
+        "peers",
+        help="check that the servers in [[locations]] take this server's lockouts",
+        description="With access_share_lockouts on, lockouts, blocks and clears go to every "
+        "server in [[locations]]. This sends each a signed check that changes nothing, and "
+        "says which take them: those that hold the same access key and list this server's "
+        "address in their access_peer_networks (docs/access.md).",
+    )
+    settings_file(peers)
+    peers.set_defaults(func=cmd_access_peers)
 
     res = sub.add_parser("results", help="the saved results that History shows")
     res_sub = res.add_subparsers(dest="action", required=True)

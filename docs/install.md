@@ -730,7 +730,10 @@ On the clone:
 5. **Check the firewall in front of it.** The server's own rules came with the clone,
    UDP range included. Open that range for the clone's addresses in any cloud security
    group or network firewall in front of it too. If the clone is on another network,
-   check `internal_networks` and `trusted_proxies`.
+   check `internal_networks` and `trusted_proxies`. With
+   [servers that defend together](access.md#servers-that-defend-together), add the
+   clone's addresses to the others' `access_peer_networks`, and check with
+   `sudo texas2step access peers` on each.
 
 Then, on the first server and every other server whose picker should offer the clone:
 
@@ -806,6 +809,20 @@ longer need them, for example `sudo rm -r /opt/texas2step`.
   codes on it needs a pass.
 * nginx logs texas2step's requests to `/var/log/nginx/access.log` without their query
   strings, so the log never holds an access pass.
+* Post-quantum key exchange: nginx on Ubuntu 26.04 (OpenSSL 3.5) can agree each
+  connection's keys with ML-KEM-768 and X25519 together (`X25519MLKEM768`), so traffic
+  recorded today can't be decrypted later by a quantum computer. Current Chrome, Edge and
+  Firefox use it, and so do texas2step's own requests. A site that sets
+  `ssl_ecdh_curve` leaves it out unless it is listed; put it first, keeping the curves
+  you had:
+
+  ```nginx
+  ssl_ecdh_curve X25519MLKEM768:X25519:secp384r1;
+  ```
+
+  Then `sudo nginx -t && sudo systemctl reload nginx`, and check:
+  `echo | openssl s_client -connect www.example.net:443 2>/dev/null | grep group` should
+  say `Negotiated TLS1.3 group: X25519MLKEM768`.
 * The service runs as the unprivileged `texas2step` user, under systemd sandboxing
   (`ProtectSystem=strict`, `NoNewPrivileges` and more). It can write only to
   `/var/lib/texas2step`.

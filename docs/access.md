@@ -316,7 +316,9 @@ sudo texas2step access block 198.51.100.0/24 --minutes 120
 a /24 with someone who did. `block` locks out an address or network by hand, as if it had
 entered too many wrong codes, for `--minutes` (`access_lockout_minutes` if left out), and
 longer if it keeps trying; blocking it again keeps it going. A block can't overlap
-`internal_networks` or loopback. Both take effect at once, with no restart.
+`internal_networks` or loopback, or be wider than a /16 of IPv4 or a /32 of IPv6. Both
+take effect at once, with no restart, and with
+[servers that defend together](#servers-that-defend-together), on every server.
 
 **From automation.** The same, as an API that answers only `internal_networks` and the
 server itself, so a script can carry a block from the server that saw an attack to all
@@ -331,7 +333,9 @@ curl -s -X DELETE 'https://houston.example.net/texas2step/api/v1/access/blocks?n
 
 A list gives each lockout's `network`, `source`, `wrong_codes`, `since` and `until`, and
 `counting`, the networks with wrong codes in a row. A block that overlaps
-`internal_networks` is refused with `400`.
+`internal_networks`, or is wider than a /16 or a /32, is refused with `400`. These calls
+change only the server they are sent to; for one that reaches every server by itself, see
+[Servers that defend together](#servers-that-defend-together).
 
 **How strong is a code, then?** A daily code always has two codes that work (yesterday's
 is still good), so an attacker's chance in a day is about twice their guesses over the
@@ -347,6 +351,88 @@ every 30 minutes. One with 10,000 networks gets about 1.4 million a day:
 
 For a server open to the Internet, use `access_digits = 4`, and standing phrases of
 several unrelated words.
+
+## Servers that defend together
+
+When a lockout begins on one server, the others can block that network too, so an
+attacker who trips the limit on one can't carry on at the next. On each server:
+
+```toml
+access_share_lockouts = true
+# The addresses the other servers' requests come from.
+access_peer_networks = ["198.51.100.20", "2001:db8:20::20", "203.0.113.30"]
+```
+
+* **What goes to the others.** A lockout here goes, as a block, to every server in
+  `[[locations]]`, at once. While the attacker keeps trying here, it goes again every
+  third of `access_lockout_minutes`, so the others' blocks don't run out first.
+  `sudo texas2step access block` and `access lockouts --clear` go to every server too:
+  `--clear` on any one of them lets a caller back in everywhere. The
+  [API's blocks](#lockouts-and-blocks) stay on the server they are sent to.
+* **What a server takes.** Only requests from an address in its `access_peer_networks`,
+  signed with a key the servers work out from the access key they share. Use the
+  addresses the other servers' requests leave from, which behind NAT may not be the
+  addresses of their names. A request more than 5 minutes off the server's clock, sent
+  before, or meant for another server, is refused, so keep the servers' clocks right
+  (Ubuntu's `systemd-timesyncd` does). Unlike `internal_networks`, `access_peer_networks`
+  grants nothing else: no tests without a code, no History.
+* **What one server can make another do,** in case one is ever misconfigured or
+  compromised: a block from another server covers at most a /24 or a /48, never
+  `internal_networks` or loopback, lasts at most a week, and isn't passed on. A server
+  holds at most 1,000 of them. A wider block by hand stays on the server where it was set.
+* **Counts stay on each server.** Wrong codes count where they are entered, so with three
+  servers an attacker gets up to about seven guesses, two at each and one more, before
+  the whole cluster locks them out.
+
+Check that each server takes this one's lockouts, with a signed request that changes
+nothing:
+
+```console
+$ sudo texas2step access peers
+Sharing lockouts: on.
+Takes them from: 198.51.100.20, 2001:db8:20::20, 203.0.113.30.
+A signed check, which changes nothing, to each server in [[locations]]:
+  dallas    takes them from this server
+  houston   404: sharing is off there, or this server's address isn't in its access_peer_networks
+```
+
+A server whose access key differs answers that the signature doesn't match. The journal
+of each side says what it sent and what it took:
+
+```text
+WARNING:  texas2step.cluster: block of 203.0.113.0/24 sent to dallas, houston
+WARNING:  texas2step.api.access: 203.0.113.0/24 blocked until 2026-10-23 19:18 EDT, shared by austin from 198.51.100.10
+```
+
+The signature is HMAC-SHA-256 with a 256-bit key, over the time, a one-time value and the
+request. Quantum computers break public-key cryptography, not keyed hashes like this, so
+it holds against them too. For the connection itself, see
+[post-quantum key exchange](install.md#security-notes) in nginx.
+
+### A hook for anything else
+
+`access_lockout_hook` names a program that runs on each lockout, block and clear on this
+server, blocks from the others included, such as to send an alert or call a firewall's or
+a SIEM's API. It gets three arguments: the event (`lockout`, `block` or `clear`), the
+network, and when it ends (ISO 8601; empty for a clear). The environment has the same in
+`TEXAS2STEP_EVENT`, `TEXAS2STEP_NETWORK` and `TEXAS2STEP_UNTIL`, with `TEXAS2STEP_WHY` and
+`TEXAS2STEP_SERVER`. For example, `/usr/local/bin/texas2step-hook`:
+
+```sh
+#!/bin/sh
+curl -s -m 10 -X POST https://siem.example.net/api/events \
+     -H 'Content-Type: application/json' \
+     -d "{\"source\": \"texas2step $TEXAS2STEP_SERVER\", \"event\": \"$1\", \"network\": \"$2\"}"
+```
+
+```toml
+access_lockout_hook = "/usr/local/bin/texas2step-hook"
+```
+
+It runs as the service's user, even when `sudo texas2step access block` sets it off,
+inside the service's sandbox: it can reach the network and write only under
+`/var/lib/texas2step`, and it can't use `sudo`. It has 30 seconds; a failure is a warning
+in the journal. Keep it owned by root and writable by nobody else.
 
 ## Other limits
 
@@ -396,7 +482,7 @@ many as you need (`results_max_rows`). `sudo texas2step results clear` deletes t
 | `/etc/texas2step/access.key` | Made when the package is installed, kept on upgrades, removed with `apt purge` |
 | `/etc/texas2step/access-phrases.toml` | Made when the package is installed or upgraded, if missing, with two examples commented out; kept on upgrades; removed with `apt purge` |
 | Your `access_words` file | Yours: kept by `apt purge` |
-| `/var/lib/texas2step/access.db` | Wrong codes, lockouts and blocks; made by the service when access codes are on; removed with `apt purge` |
+| `/var/lib/texas2step/access.db` | Wrong codes, lockouts and blocks, and with servers that defend together, the one-time values of their requests; made by the service when access codes are on; removed with `apt purge` |
 
 The pass lives in the visitor's browser (local storage, and the cookie for this server's
 pages) until it expires. Passes are not written to the journal: the request log shows

@@ -30,6 +30,7 @@ from .store import create_owned, prepare
 V4_PREFIX = 24
 V6_PREFIX = 48
 WRONG_CODES = "wrong codes"  # the source of a lockout the server made itself
+SHARED_BY = "shared by "  # the start of the source of a block another server sent
 LOOPBACK = ("127.0.0.0/8", "::1/128")
 
 SCHEMA = """
@@ -44,6 +45,16 @@ CREATE TABLE IF NOT EXISTS lockouts (
     source    TEXT NOT NULL      -- wrong codes, the command line, or the API and its caller
 );
 CREATE INDEX IF NOT EXISTS lockouts_span ON lockouts (family, first, last);
+-- Servers that defend together (cluster.py): when each lockout that began here was last
+-- sent to the other servers, and the one-time values of the requests they sent here.
+CREATE TABLE IF NOT EXISTS shared (
+    network TEXT PRIMARY KEY,
+    at      REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS nonces (
+    nonce TEXT PRIMARY KEY,
+    seen  REAL NOT NULL
+);
 """
 
 
@@ -238,6 +249,56 @@ class LockoutStore:
             return [row["network"] for row in rows]
 
         return self._write(work)
+
+    # --- Servers that defend together (cluster.py) -------------------------------------
+
+    def due_to_share(self, network: str, every: float, now: float | None = None) -> bool:
+        """Whether this server should send ``network``'s lockout to the others now: it
+        began here after wrong codes, and wasn't sent in the last ``every`` seconds. Says
+        so to one caller only, of every worker."""
+        now = now if now is not None else time.time()
+
+        def work() -> bool:
+            self._db.execute(
+                "DELETE FROM shared WHERE network NOT IN (SELECT network FROM lockouts "
+                "WHERE locked_at IS NOT NULL AND expires > ?)",
+                (now,),
+            )
+            row = self._db.execute(
+                "SELECT source FROM lockouts WHERE network = ? AND locked_at IS NOT NULL "
+                "AND expires > ?",
+                (network, now),
+            ).fetchone()
+            if row is None or row["source"] != WRONG_CODES:
+                return False
+            last = self._db.execute("SELECT at FROM shared WHERE network = ?", (network,))
+            if (found := last.fetchone()) and found["at"] > now - every:
+                return False
+            self._db.execute("INSERT OR REPLACE INTO shared VALUES (?, ?)", (network, now))
+            return True
+
+        return self._write(work)
+
+    def first_use(self, nonce: str, keep: float, now: float | None = None) -> bool:
+        """Whether a request's one-time value is new, remembering it for ``keep`` seconds."""
+        now = now if now is not None else time.time()
+
+        def work() -> bool:
+            self._db.execute("DELETE FROM nonces WHERE seen < ?", (now - keep,))
+            added = self._db.execute("INSERT OR IGNORE INTO nonces VALUES (?, ?)", (nonce, now))
+            return added.rowcount == 1
+
+        return self._write(work)
+
+    def held_from_others(self, now: float | None = None) -> int:
+        """How many blocks from other servers are in force here."""
+        now = now if now is not None else time.time()
+        with self._lock:
+            row = self._db.execute(
+                "SELECT count(*) FROM lockouts WHERE source LIKE ? AND expires > ?",
+                (SHARED_BY + "%", now),
+            ).fetchone()
+        return row[0]
 
     def current(self, now: float | None = None) -> tuple[list[Lockout], int]:
         """The lockouts and blocks in force, oldest first, and how many networks are

@@ -171,8 +171,9 @@ the lockouts. `/api/v1/health` leaves out the version for clients that would nee
 | POST | `/api/v1/access` | `{"code": "maple.river.42"}` (any case and separators, or a standing phrase) returns `{"pass", "expires"}`, and sets the pass as a cookie for this server's pages. A wrong code is `403`. After `access_lockout_after` wrong codes in a row from one /24 or /48, every code from it gets that same `403`, unread, until `access_lockout_minutes` pass without one ([Lockouts and blocks](access.md#lockouts-and-blocks)). A body over 1 KB is `413` |
 | GET | `/api/v1/access/code` | The current code, when it changes, and the previous one while it still works; only from `internal_networks` |
 | GET | `/api/v1/access/blocks` | `{"lockouts": [{"network", "source", "wrong_codes", "since", "until"}], "counting"}`; only from `internal_networks` and the server itself |
-| POST | `/api/v1/access/blocks` | `{"network": "198.51.100.0/24", "minutes": 120}` locks a network out by hand, or keeps its lockout going; `minutes` defaults to `access_lockout_minutes`. One that overlaps `internal_networks` is `400` |
+| POST | `/api/v1/access/blocks` | `{"network": "198.51.100.0/24", "minutes": 120}` locks a network out by hand, or keeps its lockout going; `minutes` defaults to `access_lockout_minutes`. One that overlaps `internal_networks`, or is wider than a /16 or a /32, is `400` |
 | DELETE | `/api/v1/access/blocks?network=<network>` | Ends the lockouts that overlap it (`all`: every one); returns `{"cleared": [...]}` |
+| POST | `/api/v1/access/peer` | For [servers that defend together](access.md#servers-that-defend-together): `{"from", "to", "action": "block" \| "clear" \| "check", "network", "minutes"}`, signed in `X-Texas2step-Time`, `-Nonce` and `-Signature`. Only from `access_peer_networks`, with `access_share_lockouts` on; `404` to everyone else |
 
 ```bash
 pass=$(curl -s -X POST https://speedtest.example.net/texas2step/api/v1/access \
