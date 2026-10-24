@@ -18,6 +18,7 @@ until set, and none gets in the way of a test from inside.
 | Abuse of the service | [Size and time caps](#abuse-of-the-service) on every request, a daily and monthly traffic limit, nginx connection limits |
 | Data | [Saved results](#data-and-privacy) readable only inside, deleted securely; no passes or phrases in any log |
 | Cryptography | [HMAC-SHA-256 with 256-bit keys](#cryptography); TLS 1.3 with post-quantum key exchange recommended |
+| On the wire | [HTTPS, WSS and DTLS](#on-the-wire) for everything measured; only ICE's signed connectivity checks travel in plain text |
 | The host | A [sandboxed service](#the-host) as its own unprivileged user, behind nginx, with only the needed ports open |
 | Updates | [Releases checked](#updates-and-supply-chain) against their SHA-256 before anything is installed; no unattended change to nginx or the firewall |
 
@@ -145,7 +146,7 @@ A speed test exists to move a lot of data, so each part has a cap:
 | Access codes, passes | HMAC-SHA-256, 256-bit shared key |
 | Requests between servers | HMAC-SHA-256 with a key derived by HKDF-SHA-256; time and one-time value against replay |
 | Connections to nginx | TLS 1.3 (your site's settings); `X25519MLKEM768`, ML-KEM-768 with X25519, recommended |
-| UDP probe | DTLS, as WebRTC requires |
+| UDP probe | DTLS 1.2, as WebRTC requires; see [On the wire](#on-the-wire) |
 | Releases | SHA-256 of each file, checked against GitHub's record before install |
 
 Quantum computers would break public-key cryptography, such as the elliptic-curve key
@@ -157,6 +158,44 @@ a site that sets `ssl_ecdh_curve` must list it. See the
 [install guide's security notes](install.md#security-notes). The certificates that
 authenticate a connection are still elliptic-curve or RSA; that risk is to a connection
 at the moment it is made, not to recorded traffic.
+
+## On the wire
+
+On a site served over HTTPS, everything a test, Monitor or Diag measures travels
+encrypted:
+
+| Traffic | Protection |
+|---|---|
+| Pages, API requests, downloads and uploads | HTTPS: TLS 1.3, ended by nginx |
+| WebSocket probes, and Monitor's TCP fallback | `wss://`: TLS, as HTTPS |
+| UDP probes: the Test page's packet loss, Monitor and Diag | A WebRTC data channel: SCTP inside DTLS 1.2, with ECDHE keys made for each session and AES-128-GCM or ChaCha20-Poly1305 |
+
+The UDP session is set up over HTTPS. The browser's offer and the server's answer carry
+each side's DTLS certificate fingerprint, and each side checks the other's certificate
+against it, so only the server the page reached over HTTPS can complete the handshake.
+The certificates are self-signed, made for the session and named at random.
+
+What isn't encrypted:
+
+* **ICE connectivity checks**: STUN binding requests and their answers, a few at the
+  start and then a few every 5 seconds or so, both ways, while a session lasts (consent
+  checks, RFC 7675).
+  They carry random user names, priorities and the address each side saw, nothing that
+  was measured. Each is signed with the session's ICE password (HMAC-SHA-1), which
+  travels over HTTPS, so none can be forged. Every WebRTC call works this way.
+* **The DTLS handshake**, as with TLS 1.2: the cipher it agrees and the throwaway
+  certificates are visible. DTLS 1.3 would hide the certificates, but the server's WebRTC
+  library, aiortc, speaks DTLS 1.2.
+* **STUN servers listed in `ice_servers`**, if any: the server and browsers ask them for
+  their public addresses in plain STUN. None are used by default.
+
+A browser hides its own addresses behind random `….local` names in its offer. The
+server leaves those out rather than ask for them by multicast DNS on its own network. It
+learns the browser's address from the connectivity checks instead.
+
+Serve texas2step over HTTPS only. Over plain HTTP the pages, the access pass and the UDP
+session's setup could be read on the way, and someone on the path could put themselves
+in the middle of the DTLS session too.
 
 ## The host
 
@@ -190,11 +229,15 @@ at the moment it is made, not to recorded traffic.
   environment. Each release moves every dependency to its newest version first, for its
   security fixes. The web page has no runtime dependencies at all.
 * **No code from elsewhere at run time.** The page's scripts are part of the package.
+* **The Python package** on PyPI is built from the release's tag and uploaded by GitHub
+  Actions with trusted publishing, so no upload token is stored anywhere. Each file comes
+  with an attestation of the repository and workflow that built it.
 
 ## Left to the operator
 
 texas2step can't do these for you:
 
+* Serve it over HTTPS only ([On the wire](#on-the-wire)).
 * Keep Ubuntu, nginx and OpenSSL patched (`unattended-upgrades` does this by default).
 * Floods that fill the link before they reach the server: that is for your provider or a
   scrubbing service.
