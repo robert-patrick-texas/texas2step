@@ -29,7 +29,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "google-crc32c" },
     { name = "pyee", version = "13.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "pyee", version = "15.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pyee", version = "16.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pylibsrtp" },
     { name = "pyopenssl" },
 ]
@@ -764,7 +764,7 @@ wheels = [
 
 [[package]]
 name = "pyee"
-version = "15.0.0"
+version = "16.0.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -772,9 +772,9 @@ resolution-markers = [
 dependencies = [
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/ca/98538d00bbf94279a6aa4391d5d8013e9d2255d801cc8e1f0d45da12d60e/pyee-15.0.0.tar.gz", hash = "sha256:48be57d58b2db456a779590c88f7e50b2a33c88e59a6bfdc9a8ab25b13a5576b", size = 134926, upload-time = "2026-10-18T00:03:07.395Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/f2/0e19d5b58e7c71060e1ed9af1ba4bd122d74656237380d7f41257d207b30/pyee-16.0.0.tar.gz", hash = "sha256:34de6fbc4d8f0880bb997efd0eb642ba01f02688e740cbd3aa3bee9db4b1c5ec", size = 138329, upload-time = "2026-10-24T17:43:32.148Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9f/56/d9780c78acbfa413b6ef08ae1b0b61366e0f9cdacc06edfc1e4c4f45c331/pyee-15.0.0-py3-none-any.whl", hash = "sha256:ea2264fe4b47e0b2edc5badcd5d1bffcef68b70f9c0224ffb08f76992491da9b", size = 15620, upload-time = "2026-10-18T00:03:05.967Z" },
+    { url = "https://files.pythonhosted.org/packages/84/c4/eaa0e659b72b0876cc95c656acb66e8b541d84499d6a001d4102a7106c79/pyee-16.0.0-py3-none-any.whl", hash = "sha256:40253d268c4a18ba9fea94c491d612d7386e9b801221399f4efd437a3d87b829", size = 16943, upload-time = "2026-10-24T17:43:30.774Z" },
 ]
 
 [[package]]

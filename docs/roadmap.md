@@ -102,6 +102,13 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.1.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.1.1) (2026-10-24)
+
+- [x] Monitor holds still at Stop, to show or take a screenshot of.
+- [x] A call's scores sit on Monitor's loss-per-second strip, each over its 10 seconds.
+- [x] History without the Local column; Diag's NAT and egress box shows this computer's
+  address.
+
 ### [2.1.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.1.0) (2026-10-24)
 
 - [x] Call quality each way: a MOS from the ITU-T E-model for what you hear and what the
