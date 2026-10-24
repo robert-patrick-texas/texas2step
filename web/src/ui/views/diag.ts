@@ -9,6 +9,7 @@ import { Endpoint } from "../../engine/net";
 import { percentile } from "../../engine/stats";
 import type { DiagHttp } from "../../types";
 import type { App, View } from "../app";
+import { awakeSwitch } from "../awake";
 import { drawTimeline, Lane, type Sample, type Tone } from "../charts/diag";
 import { clear, h, onResize, setText } from "../dom";
 import { ms, text } from "../format";
@@ -361,6 +362,7 @@ export class DiagView implements View {
   private logShown = -1;
   private away = false; // another page is shown
   private stale = false; // the server was changed while away
+  private awakeOpt: ReturnType<typeof awakeSwitch> = null; // Keep screen on
   private els!: { you: HTMLElement; server: HTMLElement; clock: HTMLElement; rows: HTMLElement; egress: HTMLElement; log: HTMLElement };
   private readonly onVisibility = () => this.log(null, document.hidden ? "tab hidden: browsers slow down timers in background tabs, so gaps may follow" : "tab visible again");
 
@@ -386,8 +388,14 @@ export class DiagView implements View {
     };
     const card = (title: string, note: string, ...body: (HTMLElement | null)[]) =>
       h("section", { class: "card diag-card" }, h("header", { class: "card-head head-inline" }, h("h2", {}, title), note ? h("p", { class: "wide" }, note) : null), ...body);
+    this.awakeOpt = awakeSwitch(this.app);
     root.append(
-      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "Diag"), h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second while this page is shown: HTTPS, WebSocket and UDP, over IPv4 and IPv6."))),
+      h(
+        "section",
+        { class: "page-head" },
+        h("div", {}, h("h1", {}, "Diag"), h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second while this page is shown: HTTPS, WebSocket and UDP, over IPv4 and IPv6.")),
+        this.awakeOpt ? h("div", { class: "head-actions" }, this.awakeOpt.el) : null,
+      ),
       h("section", { class: "card diag-card diag-addresses" }, this.els.you, this.els.server, this.els.clock),
       card(
         "Connection methods",
@@ -418,6 +426,7 @@ export class DiagView implements View {
     document.addEventListener("visibilitychange", this.onVisibility);
     this.restart();
     this.timer = window.setInterval(() => this.render(), 1000);
+    this.app.awake.hold("diag"); // the screen stays on while Diag is shown
   }
 
   /** Another page is shown: the attempts pause, and what they found stays. */
@@ -427,10 +436,13 @@ export class DiagView implements View {
     for (const m of this.methods) m.pause();
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.log(null, "paused while another page is shown");
+    this.app.awake.hold("diag", false);
   }
 
   show(): void {
     this.away = false;
+    this.app.awake.hold("diag");
+    this.awakeOpt?.mark(); // it may have changed on another page
     document.addEventListener("visibilitychange", this.onVisibility);
     if (this.stale) {
       this.stale = false;
@@ -448,6 +460,7 @@ export class DiagView implements View {
     for (const m of this.methods) m.stop();
     this.off?.();
     document.removeEventListener("visibilitychange", this.onVisibility);
+    this.app.awake.hold("diag", false);
   }
 
   // ---- Methods -------------------------------------------------------------------

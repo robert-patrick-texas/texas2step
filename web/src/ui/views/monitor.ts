@@ -9,6 +9,7 @@ import { jitter, percentile } from "../../engine/stats";
 import { CallStream, framePackets, type ProfileName, SETTLE_MS, type Slice, VIDEO_BYTES, VIDEO_FPS } from "../../engine/stream";
 import type { CallRating, Location, ServerInfo } from "../../types";
 import type { App, View } from "../app";
+import { awakeSwitch } from "../awake";
 import { LiveChart, type LiveSeries } from "../charts/live";
 import { clear, h, save, setText, store } from "../dom";
 import { type Formatted, ms, pct } from "../format";
@@ -134,6 +135,7 @@ export class MonitorView implements View {
   private profileBox!: HTMLElement; // the profile switch, beside Start
   private rateBox!: HTMLElement; // the path's probe rate
   private sizes!: HTMLDetailsElement; // the chart's scale and the exact sizes and rates, folded away
+  private awakeOpt: ReturnType<typeof awakeSwitch> = null; // Keep screen on, in Options
   private tiles!: HTMLElement;
   private compare!: HTMLElement;
   private figures: Partial<Record<Key, HTMLElement>> = {};
@@ -175,6 +177,7 @@ export class MonitorView implements View {
     this.profileBox = h("div", { class: "dest-box" });
     this.rateBox = h("div", { class: "dest-box" });
     this.sizes = h("details", { class: "options monitor-sizes" });
+    this.awakeOpt = awakeSwitch(this.app);
     this.tiles = h("div", { class: "tiles six" });
     this.compare = h("div", { class: "table-wrap compare-wrap" });
     this.chartHead = h("p", {});
@@ -194,6 +197,7 @@ export class MonitorView implements View {
     });
     this.layout();
     this.timers.push(window.setInterval(() => this.refresh(), 500));
+    this.app.awake.hold("monitor"); // the screen stays on while Monitor is shown
   }
 
   /** Another page is shown: monitoring stops, as Stop does, and the chart holds still. */
@@ -202,10 +206,13 @@ export class MonitorView implements View {
     if (this.running) this.say("Stopped when you went to another page.");
     this.stop();
     for (const t of this.timers.splice(0)) clearInterval(t);
+    this.app.awake.hold("monitor", false);
   }
 
   show(): void {
     this.away = false;
+    this.app.awake.hold("monitor");
+    this.awakeOpt?.mark(); // it may have changed on another page
     this.refresh();
     this.timers.push(window.setInterval(() => this.refresh(), 500));
   }
@@ -329,6 +336,7 @@ export class MonitorView implements View {
       );
       if (c.profile === "video") grid.append(seg("Video", [[500, "0.5 Mb/s"], [1000, "1 Mb/s"], [2500, "2.5 Mb/s"]], c.video, (v) => live(v, () => (c.video = v))));
     }
+    if (this.awakeOpt) grid.append(this.awakeOpt.el);
     const open = this.sizes.open;
     this.sizes.replaceChildren(h("summary", {}, "Options"), grid);
     this.sizes.open = open;

@@ -1,6 +1,7 @@
 // Application shell: routing, theme, server selection and shared settings.
 import { appPath, Endpoint, type Family, routeOf, whenDenied } from "../engine/net";
 import type { Location, ServerInfo, WhoAmI } from "../types";
+import { Awake } from "./awake";
 import { $, clear, h, save, setText, store } from "./dom";
 import { admit, forgetPass } from "./gate";
 import { mountSizePicker } from "./size";
@@ -13,6 +14,7 @@ export interface Settings {
   intervalMs: number;
   oneStream: boolean | null; // null: as the server tested says (defaults.one_stream)
   family: "auto" | "ipv4" | "ipv6";
+  keepAwake: boolean; // keep the screen on while a page measures (awake.ts)
 }
 
 export interface View {
@@ -53,6 +55,7 @@ export class App {
   /** Whether this visitor gets the service desk's functions (saved results, share links). */
   desk = true;
   settings: Settings;
+  readonly awake = new Awake(() => this.settings.keepAwake);
   /** The pages this site shows: all of them unless the server lists fewer. */
   readonly pages = new Set((document.documentElement.dataset.pages ?? "test monitor diag history api").split(" "));
   /** Where an address with no page of its own lands: the first page shown. */
@@ -63,7 +66,7 @@ export class App {
   private routes: Route[] = [];
 
   constructor() {
-    this.settings = store<Settings>("t2s.settings", { streams: 4, seconds: 10, packets: 500, intervalMs: 10, oneStream: null, family: "auto" });
+    this.settings = store<Settings>("t2s.settings", { streams: 4, seconds: 10, packets: 500, intervalMs: 10, oneStream: null, family: "auto", keepAwake: true });
   }
 
   /** A route to `page`; a page with several (Test's / and /r/<id>) is one page, kept once. */
@@ -185,6 +188,7 @@ export class App {
     this.current = page;
     $("#view").append(page.el);
     page.view.mount(page.el, to.params);
+    if (from && from !== page) window.scrollTo(0, 0); // not where the page left behind was
   }
 
   saveSettings(): void {

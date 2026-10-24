@@ -4,6 +4,7 @@ import { callQuality, responsiveness } from "../../engine/quality";
 import { type Phase, PHASES, type RunEvents, TestRun } from "../../engine/runner";
 import type { CallQuality, CallRating, CallSide, Direction, Level, Readiness, Responsiveness, ResponsivenessSide, TestResult, ThroughputResult } from "../../types";
 import type { App, Settings, View } from "../app";
+import { awakeSwitch } from "../awake";
 import { LatencyChart } from "../charts/latency";
 import { PacketGrid } from "../charts/packets";
 import { StreamsChart } from "../charts/streams";
@@ -212,14 +213,17 @@ export class TestView implements View {
       this.left = true;
       this.run.abort();
     }
+    this.app.awake.hold("test", false);
   }
 
   show(): void {
     this.away = false;
+    for (const refresh of this.refreshOptions) refresh(); // Keep screen on is shared
   }
 
   unmount(): void {
     this.run?.abort();
+    this.app.awake.hold("test", false);
     this.off?.();
   }
 
@@ -256,8 +260,16 @@ export class TestView implements View {
         seg("packets", "UDP probes", [[0, "Skip"], [200, "200"], [500, "500"], [1000, "1000"]], "Packets sent in the loss test."),
         seg("intervalMs", "Probe spacing", [[5, "5 ms"], [10, "10 ms"], [20, "20 ms"]], "Time between UDP probes."),
         seg("oneStream", "One stream", [[true, "Download"], [false, "Skip"]], "After the download, one stream for the same time: what a single file copy gets. Skipped when the test uses one stream. Until you choose, as the server says.", () => this.oneStream()),
+        this.awakeOption(),
       ),
     );
+  }
+
+  /** The screen is kept on while a test runs: one setting with Monitor's and Diag's. */
+  private awakeOption(): HTMLElement | null {
+    const sw = awakeSwitch(this.app);
+    if (sw) this.refreshOptions.push(sw.mark);
+    return sw?.el ?? null;
   }
 
   /** Whether a test downloads over one stream too: the visitor's choice, or the server's. */
@@ -369,6 +381,7 @@ export class TestView implements View {
     };
 
     this.run = new TestRun(app.ep, app.info, app.whoami, { streams, seconds, packets, intervalMs, oneStream }, events);
+    app.awake.hold("test");
     this.gauge.setRunning(true);
     this.gauge.button.setAttribute("aria-label", "Stop test");
     let result: TestResult | null = null;
@@ -384,6 +397,7 @@ export class TestView implements View {
     }
     const aborted = this.run.aborted;
     this.run = null;
+    app.awake.hold("test", false);
     this.gauge.setRunning(false, true);
     this.gauge.button.removeAttribute("aria-label");
     this.link.setMode("idle");

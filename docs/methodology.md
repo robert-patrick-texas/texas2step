@@ -24,6 +24,13 @@ Each page keeps what it shows while another page is open, but only the page on s
 measures, so one page's traffic never skews another's figures. Going to another page
 during a test stops it as Stop does, and its partial results stay.
 
+While a test runs, and while Monitor or Diag is open, the page asks the browser to keep
+the screen on (the Screen Wake Lock API). A phone whose screen goes off suspends the
+page, and a locked computer slows its timers, so either would put gaps in the figures.
+The **Keep screen on** switch, in Test options, Monitor's Options and on Diag, turns
+this off for that browser. Browsers offer it only over HTTPS. They let the screen sleep
+as usual when you switch to another app or tab, and some refuse it in battery saver.
+
 ## Latency
 
 Each probe is a `GET /api/v1/ping` on an already-open keep-alive connection, so TCP and
