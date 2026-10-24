@@ -1931,6 +1931,16 @@ a.brand-org:hover,
   font-variant-numeric: tabular-nums;
 }
 
+.chart-note {
+  margin: 10px 0 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
+.chart-note[hidden] {
+  display: none;
+}
+
 .stats-list .note {
   grid-column: 1 / -1;
   margin: 8px 0 0;

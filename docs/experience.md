@@ -172,6 +172,22 @@ One TCP connection can get much less than the path carries:
 A share near 100 % means a single stream fills the path. Well below it, one of these is
 likely, and a file copy will be slow even though the speed test isn't.
 
+Two things can lower the share without the network being the cause:
+
+* **HTTP/2 or HTTP/3.** A browser sends all its requests to one server over one
+  connection, so on a server published over HTTP/2 the several streams share one
+  connection too, and the Test page says so under the throughput chart. One stream then
+  compares one connection with one connection: the network's limits on a single
+  connection weigh on both, and what's left between them is the protocol's flow control,
+  which gives each stream a window of its own, and the server's work. A server published
+  over HTTP/1.1 gives each stream a connection of its own, which is what the comparison is
+  for ([HTTP/2 and parallel streams](install.md#http2-and-parallel-streams)). The command
+  line always uses HTTP/1.1.
+* **The server, at multi-gigabit speeds.** One request is served by one of texas2step's
+  worker processes, so on a short, fast path a single stream can be held back by that
+  process's share of the CPU rather than by the network. On a fast LAN, a share well
+  below 100 % says more about the server than about the path.
+
 ## Sources
 
 * ITU-T [G.107](https://www.itu.int/rec/T-REC-G.107), The E-model: a computational model

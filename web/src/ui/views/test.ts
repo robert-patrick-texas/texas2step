@@ -73,6 +73,9 @@ const RATING: Record<CallRating, string> = {
   bad: "Bad",
 };
 
+/** Whether the test's streams shared one connection: HTTP/2 or 3, from a browser. */
+const shared = (r: TestResult) => /^h[23]$/i.test(r.client.protocol ?? "") && r.tool.startsWith("texas2step-web/");
+
 /** Whether a gap a caller would hear rated this call below its score's own rating. */
 const gapped = (c: CallSide) => c.rating !== (c.mos_rating ?? c.rating);
 
@@ -111,6 +114,7 @@ export class TestView implements View {
   private packets!: PacketGrid;
   private packetStats!: HTMLElement;
   private streams!: StreamsChart;
+  private throughputNote!: HTMLElement; // over HTTP/2 or 3, the streams shared one connection
   private readiness!: HTMLElement;
   private details!: HTMLElement;
   private actions!: HTMLElement;
@@ -155,6 +159,7 @@ export class TestView implements View {
     this.packets = new PacketGrid();
     this.packetStats = h("dl", { class: "stats-list" });
     this.streams = new StreamsChart();
+    this.throughputNote = h("p", { class: "chart-note", hidden: true });
     this.readiness = h("ul", { class: "readiness" });
     this.details = h("div", { class: "details" });
     this.actions = h("div", { class: "actions" });
@@ -178,7 +183,7 @@ export class TestView implements View {
       h(
         "div",
         { class: "grid" },
-        card("Throughput", "Aggregate rate across parallel streams, and one stream's (dashed), sampled every 100 ms. The stable figure excludes TCP ramp-up.", this.throughput.el, "span-2"),
+        card("Throughput", "Aggregate rate across parallel streams, and one stream's (dashed), sampled every 100 ms. The stable figure excludes TCP ramp-up.", h("div", {}, this.throughput.el, this.throughputNote), "span-2"),
         card("Latency", "Round-trip time idle (HTTP) and under load (WebSocket probes during each transfer). Growth under load is bufferbloat.", this.latency.el),
         card("Packet loss", "Numbered UDP probes over an unreliable WebRTC data channel, echoed by the server. Each square is one packet.", h("div", { class: "packet-body" }, this.packets.el, this.packetStats)),
         card("Parallel streams", "How evenly concurrent flows shared the path.", this.streams.el),
@@ -442,6 +447,7 @@ export class TestView implements View {
         setText(li.querySelector(".rail-value"), "");
       }
       this.throughput.reset();
+      this.throughputNote.hidden = true;
       this.latency.reset();
       this.streams.reset();
       this.packets.reset(this.app.settings.packets);
@@ -480,7 +486,7 @@ export class TestView implements View {
       const multi = r.download?.mbps;
       const share = multi ? `${Math.round((one.mbps / multi) * 100)} % of ${r.download!.streams} streams · ` : "";
       put(this.tiles.one, rate(one.mbps), `${share}peak ${text(rate(one.peak_mbps))}`);
-      this.tiles.one.el.title = "One stream's download, after the download over several: what a single file copy, backup or remote-desktop session gets.";
+      this.tiles.one.el.title = `One stream's download, after the download over several: what a single file copy, backup or remote-desktop session gets.${shared(r) ? " Over HTTP/2 or 3 the several streams shared one connection too." : ""}`;
       this.throughput.set("one", { timeline: one.timeline, binMs: one.bin_ms, warmupS: one.warmup_s, durationS: one.duration_s, stable: one.mbps });
       railValue("one", text(rate(one.mbps)));
     } else if (!partial) {
@@ -488,6 +494,20 @@ export class TestView implements View {
       const why = r.config.streams === 1 ? "the test used one stream" : r.config.one_stream === false ? "skipped" : "not measured";
       put(this.tiles.one, { value: "—", unit: "" }, why);
     }
+    // Over HTTP/2 or 3 a browser's streams share one TCP connection: say so, as it changes
+    // what "parallel streams", and one stream beside them, mean.
+    const n = r.download?.streams ?? r.upload?.streams ?? 0;
+    this.throughputNote.hidden = !(shared(r) && n > 1);
+    setText(
+      this.throughputNote,
+      [
+        `Over ${r.client.protocol === "h3" ? "HTTP/3" : "HTTP/2"}, the ${n} streams shared one connection, as a browser's requests to one server do.`,
+        r.one_stream ? "One stream then compares one connection with one connection: it shows the protocol's flow control and the server's work, not the network's limits on a single connection." : "",
+        "A server published over HTTP/1.1 gives each stream a connection of its own.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
     const bloat = r.bufferbloat;
     if (bloat?.grade) {
       const worst = Math.max(bloat.added_download_ms ?? -Infinity, bloat.added_upload_ms ?? -Infinity);
