@@ -1477,6 +1477,13 @@ a.brand-org:hover,
   font-size: 14px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Monitor's small print goes under its figure when the two don't fit side by side. */
+.tile.compact .tile-figure {
+  flex-wrap: wrap;
+  row-gap: 0;
 }
 
 .tile-count.bad {
@@ -3014,6 +3021,12 @@ a.brand-org:hover,
 
   .tiles.six {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  /* Out of their one row, the call's tiles put the rating and the "ago" under the score. */
+  .tile[data-key="mos"] .tile-count,
+  .tile[data-key="worst"] .tile-count {
+    flex-basis: 100%;
   }
 }
 

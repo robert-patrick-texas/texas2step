@@ -708,7 +708,7 @@ function lede(c: Choice, two: boolean): string {
 /** How long before `now`, as "40 s ago" or "3 min ago". */
 function ago(t: number, now: number): string {
   const s = Math.max(0, Math.round((now - t) / 1000));
-  return s < 120 ? `${s} s ago` : `${Math.round(s / 60)} min ago`;
+  return s < 120 ? `${s}s ago` : `${Math.round(s / 60)}\u00a0min ago`; // the unit can't wrap away
 }
 
 /** A figure as its tile or table cell shows it. */
