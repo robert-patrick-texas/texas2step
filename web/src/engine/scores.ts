@@ -1,6 +1,6 @@
 // Interpretation layer: bufferbloat grade and use-case readiness.
 // Thresholds are documented in docs/methodology.md.
-import type { Bufferbloat, Level, Readiness, TestResult } from "../types";
+import type { Bufferbloat, CallRating, Level, Readiness, TestResult } from "../types";
 
 const BLOAT: [string, number][] = [
   ["A+", 5],
@@ -37,6 +37,7 @@ interface Metrics {
   jitter?: number;
   loss?: number;
   bloat?: number;
+  call?: number; // the call-quality rating, 0 bad to 4 excellent
 }
 
 type Need = Partial<Record<keyof Metrics, number>>;
@@ -57,9 +58,9 @@ const CASES: { id: Readiness["id"]; label: string; tiers: [Need, Need, Need] }[]
     id: "calls",
     label: "Video calls",
     tiers: [
-      { down: 10, up: 5, latency: 50, jitter: 10, loss: 0.5, bloat: 60 },
-      { down: 4, up: 2, latency: 100, jitter: 30, loss: 1.5, bloat: 200 },
-      { down: 1.5, up: 1, latency: 200, jitter: 50, loss: 3 },
+      { down: 10, up: 5, latency: 50, jitter: 10, loss: 0.5, bloat: 60, call: 4 },
+      { down: 4, up: 2, latency: 100, jitter: 30, loss: 1.5, bloat: 200, call: 3 },
+      { down: 1.5, up: 1, latency: 200, jitter: 50, loss: 3, call: 2 },
     ],
   },
   {
@@ -82,7 +83,8 @@ const CASES: { id: Readiness["id"]; label: string; tiers: [Need, Need, Need] }[]
   },
 ];
 
-const FLOORS = new Set<keyof Metrics>(["down", "up"]);
+const FLOORS = new Set<keyof Metrics>(["down", "up", "call"]);
+const RANK: Record<CallRating, number> = { bad: 0, poor: 1, fair: 2, good: 3, excellent: 4 };
 const LABEL: Record<keyof Metrics, string> = {
   down: "download",
   up: "upload",
@@ -90,6 +92,7 @@ const LABEL: Record<keyof Metrics, string> = {
   jitter: "jitter",
   loss: "packet loss",
   bloat: "latency under load",
+  call: "call quality",
 };
 
 function unmet(m: Metrics, need: Need): (keyof Metrics)[] {
@@ -110,6 +113,7 @@ export function readiness(r: TestResult): Readiness[] {
     jitter: r.latency?.jitter ?? undefined,
     loss: r.loss && !r.loss.error ? r.loss.loss_pct : undefined,
     bloat: added.length ? Math.max(...added) : undefined,
+    call: r.call ? RANK[r.call.rating] : undefined,
   };
   const levels: Level[] = ["great", "good", "fair"];
   return CASES.map(({ id, label, tiers }) => {

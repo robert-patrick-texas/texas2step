@@ -35,6 +35,37 @@ def test_report_without_this_computer():
     assert "this computer 10.8.0.2" in cli._report(no_mac).splitlines()
 
 
+def test_report_gives_call_quality_and_responsiveness():
+    lines = cli._report(RESULT).splitlines()
+    assert "  Call quality   —" in lines
+    assert "  Responsiveness —" in lines
+    judged = {
+        **RESULT,
+        "call": {
+            "mos": 4.36,
+            "rating": "excellent",
+            "late_pct": 0.2,
+            "longest_gap_ms": 40.0,
+            "basis": "round trip",
+        },
+        "responsiveness": {"rpm": 1500, "download_rpm": 3000, "upload_rpm": 1500},
+    }
+    lines = cli._report(judged).splitlines()
+    assert (
+        "  Call quality          4.4 MOS   excellent   (late 0.20 % · longest gap 40 ms"
+        " · from round trips)" in lines
+    )
+    assert "  Responsiveness      1,500 RPM   (↓ 3,000 · ↑ 1,500, under load)" in lines
+    gap = {**judged["call"], "mos_rating": "excellent", "rating": "good", "longest_gap_ms": 140.0}
+    lines = cli._report({**judged, "call": gap}).splitlines()
+    assert any(
+        line.startswith(
+            "  Call quality          4.4 MOS   good, for its gap (the score alone: excellent)"
+        )
+        for line in lines
+    )
+
+
 def test_results_clear(tmp_path, monkeypatch, capsys):
     db = tmp_path / "results.db"
     conf = tmp_path / "config.toml"

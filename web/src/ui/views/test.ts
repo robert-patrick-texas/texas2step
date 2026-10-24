@@ -1,7 +1,8 @@
 // The main view: run a test (or show a saved one) with live instruments and charts.
 import { appPath, Refused, REFUSED, routeOf } from "../../engine/net";
+import { callQuality, responsiveness } from "../../engine/quality";
 import { type Phase, PHASES, type RunEvents, TestRun } from "../../engine/runner";
-import type { Direction, Level, Readiness, TestResult, ThroughputResult } from "../../types";
+import type { CallQuality, CallRating, Direction, Level, Readiness, Responsiveness, TestResult, ThroughputResult } from "../../types";
 import type { App, Settings, View } from "../app";
 import { LatencyChart } from "../charts/latency";
 import { PacketGrid } from "../charts/packets";
@@ -63,6 +64,14 @@ const LEVEL: Record<Level, { label: string; icon: string }> = {
   unknown: { label: "Unknown", icon: "M12 7v.01M12 11v6" },
 };
 
+const RATING: Record<CallRating, string> = {
+  excellent: "Excellent",
+  good: "Good",
+  fair: "Fair",
+  poor: "Poor",
+  bad: "Bad",
+};
+
 const USE_ICON: Record<Readiness["id"], string> = {
   streaming: "M3 5h18v12H3zM8 21h8M10 8.5v5l4.5-2.5z",
   calls: "M3 7h12v10H3zM15 10.5l6-3.5v10l-6-3.5",
@@ -86,7 +95,7 @@ export class TestView implements View {
   private link!: LinkView;
   private rail!: HTMLElement;
   private status!: HTMLElement;
-  private tiles!: Record<"download" | "upload" | "latency" | "jitter" | "loss" | "bloat", Tile>;
+  private tiles!: Record<"download" | "upload" | "latency" | "jitter" | "loss" | "bloat" | "call" | "rpm", Tile>;
   private throughput!: ThroughputChart;
   private latency!: LatencyChart;
   private packets!: PacketGrid;
@@ -123,6 +132,8 @@ export class TestView implements View {
       jitter: tile("jitter", "Jitter"),
       loss: tile("loss", "Packet loss"),
       bloat: tile("bloat", "Under load"),
+      call: tile("call", "Call quality"),
+      rpm: tile("rpm", "Responsiveness"),
     };
     this.banner = h("div", { class: "banner", hidden: true });
     this.options = this.renderOptions();
@@ -447,10 +458,16 @@ export class TestView implements View {
       const chip = h("span", { class: "grade", "data-grade": bloat.grade[0]! }, `Grade ${bloat.grade}`);
       this.tiles.bloat.sub.replaceChildren(chip, " bufferbloat");
     }
-    if (r.loss) this.renderLoss(r.loss, railValue);
+    // Results saved before call quality and responsiveness get them from their own figures.
+    const call = r.call ?? callQuality(r.loss);
+    const rpm = r.responsiveness ?? responsiveness(r);
+    if (call) this.renderCall(call);
+    if (rpm) this.renderRpm(rpm);
+    if (r.loss) this.renderLoss(r.loss, railValue, call);
     else if (!partial && r.config.packets === 0) {
       railValue("loss", "");
       put(this.tiles.loss, { value: "—", unit: "" }, "skipped");
+      put(this.tiles.call, { value: "—", unit: "" }, "needs the UDP test");
       this.packetStats.replaceChildren(h("p", { class: "note" }, "The UDP test was skipped. Enable it under Test options → UDP probes."));
     }
 
@@ -461,7 +478,25 @@ export class TestView implements View {
     }
   }
 
-  private renderLoss(loss: NonNullable<TestResult["loss"]>, railValue: (p: Phase, v: string) => void): void {
+  private renderCall(call: CallQuality): void {
+    put(this.tiles.call, { value: call.mos.toFixed(1), unit: "MOS" });
+    const chip = h("span", { class: "grade", "data-rating": call.rating }, RATING[call.rating]);
+    const seconds = (call.packets * call.interval_ms) / 1000;
+    // A gap a caller would hear lowers the rating below the score's own; say which gap.
+    const down = call.rating !== (call.mos_rating ?? call.rating);
+    this.tiles.call.sub.replaceChildren(chip, down ? ` ${call.longest_gap_ms.toLocaleString()} ms gap` : ` ${seconds.toLocaleString()} s snapshot`);
+    this.tiles.call.el.title = down
+      ? `The E-model scores this ${RATING[call.mos_rating].toLowerCase()}, but its longest gap, ${call.longest_gap_ms} ms, is long enough for a caller to hear, so it is rated ${RATING[call.rating].toLowerCase()}.`
+      : `A G.711 voice call scored with the ITU-T E-model, over the packet-loss test's ${seconds.toLocaleString()} seconds.`;
+  }
+
+  private renderRpm(rpm: Responsiveness): void {
+    const n = (v: number | null) => (v === null ? "—" : v.toLocaleString());
+    put(this.tiles.rpm, { value: n(rpm.rpm), unit: "RPM" }, `↓ ${n(rpm.download_rpm)} · ↑ ${n(rpm.upload_rpm)}`);
+    this.tiles.rpm.el.title = "Round trips per minute under load, as the IETF's responsiveness measure counts them: higher is better. The slower direction's.";
+  }
+
+  private renderLoss(loss: NonNullable<TestResult["loss"]>, railValue: (p: Phase, v: string) => void, call: CallQuality | null): void {
     const lossPct = pct(loss.loss_pct);
     put(this.tiles.loss, lossPct, `${loss.lost} of ${loss.sent} lost · ${loss.transport === "webrtc" ? "UDP" : "TCP fallback"}`);
     railValue("loss", text(lossPct));
@@ -476,6 +511,13 @@ export class TestView implements View {
     row("Out of order", String(loss.out_of_order));
     row("Round trip", `${text(ms(loss.rtt.median))} median`);
     row("Jitter", text(ms(loss.rtt.jitter)));
+    if (call) {
+      row("Late for a call", `${call.late} (${text(pct(call.late_pct))})`);
+      row("Longest gap", `${call.longest_gap_ms.toLocaleString()} ms`);
+      row("Burst ratio", call.burst_ratio === null ? "no loss" : call.burst_ratio.toFixed(2));
+      const down = call.rating !== (call.mos_rating ?? call.rating);
+      row("Call quality", `${call.mos.toFixed(1)} MOS · ${RATING[call.rating].toLowerCase()}${down ? ` for its gap (the score alone: ${RATING[call.mos_rating].toLowerCase()})` : ""}`);
+    }
     if (loss.note) this.packetStats.append(h("p", { class: "note" }, loss.note));
   }
 
@@ -519,6 +561,11 @@ export class TestView implements View {
     if (r.bufferbloat?.grade) add("Bufferbloat", `grade ${r.bufferbloat.grade}`);
     const l = r.loss;
     if (l) add("Packet loss", `${text(pct(l.loss_pct))} (${l.lost}/${l.sent}) over ${l.transport === "webrtc" ? "UDP" : "TCP"}${l.up_loss_pct !== null ? ` · up ${text(pct(l.up_loss_pct))} · down ${text(pct(l.down_loss_pct))}` : ""} · ${l.out_of_order} out of order · RTT ${text(ms(l.rtt.median))} · jitter ${text(ms(l.rtt.jitter))}`);
+    const call = r.call ?? callQuality(l);
+    const rated = (c: CallQuality) => (c.rating !== (c.mos_rating ?? c.rating) ? `${RATING[c.rating].toLowerCase()} for its gap (the score alone: ${RATING[c.mos_rating].toLowerCase()})` : RATING[c.rating].toLowerCase());
+    if (call) add("Call quality", `${call.mos.toFixed(2)} MOS, ${rated(call)} · R ${call.r.toFixed(1)} · ${text(ms(call.delay_ms))} mouth to ear · ${text(pct(call.impaired_pct))} lost or late (${call.late} late) · longest gap ${call.longest_gap_ms} ms · burst ratio ${call.burst_ratio?.toFixed(2) ?? "—"} · ${call.packets} packets every ${call.interval_ms} ms, from round trips`);
+    const rpm = r.responsiveness ?? responsiveness(r);
+    if (rpm) add("Responsiveness", `${rpm.rpm.toLocaleString()} RPM · download ${rpm.download_rpm?.toLocaleString() ?? "—"} · upload ${rpm.upload_rpm?.toLocaleString() ?? "—"} · from the latency-under-load probes`);
     clear(this.details);
     const table = h("table", { class: "table" }, h("tbody", {}, ...rows.map(([k, v]) => h("tr", {}, h("th", { scope: "row" }, k), h("td", {}, v)))));
     this.details.append(table);

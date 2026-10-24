@@ -22,7 +22,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from . import __version__, iface, payload
+from . import __version__, iface, payload, quality
 from .stats import bufferbloat_grade, summarize, summarize_throughput
 
 API = "/api/v1"
@@ -480,6 +480,10 @@ async def run_all(
         except Exception as exc:
             result["loss"] = {"error": f"{type(exc).__name__}: {exc}"}
     result["bufferbloat"] = bufferbloat(result)
+    if call := quality.call_quality(result.get("loss")):
+        result["call"] = call
+    if rpm := quality.responsiveness(result):
+        result["responsiveness"] = rpm
     result["duration_s"] = (datetime.now(UTC) - started).total_seconds()
     return result
 

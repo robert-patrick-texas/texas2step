@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from . import __version__, engine
+from . import __version__, engine, quality
 
 
 def _fmt(value: float | None, unit: str = "", digits: int = 2) -> str:
@@ -46,37 +46,62 @@ class _Live:
 
 def _latency_line(label: str, s: dict[str, Any] | None) -> str:
     if not s or s.get("median") is None:
-        return f"  {label:<11} —"
+        return f"  {label:<14} —"
     lost = f", {s['lost']} lost" if s.get("lost") else ""
     return (
-        f"  {label:<11} {_fmt(s['median'], ' ms'):>14}   jitter {_fmt(s['jitter'], ' ms')}"
+        f"  {label:<14} {_fmt(s['median'], ' ms'):>14}   jitter {_fmt(s['jitter'], ' ms')}"
         f"   (min {_fmt(s['min'])} · p90 {_fmt(s['p90'])} · {s['count']} samples{lost})"
     )
 
 
 def _throughput_line(label: str, t: dict[str, Any] | None, idle: float | None) -> str:
     if not t:
-        return f"  {label:<11} —"
+        return f"  {label:<14} —"
     loaded = (t.get("loaded_latency") or {}).get("median")
     added = f" · loaded {loaded - idle:+.1f} ms" if loaded is not None and idle is not None else ""
     return (
-        f"  {label:<11} {_fmt(t['mbps'], ' Mbps', 1):>14}   peak {_fmt(t['peak_mbps'], '', 1)}"
+        f"  {label:<14} {_fmt(t['mbps'], ' Mbps', 1):>14}   peak {_fmt(t['peak_mbps'], '', 1)}"
         f"   ({t['streams']} streams{added})"
     )
 
 
 def _loss_line(loss: dict[str, Any] | None) -> str:
     if not loss:
-        return "  Loss        —"
+        return f"  {'Loss':<14} —"
     if "error" in loss:
-        return f"  Loss        unavailable ({loss['error']})"
+        return f"  {'Loss':<14} unavailable ({loss['error']})"
     rtt = loss.get("rtt") or {}
     parts = [f"{loss['lost']}/{loss['sent']} lost"]
     if loss.get("up_loss_pct") is not None:
         parts.append(f"↑ {_fmt(loss['up_loss_pct'], ' %')} ↓ {_fmt(loss['down_loss_pct'], ' %')}")
     if rtt.get("median") is not None:
         parts.append(f"UDP RTT {_fmt(rtt['median'], ' ms')} · jitter {_fmt(rtt['jitter'], ' ms')}")
-    return f"  {'Loss':<11} {_fmt(loss['loss_pct'], ' %'):>14}   ({' · '.join(parts)})"
+    return f"  {'Loss':<14} {_fmt(loss['loss_pct'], ' %'):>14}   ({' · '.join(parts)})"
+
+
+_BASIS = {"round trip": "from round trips"}
+
+
+def _call_line(call: dict[str, Any] | None) -> str:
+    if not call:
+        return f"  {'Call quality':<14} —"
+    rated = call["rating"]
+    if rated != call.get("mos_rating", rated):  # a gap a caller would hear
+        rated += f", for its gap (the score alone: {call['mos_rating']})"
+    return (
+        f"  {'Call quality':<14} {_fmt(call['mos'], ' MOS', 1):>14}   {rated}"
+        f"   (late {_fmt(call['late_pct'], ' %')} · longest gap {call['longest_gap_ms']:g} ms"
+        f" · {_BASIS.get(call['basis'], call['basis'])})"
+    )
+
+
+def _rpm_line(rpm: dict[str, Any] | None) -> str:
+    if not rpm:
+        return f"  {'Responsiveness':<14} —"
+    return (
+        f"  {'Responsiveness':<14} {rpm['rpm']:>10,} RPM   (↓ {_fmt(rpm['download_rpm'], '', 0)}"
+        f" · ↑ {_fmt(rpm['upload_rpm'], '', 0)}, under load)"
+    )
 
 
 def _report(result: dict[str, Any]) -> str:
@@ -94,9 +119,10 @@ def _report(result: dict[str, Any]) -> str:
     if client.get("local_ip"):
         mac = f" · MAC {client['mac']}" if client.get("mac") else ""
         lines.insert(2, f"this computer {client['local_ip']}{mac}")
+    lines += [_call_line(result.get("call")), _rpm_line(result.get("responsiveness"))]
     grade = (result.get("bufferbloat") or {}).get("grade")
     if grade:
-        lines.append(f"  {'Bufferbloat':<11} {grade:>14}")
+        lines.append(f"  {'Bufferbloat':<14} {grade:>14}")
     if result.get("id"):
         lines += ["", f"saved: {server.get('url')}/r/{result['id']}"]
     return "\n".join(lines)
@@ -1284,7 +1310,7 @@ def build_parser() -> argparse.ArgumentParser:
     loss.set_defaults(
         func=_discrete(
             engine.measure_loss,
-            _loss_line,
+            lambda r: f"{_loss_line(r)}\n{_call_line(quality.call_quality(r))}",
             packets="packets",
             interval_ms="interval",
             size="size",

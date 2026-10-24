@@ -48,6 +48,9 @@ async def test_run_all_shape(live_server):
     assert r["version"] == 1
     assert {"latency", "download", "upload", "loss", "bufferbloat"} <= set(r)
     assert r["bufferbloat"]["grade"] is not None
+    assert r["responsiveness"]["rpm"] > 0
+    # A call's quality comes from the packet-loss test's round trips.
+    assert ("call" in r) == bool(r["loss"].get("packets"))
     # The CLI's own end of the connection the server saw; loopback has no MAC.
     assert r["client"]["local_ip"] == r["client"]["ip"] == "127.0.0.1"
     assert "mac" not in r["client"]

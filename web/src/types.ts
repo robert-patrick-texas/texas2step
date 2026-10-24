@@ -50,6 +50,33 @@ export interface LossResult {
   error?: string;
 }
 
+export type CallRating = "excellent" | "good" | "fair" | "poor" | "bad";
+
+/** A call's quality over the path the packet-loss test measured (src/texas2step/quality.py). */
+export interface CallQuality {
+  basis: "round trip";
+  packets: number; // in the call's view: the probes a call's 20 ms packets would be
+  interval_ms: number; // their spacing
+  late: number; // probes more than the jitter buffer behind the fastest
+  late_pct: number;
+  impaired_pct: number; // lost or late, of every probe
+  burst_ratio: number | null; // 1 for random loss, more for bursts; null without any
+  longest_gap_ms: number; // the longest run of lost or late packets in the call's view
+  delay_ms: number; // mouth to ear: one way, plus what the call adds
+  r: number; // the E-model's rating
+  mos: number;
+  mos_rating: CallRating; // the E-model's, from the score alone
+  rating: CallRating; // as a caller would hear it: mos_rating, at most what the longest gap allows
+}
+
+/** Round trips per minute under load: each direction's, and the lower of the two. */
+export interface Responsiveness {
+  rpm: number;
+  download_rpm: number | null;
+  upload_rpm: number | null;
+  basis: "latency under load";
+}
+
 export type Level = "great" | "good" | "fair" | "poor" | "unknown";
 
 export interface Readiness {
@@ -83,6 +110,8 @@ export interface TestResult {
   upload?: ThroughputResult;
   loss?: LossResult;
   bufferbloat?: Bufferbloat;
+  call?: CallQuality;
+  responsiveness?: Responsiveness;
   readiness?: Readiness[];
 }
 

@@ -4,6 +4,7 @@ import { eui64Mac } from "./addr";
 import { measureHttpLatency, probeWhile, WsProber } from "./latency";
 import { measureLossRtc, measureLossWs, RtcProbe } from "./loss";
 import { clearTimings, type Endpoint, nonce } from "./net";
+import { callQuality, responsiveness } from "./quality";
 import { bufferbloat, readiness } from "./scores";
 import { summarize, summarizeThroughput } from "./stats";
 import { BIN_MS, type LiveThroughput, measureDownload, measureUpload } from "./throughput";
@@ -100,6 +101,7 @@ export class TestRun {
         this.on.phase(direction);
         r[direction] = await this.throughput(direction, prober, signal);
         r.bufferbloat = bufferbloat(r);
+        this.judge();
         this.on.partial(r);
         clearTimings();
       }
@@ -107,6 +109,7 @@ export class TestRun {
       if (this.config.packets > 0 && !signal.aborted) {
         this.on.phase("loss");
         r.loss = await this.loss(prober, signal);
+        this.judge();
         this.on.partial(r);
       }
     } finally {
@@ -114,9 +117,19 @@ export class TestRun {
     }
 
     r.bufferbloat = bufferbloat(r);
+    this.judge();
     r.readiness = readiness(r);
     r.duration_s = (performance.now() - t0) / 1000;
     return r;
+  }
+
+  /** What the figures so far mean for calls and responsiveness. */
+  private judge(): void {
+    const r = this.result;
+    const call = callQuality(r.loss);
+    const rpm = responsiveness(r);
+    if (call) r.call = call;
+    if (rpm) r.responsiveness = rpm;
   }
 
   private async throughput(direction: Direction, prober: WsProber, signal: AbortSignal): Promise<ThroughputResult> {

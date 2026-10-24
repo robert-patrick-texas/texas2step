@@ -24,9 +24,12 @@ works on air-gapped and internal networks.
 | **Latency under load** | Probes every 250 ms on a separate connection during each transfer, graded A+ to F | WebSocket |
 | **Packet loss** | Numbered probes on an unreliable data channel, echoed; up- and downstream loss separated | UDP (WebRTC) |
 | **Stream fairness** | Per-stream rates and Jain's index | HTTP |
+| **Call quality** | A G.711 call's MOS (1 to 5) from the ITU-T E-model: delay, and packets lost, late or in bursts | derived |
+| **Responsiveness** | Round trips per minute under load, as the IETF draft and macOS's `networkQuality` count them | derived |
 | **Readiness** | Grades for streaming, video calls, reaction time/VDI/SSH and bulk transfers | derived |
 
-Details and definitions: [docs/methodology.md](docs/methodology.md).
+Details and definitions: [docs/methodology.md](docs/methodology.md). What the scores mean
+to the people using a connection: [docs/experience.md](docs/experience.md).
 
 ![Results](docs/images/results-light.jpg)
 
@@ -101,11 +104,13 @@ texas2step loss     https://www.example.net/texas2step --packets 1000 --interval
 client 127.0.0.1 (IPv4, HTTP/1.1)
 this computer 127.0.0.1
 
-  Latency            1.26 ms   jitter 0.09 ms   (min 1.17 · p90 1.53 · 20 samples)
-  Download      6,240.5 Mbps   peak 6,543.6   (2 streams · loaded -0.5 ms)
-  Upload       13,624.1 Mbps   peak 14,188.3   (2 streams · loaded -0.1 ms)
-  Loss                0.00 %   (0/200 lost · ↑ 0.00 % ↓ 0.00 % · UDP RTT 0.92 ms · jitter 0.10 ms)
-  Bufferbloat             A+
+  Latency               1.95 ms   jitter 0.16 ms   (min 1.65 · p90 2.27 · 20 samples)
+  Download         5,475.2 Mbps   peak 6,071.5   (2 streams · loaded -1.0 ms)
+  Upload          12,131.0 Mbps   peak 12,888.0   (2 streams · loaded -0.6 ms)
+  Loss                   0.00 %   (0/200 lost · ↑ 0.00 % ↓ 0.00 % · UDP RTT 1.06 ms · jitter 0.10 ms)
+  Call quality          4.4 MOS   excellent   (late 0.00 % · longest gap 0 ms · from round trips)
+  Responsiveness     41,838 RPM   (↓ 56,929 · ↑ 41,838, under load)
+  Bufferbloat                A+
 ```
 
 `client` is the address the server sees; `this computer` is the CLI's own on that
@@ -143,6 +148,9 @@ For servers open to the Internet, see [Access codes](docs/access.md).
 * [Security](docs/security.md): the security controls, what each guards against, and
   what is left to the operator.
 * [Methodology](docs/methodology.md): what is measured, and how.
+* [Quality and user experience](docs/experience.md): what the call-quality score and
+  responsiveness mean to the people using a connection, the adjustments texas2step makes
+  to match what they notice, and the sources.
 * [API](docs/api.md): endpoints and the UDP probe protocol.
 * [Development](docs/development.md): running from source, tests, docs site, packaging,
   releases.

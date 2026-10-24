@@ -1478,6 +1478,22 @@ a.brand-org:hover,
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--critical) 55%, transparent);
 }
 
+/* Call quality's ratings, in the grades' colours. */
+.grade[data-rating="fair"] {
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 55%, transparent);
+}
+
+.grade[data-rating="poor"] {
+  background: color-mix(in srgb, var(--serious) 22%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--serious) 55%, transparent);
+}
+
+.grade[data-rating="bad"] {
+  background: color-mix(in srgb, var(--critical) 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--critical) 55%, transparent);
+}
+
 /* Options */
 
 .options {

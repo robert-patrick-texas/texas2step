@@ -204,11 +204,23 @@ Browser runs, `texas2step run --json` and `/measure/full` share one shape (snake
            "up_loss_pct": 0.0, "down_loss_pct": 0.2, "out_of_order": 0,
            "rtt": { …latency stats… }, "packets": [3.1, 3.0, null, …]},
   "bufferbloat": {"added_download_ms": 4.1, "added_upload_ms": 11.0, "grade": "A"},
+  "call": {"basis": "round trip", "packets": 250, "interval_ms": 20, "late": 0, "late_pct": 0.0,
+           "impaired_pct": 0.2, "burst_ratio": 1.0, "longest_gap_ms": 20, "delay_ms": 81.6,
+           "r": 90.5, "mos": 4.35, "mos_rating": "excellent", "rating": "excellent"},
+  "responsiveness": {"rpm": 1850, "download_rpm": 1910, "upload_rpm": 1850, "basis": "latency under load"},
   "readiness": [{"id": "calls", "label": "Video calls", "level": "great", "detail": "…"}, …]
 }
 ```
 
-`readiness` is computed by the browser client only. `client.local_ip` is this computer's
+`call` is a G.711 call's quality over the path the packet-loss test measured, and
+`responsiveness` is round trips per minute under load: see
+[Call quality](methodology.md#call-quality) and
+[Responsiveness](methodology.md#responsiveness). `call.mos_rating` is the score's own
+rating, and `call.rating` the one shown: lower when a gap is long enough for a caller to
+hear ([Quality and user experience](experience.md#adjustments-for-what-callers-hear)). Each is left out without the figures it
+comes from: `call` without echoed UDP probes, `responsiveness` without latency-under-load
+probes. Both clients work them out the same way, and the Test page works them out for a
+result saved before they existed. `readiness` is computed by the browser client only. `client.local_ip` is this computer's
 own address: the browser's on the UDP path, where it reveals it, or `texas2step run`'s on
 its connection. `client.mac` is the MAC address of the NIC the CLI's connection left by
 (`mac_source` `"nic"`, on Linux) or one read from an EUI-64 IPv6 address (`"eui64"`); see

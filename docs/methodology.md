@@ -7,7 +7,8 @@ reach the server: no agents, plugins or raw sockets.
 
 The browser engine (`web/src/engine/`) and the Python engine (`src/texas2step/engine.py`)
 implement the same methods against the same wire endpoints, and share statistical
-definitions (`stats.ts` / `stats.py`), so their results are comparable.
+definitions (`stats.ts` / `stats.py`, and `quality.ts` / `quality.py` for call quality and
+responsiveness), so their results are comparable.
 
 ## Test sequence
 
@@ -101,6 +102,24 @@ On very fast links (multi-gigabit, or loopback) the server's own CPU can become 
 bottleneck and add queueing delay of its own. Running with `--workers 2` or more
 reduces this.
 
+## Responsiveness
+
+Responsiveness is the number of round trips a connection manages per minute while it's
+busy, in **RPM**: 60,000 divided by the round trip in milliseconds, so higher is better.
+1,000 RPM is 60 ms a round trip. It is the measure of the IETF draft
+[Responsiveness under Working Conditions](https://datatracker.ietf.org/doc/draft-ietf-ippm-responsiveness/),
+which macOS's `networkQuality` also reports.
+
+texas2step works it out from the latency-under-load probes above. As the draft does, it
+takes the mean of the fastest 95 % of each direction's round trips, leaving out the
+slowest 5 %. Each direction gets a figure, and the Results tile shows the lower of the
+two.
+
+The draft also times connections opened while the load runs, and requests on the loaded
+connections themselves. texas2step's probes travel on a connection of their own that is
+already open, so its figure can read somewhat higher than `networkQuality`'s on the same
+path.
+
 ## Packet loss (UDP)
 
 Browsers cannot send raw UDP or ICMP, but WebRTC data channels run over
@@ -134,16 +153,56 @@ If the UDP path cannot be established (UDP blocked, ICE fails), the client falls
 the WebSocket and says so. Over TCP, loss appears as delay rather than drops, so
 fallback results only count probes that time out.
 
+## Call quality
+
+The packet-loss test's probes also tell how a voice call over the same path would sound.
+The score is a **MOS** (mean opinion score, 1 to 5) from the ITU-T G.107 **E-model**, for
+a G.711 call with packet-loss concealment. The definitions are in
+`web/src/engine/quality.ts` and `src/texas2step/quality.py`.
+
+1. **Late packets.** A call plays its packets out of a jitter buffer, 60 ms here. A probe
+   that came back more than 60 ms behind the fastest one would have missed its turn, so
+   it counts as lost.
+2. **The call's own packets.** A call sends a packet every 20 ms, so bursts are counted
+   on the probes at that spacing: every other probe at the default 10 ms, every fourth at
+   5 ms, every probe at 20 ms. A 100 ms outage is then the 5 packets a call loses, not 10
+   probes. The shares of lost and late packets count every probe, which makes them
+   steadier.
+3. **The score.**
+   * Mouth-to-ear delay *d*: half the median UDP round trip, plus the 80 ms a call adds
+     (20 ms to fill a packet, and the 60 ms buffer).
+   * Delay impairment *Id* = 0.024 *d*, plus 0.11 (*d* − 177.3) beyond 177.3 ms: Cole
+     and Rosenbluth's fit to G.107's.
+   * Loss impairment *Ie,eff* = 95 *Ppl* / (*Ppl* / *BurstR* + 25.1), where *Ppl* is the
+     percentage of packets lost or late, and 25.1 is G.711's robustness to loss with
+     concealment (ITU-T G.113 Appendix I).
+   * *R* = 93.2 − *Id* − *Ie,eff*, and MOS = 1 + 0.035 *R* + 0.000007 *R* (*R* − 60)
+     (100 − *R*), from 1 below *R* 0 to 4.5 above *R* 100.
+
+4. **The rating.** The score is read to one decimal, as it is shown, and rated
+   excellent from 4.3, good from 4.0, fair from 3.6, poor from 3.1, and bad below. A gap a
+   caller would hear lowers the rating: the longest gap above 60 ms allows at most good,
+   200 ms or more at most fair.
+
+*BurstR*, the **burst ratio**, is the average run of lost or late packets divided by the
+run random loss would give, 1 / (1 − *p*) for a share *p*. It is 1 for random loss and
+more for bursts. The **longest gap** is the longest run of lost or late packets, in
+milliseconds of the call.
+
+What each rating means to callers, why texas2step adjusts the E-model for gaps, the
+score's limits and the sources are in [Quality and user experience](experience.md).
+
 ## Readiness
 
 A simple interpretation layer, defined in `web/src/engine/scores.ts`. Each use case has
-three tiers; the result is the highest tier whose every requirement is met. Rates are
-floors, the rest are ceilings, and missing measurements are not held against you.
+three tiers; the result is the highest tier whose every requirement is met. Rates and
+the [call-quality rating](#call-quality) are floors, the rest are ceilings, and missing
+measurements are not held against you.
 
 | Use case | Great | Good | Fair |
 |---|---|---|---|
 | 4K video streaming | ↓ 25 Mbps, loss ≤ 1 %, latency ≤ 150 ms | ↓ 15, loss ≤ 2 % | ↓ 5, loss ≤ 5 % |
-| Video calls | ↓ 10, ↑ 5, latency ≤ 50, jitter ≤ 10, loss ≤ 0.5 %, bloat ≤ 60 | ↓ 4, ↑ 2, ≤ 100, ≤ 30, ≤ 1.5 %, ≤ 200 | ↓ 1.5, ↑ 1, ≤ 200, ≤ 50, ≤ 3 % |
+| Video calls | ↓ 10, ↑ 5, latency ≤ 50, jitter ≤ 10, loss ≤ 0.5 %, bloat ≤ 60, call excellent | ↓ 4, ↑ 2, ≤ 100, ≤ 30, ≤ 1.5 %, ≤ 200, call good | ↓ 1.5, ↑ 1, ≤ 200, ≤ 50, ≤ 3 %, call fair |
 | Reaction time, VDI and SSH | ↓ 10, ↑ 3, latency ≤ 20, jitter ≤ 5, loss ≤ 0.1 %, bloat ≤ 30 | ↓ 5, ↑ 1, ≤ 50, ≤ 15, ≤ 1 %, ≤ 100 | ≤ 100, ≤ 30, ≤ 2 % |
 | Large file transfers | ↓ 500, ↑ 500 | ↓ 100, ↑ 50 | ↓ 25, ↑ 10 |
 
