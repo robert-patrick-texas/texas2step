@@ -9,41 +9,12 @@ or promised: one goes into a release when it's needed, and moves to
 ### Measurements
 
 Tests that say how a connection will feel to the people using it, not only how fast it
-is. The first three are being built.
+is. Call quality, responsiveness, one stream and Monitor's call profiles came in
+[2.1.0](#210-2026-10-24).
 
-- [ ] **Call quality, for Teams, Zoom and VDI.** Averages hide what a call sounds like:
-  1 % loss spread out is barely heard, while the same 1 % in runs of five drops whole
-  syllables.
-  * From the packet-loss test as it is: the runs of lost packets (how many, the longest,
-    and the burst ratio, 1 for random loss), packets that come back too late for a
-    call's 60 ms jitter buffer, and a call-quality score, MOS 1 to 5, from the ITU-T G.107
-    E-model for a G.711 call with packet-loss concealment.
-  * Each direction on its own: the server stamps each probe's arrival and its count of
-    probes received into the echo. Each direction's loss, delay variation and late
-    packets are then measured without synchronized clocks, and give a score for what you
-    hear and one for what the other end hears. The Test page's probes grow to 200 bytes,
-    at least a voice packet's size, still 500 of them 10 ms apart.
-  * Monitor, for trouble that comes and goes: a choice of **Path** (today's small probes),
-    **Voice call** (200 bytes every 20 ms) or **Video call** (the voice stream with 1.2
-    Mbps of video in bursts of 1,100-byte packets, a frame at a time), with a score every
-    10 seconds drawn as a trace. The exact sizes and rates are in Monitor's options and
-    its URL, and the site's default profile in the settings. Voice and video count toward
-    a [traffic limit](traffic.md), and the Video profile can be turned off.
-- [ ] **Responsiveness and connection setup.** Web apps feel slow because of round
-  trips, not bandwidth.
-  * From the latency-under-load probes as they are: responsiveness in round trips per
-    minute (RPM), the IETF's working-conditions measure
-    ([draft-ietf-ippm-responsiveness](https://datatracker.ietf.org/doc/draft-ietf-ippm-responsiveness/)),
-    also reported by macOS's `networkQuality`.
-  * A responsiveness test: during each transfer, new connections opened and timed (TCP
-    connect, TLS handshake and first request), and requests on the loaded connection
-    itself, combined as the draft defines. The time to open a connection idle is shown
-    too: what each new connection, and each page load, costs.
-- [ ] **One stream, and shapers.** A single connection's rate beside the multi-stream
-  one shows what one file copy, backup or VDI session gets, and explains "the speed test
-  is fine but my copy is slow". A rate that starts high and settles lower after a few
-  seconds is a shaper or policer; the 100 ms throughput timeline already shows it, and
-  the test could say so.
+- [ ] **Shapers.** A rate that starts high and settles lower after a few seconds is a
+  shaper or policer. The 100 ms throughput timeline already shows it, for several streams
+  and for one, and the test could say so.
 - [ ] **Where is the problem?** A guided comparison of a nearby or internal server with a
   distant one: if both are bad, it's the local network or Wi-Fi; if only the distant one
   is, it's the WAN or the ISP. It would build on the server picker and Monitor's
@@ -130,6 +101,18 @@ links and footer credit. Three places still say texas2step:
 ## Done
 
 Newest first. Each release's notes have the details and its upgrade steps.
+
+### [2.1.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.1.0) (2026-10-24)
+
+- [x] Call quality each way: a MOS from the ITU-T E-model for what you hear and what the
+  other end hears, adjusted for late packets, bursts and gaps a caller would hear
+  ([Quality and user experience](experience.md)).
+- [x] The UDP probe's stamps, for each direction's delay and losses, and 200-byte probes.
+- [x] Responsiveness in round trips per minute, by the IETF draft's method: new
+  connections and the loaded connection.
+- [x] One stream's download beside the several streams' rate, and `default_one_stream`.
+- [x] Monitor's Path, Voice call and Video call profiles, each 10 seconds of a call
+  scored, counted toward a traffic limit.
 
 ### [2.0.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.0.0) (2026-10-23)
 
