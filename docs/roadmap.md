@@ -102,6 +102,14 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.2.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.1) (2026-10-24)
+
+- [x] Monitor gets a server back after an outage: HTTPS checks, then a new session, or
+  TCP until UDP returns; the outage counts as loss and is noted beside the chart.
+- [x] UDP sessions open about a second sooner: browsers' `.local` candidates are left out
+  of the offer, so no multicast DNS lookup holds up the answer.
+- [x] [Security](security.md#on-the-wire): what travels encrypted, and what doesn't.
+
 ### [2.2.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.0) (2026-10-24)
 
 - [x] Each page keeps what it shows across tabs; only the page on screen measures.
