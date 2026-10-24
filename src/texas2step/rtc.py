@@ -23,6 +23,7 @@ import ipaddress
 import json
 import logging
 import random
+import re
 import secrets
 import socket
 import struct
@@ -76,6 +77,19 @@ LIMIT_CHECK = 5.0  # seconds between checks that a counted session is still with
 # probe, measured over IPv6 for voice and video sessions (IPv4 carries a little less).
 SENT_OVERHEAD = 230
 RECEIVED_OVERHEAD = 150
+# A browser offers its own addresses as random "<uuid>.local" names. Resolving one takes a
+# multicast DNS query on this server's network, in plain text, and finds nothing unless the
+# browser is on that network: each such name held up the answer by aioice's 1-second wait.
+# They are left out; the browser's connectivity checks reach this server either way, and
+# it learns the browser's address from them (a peer-reflexive candidate).
+MDNS_CANDIDATE = re.compile(
+    r"^a=candidate:\S+ \d+ \S+ \d+ \S+\.local \d+ [^\r\n]*\r?\n", re.M | re.I
+)
+
+
+def without_mdns(sdp: str) -> str:
+    """The offer without the candidates a browser names by multicast DNS."""
+    return MDNS_CANDIDATE.sub("", sdp)
 
 
 def _bind_in_range(address: str, ports: tuple[int, int]) -> socket.socket | None:
@@ -362,7 +376,7 @@ class RtcEcho:
         # The ICE connection is created by setRemoteDescription, in this task's context.
         token = _PORT_RANGE.set(self.port_range)
         try:
-            await pc.setRemoteDescription(RTCSessionDescription(sdp=sdp, type=kind))
+            await pc.setRemoteDescription(RTCSessionDescription(sdp=without_mdns(sdp), type=kind))
             await pc.setLocalDescription(await pc.createAnswer())
         except Exception:
             await self._close(session)

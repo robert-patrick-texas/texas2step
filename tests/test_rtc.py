@@ -16,7 +16,7 @@ from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
 
 from texas2step.app import create_app
 from texas2step.config import Settings
-from texas2step.rtc import RtcBusy, RtcEcho
+from texas2step.rtc import RtcBusy, RtcEcho, without_mdns
 
 # Below Linux's default ephemeral range (32768-60999), so no OS-chosen port lands here.
 RANGE = (29100, 29199)
@@ -273,3 +273,20 @@ def test_settings_reach_the_echo(tmp_path):
     settings = Settings(results_path=str(tmp_path / "r.db"), rtc_port_min=50000, rtc_port_max=50999)
     assert create_app(settings).state.rtc.port_range == (50000, 50999)
     assert create_app(Settings(results_path=str(tmp_path / "r.db"))).state.rtc.port_range is None
+
+
+def test_offers_lose_their_mdns_candidates_only():
+    offer = (
+        "v=0\r\n"
+        "a=candidate:1 1 udp 2122260223 1750fd45-5a12-4c1b-ab08-0b86318abc2c.local 41398"
+        " typ host generation 0\r\n"
+        "a=candidate:2 1 UDP 2122194687 192.0.2.10 50000 typ host\r\n"
+        "a=candidate:3 1 udp 1686052607 203.0.113.9 61000 typ srflx raddr 0.0.0.0 rport 0\r\n"
+        "a=candidate:4 1 udp 2122129151 2E34B8D9-578C-401A-8A52-E29978BDB7F9.LOCAL 46985"
+        " typ host\r\n"
+        "a=end-of-candidates\r\n"
+    )
+    got = without_mdns(offer)
+    assert ".local" not in got.lower()
+    assert "192.0.2.10 50000" in got and "203.0.113.9 61000" in got
+    assert got.endswith("a=end-of-candidates\r\n")
