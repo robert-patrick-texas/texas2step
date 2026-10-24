@@ -82,7 +82,7 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/v1/info` | name, version, server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes), limits, ICE servers, UI defaults; with a [traffic limit](traffic.md), `traffic` (below) |
+| GET | `/api/v1/info` | name, version, server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes), limits, ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise); with a [traffic limit](traffic.md), `traffic` (below) |
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |
@@ -147,7 +147,7 @@ this server's side of them.
 | POST | `/api/v1/measure/download` | `{"target", "seconds": 10, "streams": 4, "loaded_latency": true}` |
 | POST | `/api/v1/measure/upload` | same as download |
 | POST | `/api/v1/measure/loss` | `{"target", "packets": 500, "interval_ms": 10, "size": 200}` |
-| POST | `/api/v1/measure/full` | `{"target", "seconds", "streams", "packets", "interval_ms", "loss": true, "one_stream": true}` |
+| POST | `/api/v1/measure/full` | `{"target", "seconds", "streams", "packets", "interval_ms", "loss": true, "one_stream"}`; without `one_stream`, as the target's `default_one_stream` says |
 
 ```bash
 curl -s -X POST https://dallas.example.net/texas2step/api/v1/measure/full \

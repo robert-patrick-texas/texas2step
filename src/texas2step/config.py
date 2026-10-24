@@ -101,6 +101,10 @@ class Settings:
     default_streams: int = 4
     default_seconds: float = 10.0
     default_packets: int = 500
+    # Whether a test downloads over one stream too, unless the visitor or the command line
+    # chooses: up to half again a test's traffic, so a server whose traffic is billed may
+    # want it off.
+    default_one_stream: bool = True
 
     # HTTP plumbing.
     cors_origins: list[str] = field(default_factory=lambda: ["*"])

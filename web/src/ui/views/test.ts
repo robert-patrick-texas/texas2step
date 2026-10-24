@@ -116,6 +116,7 @@ export class TestView implements View {
   private actions!: HTMLElement;
   private banner!: HTMLElement;
   private options!: HTMLElement;
+  private refreshOptions: (() => void)[] = [];
   private run: TestRun | null = null;
   private result: TestResult | null = null;
   /** Whether the page shows a saved result (/r/<id>) rather than a test from this visit. */
@@ -189,6 +190,7 @@ export class TestView implements View {
     this.off = this.app.onServer(() => {
       this.describeEndpoints();
       this.noteTraffic();
+      for (const refresh of this.refreshOptions) refresh();
     });
     this.describeEndpoints();
     this.noteTraffic();
@@ -205,17 +207,21 @@ export class TestView implements View {
 
   private renderOptions(): HTMLElement {
     const s = this.app.settings;
-    const seg = <K extends keyof Settings>(key: K, label: string, values: [Settings[K], string][], hint: string) => {
+    // `shown` is the value a choice stands at, where a setting left unset follows the server.
+    const seg = <K extends keyof Settings>(key: K, label: string, values: [Settings[K], string][], hint: string, shown = () => s[key]) => {
       const group = h("div", { class: "seg", role: "radiogroup", "aria-label": label });
+      const mark = () => values.forEach(([v], i) => group.children[i]?.setAttribute("aria-checked", String(shown() === v)));
       for (const [v, text] of values) {
-        const b = h("button", { type: "button", role: "radio", "aria-checked": String(s[key] === v) }, text);
+        const b = h("button", { type: "button", role: "radio" }, text);
         b.addEventListener("click", () => {
           s[key] = v;
           this.app.saveSettings();
-          for (const other of group.children) other.setAttribute("aria-checked", String(other === b));
+          mark();
         });
         group.append(b);
       }
+      mark();
+      this.refreshOptions.push(mark);
       return h("div", { class: "opt" }, h("span", { class: "opt-label", title: hint }, label), group);
     };
     return h(
@@ -229,9 +235,14 @@ export class TestView implements View {
         seg("seconds", "Duration", [[5, "5 s"], [10, "10 s"], [15, "15 s"], [20, "20 s"]], "Length of each of the download and upload phases."),
         seg("packets", "UDP probes", [[0, "Skip"], [200, "200"], [500, "500"], [1000, "1000"]], "Packets sent in the loss test."),
         seg("intervalMs", "Probe spacing", [[5, "5 ms"], [10, "10 ms"], [20, "20 ms"]], "Time between UDP probes."),
-        seg("oneStream", "One stream", [[true, "Download"], [false, "Skip"]], "After the download, one stream for the same time: what a single file copy gets. Skipped when the test uses one stream."),
+        seg("oneStream", "One stream", [[true, "Download"], [false, "Skip"]], "After the download, one stream for the same time: what a single file copy gets. Skipped when the test uses one stream. Until you choose, as the server says.", () => this.oneStream()),
       ),
     );
+  }
+
+  /** Whether a test downloads over one stream too: the visitor's choice, or the server's. */
+  private oneStream(): boolean {
+    return this.app.settings.oneStream ?? this.app.info?.defaults.one_stream ?? true;
   }
 
   /** A server whose traffic limit is reached says so before a test is tried. */
@@ -301,7 +312,8 @@ export class TestView implements View {
     this.showingSaved = false;
     this.describeEndpoints();
     this.renderResult(null);
-    const { streams, seconds, packets, intervalMs, oneStream } = app.settings;
+    const { streams, seconds, packets, intervalMs } = app.settings;
+    const oneStream = this.oneStream();
     this.packets.reset(packets);
     this.options.removeAttribute("open");
 

@@ -36,6 +36,7 @@ file up to date with the new version's template and keeps your values; see
 | `allow_any_target` | `false` | Let `/measure/*` target any URL, not just configured locations. Leave off on shared networks: it turns the server into a request relay. |
 | `page_test` / `page_monitor` / `page_diag` / `page_history` / `page_api` | `true` | Show that tab of the web UI. Any can be hidden, but not all. A hidden page's address opens the first page shown. The API stays on: `results_enabled` and `measure_enabled` turn parts of it off, and `/api/docs` stays reachable without the API tab. |
 | `default_streams` / `default_seconds` / `default_packets` | 4 / 10 / 500 | Defaults advertised by `/api/v1/info` |
+| `default_one_stream` | `true` | Whether a test also downloads over [one stream](methodology.md#one-stream), unless the visitor chooses in Test options or the command line with `--one-stream` or `--no-one-stream`. It can add up to half again to a test's traffic, so a server whose traffic is billed may want `false`; see [Traffic limits](traffic.md#what-a-test-moves). |
 | `cors_origins` | `["*"]` | Origins allowed to call the API from a browser |
 | `trusted_proxies` | `["127.0.0.1", "::1"]` | Peers whose `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Prefix` and `X-Client-Protocol` are believed |
 | `debug` | `false` | Also log every request and the UDP probe's WebRTC detail; see [Logging](#logging) |

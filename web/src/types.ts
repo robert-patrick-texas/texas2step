@@ -174,7 +174,9 @@ export interface ServerInfo {
   capabilities: { websocket: boolean; webrtc: boolean; results: boolean; measure: boolean; stamps?: boolean };
   limits: { max_download_bytes: number; max_upload_bytes: number; max_stream_seconds: number };
   ice_servers: RTCIceServer[];
-  defaults: { streams: number; seconds: number; packets: number };
+  /** `one_stream`: whether a test measures one stream's download unless the visitor
+   * chooses; older servers leave it out. */
+  defaults: { streams: number; seconds: number; packets: number; one_stream?: boolean };
   /** With a traffic limit: whether this visitor may start a test; if not, the site's
    * message, and a link to continue elsewhere if it gave one. */
   traffic?: { open: boolean; message: string | null; url: string | null };

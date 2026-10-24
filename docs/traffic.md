@@ -17,6 +17,9 @@ most as much as the download:
 | 1 Gbps | 1.25 GB | 1.25 GB | 1.25 GB | 3.75 GB |
 | 10 Gbps | 12.5 GB | 12.5 GB | 12.5 GB | 37.5 GB |
 
+With `default_one_stream = false` a test leaves one stream out unless the visitor turns it
+on in Test options, or the command line asks with `--one-stream`.
+
 History's Traffic column shows what each saved test moved.
 
 Clouds such as AWS, Azure and Google Cloud generally bill the traffic a server sends,

@@ -67,6 +67,7 @@ def test_info_whoami_locations(client):
     assert info["version"] == __version__
     assert info["server"] == {"id": "t1", "name": "Test One", "location": "Testville"}
     assert set(info["capabilities"]) == {"websocket", "webrtc", "results", "measure", "stamps"}
+    assert info["defaults"] == {"streams": 4, "seconds": 10.0, "packets": 500, "one_stream": True}
 
     me = client.get("/api/v1/whoami", headers={"user-agent": "pytest"}).json()
     assert me["user_agent"] == "pytest"

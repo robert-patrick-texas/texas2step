@@ -1,8 +1,16 @@
 """End-to-end: the Python engine against a real server on loopback (HTTP, WebSocket, WebRTC)."""
 
+import threading
+import time
+from collections.abc import Iterator
+
 import httpx
+import pytest
+import uvicorn
 
 from texas2step import engine
+from texas2step.app import create_app
+from texas2step.config import Settings
 
 
 async def test_latency(live_server):
@@ -73,3 +81,27 @@ async def test_run_all_measures_one_stream_and_responsiveness(live_server):
     assert r["responsiveness"]["download"]["loaded_on"] == "own connection"
     no_one = await engine.run_all(live_server, seconds=1, streams=2, loss=False, one_stream=False)
     assert "one_stream" not in no_one and no_one["config"]["one_stream"] is False
+
+
+@pytest.fixture
+def billed_server(tmp_path) -> Iterator[str]:
+    """A server whose traffic is billed: one stream is off unless a test asks for it."""
+    settings = Settings(results_path=str(tmp_path / "r.db"), default_one_stream=False)
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(settings), host="127.0.0.1", port=0, log_level="warning")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.05)
+    yield f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
+    server.should_exit = True
+    thread.join(timeout=10)
+
+
+async def test_one_stream_follows_the_servers_default(billed_server):
+    r = await engine.run_all(billed_server, seconds=1, streams=2, loss=False)
+    assert r["config"]["one_stream"] is False and "one_stream" not in r
+    asked = await engine.run_all(billed_server, seconds=1, streams=2, loss=False, one_stream=True)
+    assert asked["config"]["one_stream"] is True and asked["one_stream"]["mbps"] > 0

@@ -44,6 +44,8 @@ results_path = "/var/lib/texas2step/results.db"
 # default_streams = 4
 # default_seconds = 10.0
 # default_packets = 500
+# default_one_stream = true             # one stream's download after the download; up to
+#                                       # half again a test's traffic, so false where billed
 
 # --- HTTP ----------------------------------------------------------------------------------
 # cors_origins = ["*"]

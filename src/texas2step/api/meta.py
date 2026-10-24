@@ -86,6 +86,7 @@ async def info(request: Request) -> dict[str, Any]:
             "streams": s.default_streams,
             "seconds": s.default_seconds,
             "packets": s.default_packets,
+            "one_stream": s.default_one_stream,
         },
     }
     if (meter := request.app.state.traffic) is not None:

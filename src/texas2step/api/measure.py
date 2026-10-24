@@ -52,7 +52,7 @@ class FullRequest(Target):
     packets: int = Field(500, ge=0, le=10_000)
     interval_ms: float = Field(10.0, ge=1, le=1000)
     loss: bool = True
-    one_stream: bool = True
+    one_stream: bool | None = Field(None, description="Default: as the target server says")
 
 
 async def _run(

@@ -546,14 +546,13 @@ async def run_all(
     loss: bool = True,
     progress: Progress | None = None,
     local: bool = False,
-    one_stream: bool = True,
+    one_stream: bool | None = None,
 ) -> dict[str, Any]:
     """A full test toward ``target``. With ``local``, the result also gives this host's
     own address on the connection the server saw, as the socket was bound, and the MAC
     of the NIC the kernel routes it out of (the CLI's; a server measuring for an API
     caller keeps them to itself). With ``one_stream``, one stream's download follows the
-    download, unless the test already uses one."""
-    one_stream = one_stream and streams > 1
+    download, unless the test already uses one; None follows the server's default."""
     base = _base(target)
     started = datetime.now(UTC)
     async with _client() as client:
@@ -563,6 +562,9 @@ async def run_all(
         stream = r.extensions.get("network_stream") if local else None
         mine = stream.get_extra_info("client_addr") if stream else None
         theirs = stream.get_extra_info("server_addr") if stream else None
+    if one_stream is None:
+        one_stream = bool(info.get("defaults", {}).get("one_stream", True))
+    one_stream = one_stream and streams > 1
 
     result: dict[str, Any] = {
         "version": 1,

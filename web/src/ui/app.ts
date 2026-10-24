@@ -11,7 +11,7 @@ export interface Settings {
   seconds: number;
   packets: number;
   intervalMs: number;
-  oneStream: boolean;
+  oneStream: boolean | null; // null: as the server tested says (defaults.one_stream)
   family: "auto" | "ipv4" | "ipv6";
 }
 
@@ -41,7 +41,7 @@ export class App {
   private routes: [RegExp, () => View][] = [];
 
   constructor() {
-    this.settings = store<Settings>("t2s.settings", { streams: 4, seconds: 10, packets: 500, intervalMs: 10, oneStream: true, family: "auto" });
+    this.settings = store<Settings>("t2s.settings", { streams: 4, seconds: 10, packets: 500, intervalMs: 10, oneStream: null, family: "auto" });
   }
 
   route(pattern: RegExp, view: () => View): this {

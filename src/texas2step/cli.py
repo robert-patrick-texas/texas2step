@@ -991,7 +991,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             loss=not args.no_loss,
             progress=live,
             local=not args.no_local,
-            one_stream=not args.no_one_stream,
+            one_stream=args.one_stream,
         )
     )
     live.clear()
@@ -1307,9 +1307,9 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--interval", type=float, default=10.0, help="ms between UDP probes")
     run.add_argument("--no-loss", action="store_true", help="skip the UDP packet-loss test")
     run.add_argument(
-        "--no-one-stream",
-        action="store_true",
-        help="skip the download over one stream that follows the multi-stream one",
+        "--one-stream",
+        action=argparse.BooleanOptionalAction,
+        help="after the download, download over one stream too (default: as the server says)",
     )
     run.add_argument("--save", action="store_true", help="store the result on the server")
     run.add_argument(

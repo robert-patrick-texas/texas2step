@@ -79,8 +79,9 @@ From the 100 ms timeline:
 After the download, the test downloads over **one stream** for the same time, measured in
 the same way: what a single file copy, backup or remote-desktop session gets, as each of
 those uses one connection. It is shown beside the multi-stream rate, as a share of it.
-It is skipped when the test itself uses one stream, and Test options or the command line's
-`--no-one-stream` can leave it out. Why one stream can get less than several is in
+It is skipped when the test itself uses one stream. Whether it runs otherwise is the
+server's `default_one_stream`, unless the visitor chooses in Test options or the command
+line with `--one-stream` or `--no-one-stream`. Why one stream can get less than several is in
 [Quality and user experience](experience.md#one-stream).
 
 ### Streams and HTTP versions
