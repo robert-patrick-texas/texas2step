@@ -275,21 +275,26 @@ whole. A frame goes out as a burst because a video call sends it that way, and b
 what shallow buffers and policers drop.
 
 With a call profile, the server [stamps](#packet-loss-udp) each echo, and every
-10 seconds of the call is scored as the Test page scores its packet-loss test, each
-direction on its own ([Call quality](#call-quality)):
+10 seconds of the call, counted from the start, is scored as the Test page scores its
+packet-loss test, each direction on its own ([Call quality](#call-quality)):
 
-* **A strip of 10-second cells** under the chart, coloured by rating, with the score
-  written in where it fits. It takes the place of the loss-per-second strip; lost
-  packets still show as red ticks along the top.
-* **Call quality**, the median 10-second score in the window; **Worst 10 s**, and how
-  long ago; **Below good**, the share of 10-second cells rated below good (4.0).
+* **On the loss-per-second strip**, each 10 seconds, once whole, gets a line beneath it
+  in its rating's colour and its score on a label over its middle, where there's room.
+  The seconds' own loss stays in view around and under them. Hovering a second gives its
+  loss and the score of its 10 seconds, each way.
+* **Call quality**, the median 10-second score in the window; **Worst 10s**, and how
+  long ago; **Below good**, the share of the 10-second scores below good (4.0).
 * **Frames hit** (Video call): video frames with a packet lost or more than 60 ms late,
   in the worse direction. Each is a freeze or a smear on the screen.
 
 Over hours the two computers' clocks drift apart, by tens of milliseconds an hour, so each
-cell measures delays against its own fastest packet, where the drift is a fraction of a
-millisecond. A server without stamps scores each cell on round trips, and over the TCP
-fallback only the voice packets are sent.
+10 seconds measures delays against its own fastest packet, where the drift is a fraction
+of a millisecond. A server without stamps scores each 10 seconds on round trips, and over
+the TCP fallback only the voice packets are sent.
+
+**Stop** holds the chart and its figures where they stopped, to show or to take a
+screenshot of. The window can still be changed, to look back over the last 15 minutes.
+The 10 seconds cut short by Stop aren't scored.
 
 Voice and Video calls count toward a [traffic limit](traffic.md#monitors-call-profiles).
 When one is reached, the server holds the session to path probes and says so, and the
@@ -339,7 +344,7 @@ could see it, gives a random name ending in `.local` instead. So by default the 
 egress box shows only the addresses the server sees. Where the browser reveals it, the
 box adds **This computer**, the address of the interface the UDP path leaves by, and a
 **NAT** row comparing it with the address the server sees. Browser test runs save it
-with their results, in History's **Local** column.
+with their results (`client.local_ip`).
 
 To have managed browsers reveal it to this site only:
 

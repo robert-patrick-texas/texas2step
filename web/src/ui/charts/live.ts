@@ -1,7 +1,7 @@
 // Scrolling RTT chart for the monitor: one dot per probe, lost probes as ticks on top,
-// and a per-second loss strip underneath; for a call, a strip of its quality every 10
-// seconds below that. It draws one series, or two (one per server) on shared axes, so two
-// paths can be compared directly.
+// and a per-second loss strip underneath, where a call's score marks each 10 seconds. It
+// draws one series, or two (one per server) on shared axes, so two paths can be compared
+// directly. Stopped, it holds still where it stopped.
 import type { Slice } from "../../engine/stream";
 import type { CallRating } from "../../types";
 import { clear, cssVar, h, onResize, pointerIn } from "../dom";
@@ -24,13 +24,13 @@ export interface LiveSeries {
 
 const LONE: LiveSeries = { label: "", short: "", token: "--idle" };
 
-// A call's rating as a slice's fill: the grades' colours, paler for the better ratings.
-const RATING_FILL: Record<CallRating, [string, number]> = {
-  excellent: ["--good", 0.5],
-  good: ["--good", 0.25],
-  fair: ["--warning", 0.45],
-  poor: ["--serious", 0.5],
-  bad: ["--critical", 0.55],
+// A call's rating as the colour of its mark on the loss strip: the grades' colours.
+const RATING_INK: Record<CallRating, string> = {
+  excellent: "--good",
+  good: "--good",
+  fair: "--warning",
+  poor: "--serious",
+  bad: "--critical",
 };
 const RATING_WORD: Record<CallRating, string> = { excellent: "Excellent", good: "Good", fair: "Fair", poor: "Poor", bad: "Bad" };
 
@@ -39,9 +39,9 @@ export class LiveChart {
   private canvas: HTMLCanvasElement;
   private strips: HTMLCanvasElement[] = [];
   private stripBox: HTMLElement;
-  private callBox: HTMLElement;
-  private callStrips: HTMLCanvasElement[] = [];
+  private stripLabel: HTMLElement;
   private calls: (Slice[] | null)[] = []; // per series, with a call profile
+  private frozen: number | null = null; // when monitoring stopped: the chart holds still there
   private series: (LiveSeries & { samples: LiveSample[] })[] = [];
   private windowS = 60;
   private log = false;
@@ -53,8 +53,8 @@ export class LiveChart {
   constructor() {
     this.canvas = h("canvas", { class: "live-canvas", role: "img", "aria-label": "Round-trip time over the monitoring window" });
     this.stripBox = h("div", {});
-    this.callBox = h("div", { hidden: true });
-    this.el = h("div", { class: "chart live" }, this.canvas, this.stripBox, this.callBox);
+    this.stripLabel = h("div", { class: "strip-label" }, "Loss per second");
+    this.el = h("div", { class: "chart live" }, this.canvas, this.stripBox);
     this.setSeries([LONE]);
     onResize(this.el, (w) => {
       this.width = w;
@@ -83,34 +83,36 @@ export class LiveChart {
     this.m.right = list.length > 1 ? 24 : 12; // room to name each row of lost-probe ticks
     clear(this.stripBox);
     // One label for every strip; with two servers, each strip names its own at its left edge.
-    this.stripBox.append(h("div", { class: "strip-label" }, "Loss per second"));
-    this.strips = this.series.map((s) => {
+    this.stripBox.append(this.stripLabel);
+    this.strips = this.series.map((s, i) => {
       const strip = h("canvas", { class: "loss-strip", role: "img", "aria-label": s.label ? `Packet loss per second, ${s.label}` : "Packet loss per second" });
-      this.stripBox.append(strip);
-      return strip;
-    });
-    clear(this.callBox);
-    this.callBox.append(h("div", { class: "strip-label" }, "Call quality per 10 s"));
-    this.callStrips = this.series.map((s, i) => {
-      const strip = h("canvas", { class: "loss-strip", role: "img", "aria-label": s.label ? `Call quality every 10 seconds, ${s.label}` : "Call quality every 10 seconds" });
-      strip.addEventListener("pointermove", (ev) => this.callTip(ev, strip, i));
+      strip.addEventListener("pointermove", (ev) => this.stripTip(ev, strip, i));
       strip.addEventListener("pointerleave", () => hideTip());
-      this.callBox.append(strip);
+      this.stripBox.append(strip);
       return strip;
     });
     this.calls = this.series.map(() => null);
     this.draw();
   }
 
-  /** A call's 10-second slices, per series; all null for the path profile. A call's strips
-   * take the place of the loss strips: lost packets still show along the top. */
+  /** A call's 10-second slices, per series, marked on the loss strips; null for the path
+   * profile. */
   setCalls(calls: (Slice[] | null)[]): void {
     this.calls = calls;
-    const call = calls.some((c) => c);
-    if (this.callBox.hidden === !call) return void this.draw();
-    this.callBox.hidden = !call;
-    this.stripBox.hidden = call;
+    const label = calls.some((c) => c) ? "Loss per second · call quality per 10\u00a0s" : "Loss per second";
+    if (this.stripLabel.textContent !== label) this.stripLabel.textContent = label;
     this.draw();
+  }
+
+  /** Hold the chart still at `at` (Date.now() when monitoring stopped), or let it run on. */
+  freeze(at: number | null): void {
+    this.frozen = at;
+    this.draw();
+  }
+
+  /** The chart's present: now, or when monitoring stopped. */
+  get now(): number {
+    return this.frozen ?? Date.now();
   }
 
   get windowSeconds(): number {
@@ -145,7 +147,7 @@ export class LiveChart {
   }
 
   visible(series = 0): LiveSample[] {
-    const from = Date.now() - this.windowS * 1000;
+    const from = this.now - this.windowS * 1000;
     return (this.series[series]?.samples ?? []).filter((s) => s.t >= from);
   }
 
@@ -175,7 +177,7 @@ export class LiveChart {
     const H = this.plotHeight();
     const { top, right, bottom, left } = this.m;
     const ctx = this.setup(this.canvas, H);
-    const now = Date.now();
+    const now = this.now;
     const from = now - this.windowS * 1000;
     const data = this.series.map((_, i) => this.visible(i));
     const got = data.flat().filter((d) => d.rtt !== null).map((d) => d.rtt!);
@@ -269,70 +271,10 @@ export class LiveChart {
       ctx.stroke();
     }
 
-    if (!this.stripBox.hidden) for (const [i, strip] of this.strips.entries()) this.drawStrip(strip, data[i] ?? [], from, ink, this.series[i]!);
-    if (!this.callBox.hidden) for (const [i, strip] of this.callStrips.entries()) this.drawCalls(strip, this.calls[i] ?? [], from, this.series[i]!);
+    for (const [i, strip] of this.strips.entries()) this.drawStrip(strip, data[i] ?? [], from, ink, this.series[i]!, this.calls[i] ?? []);
   }
 
-  /** One cell per 10-second slice, coloured by its rating, its score written in when it fits. */
-  private drawCalls(strip: HTMLCanvasElement, slices: Slice[], from: number, series: LiveSeries): void {
-    const W = this.width;
-    const H = 18;
-    const ctx = this.setup(strip, H);
-    const { left, right } = this.m;
-    const x = (t: number) => left + ((t - from) / (this.windowS * 1000)) * (W - left - right);
-    if (this.series.length > 1) {
-      ctx.fillStyle = cssVar(series.token);
-      ctx.font = "600 10px system-ui, sans-serif";
-      ctx.textAlign = "right";
-      ctx.textBaseline = "middle";
-      ctx.fillText(series.short, left - 8, H / 2);
-    }
-    ctx.font = "600 10px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    const ink = cssVar("--ink");
-    for (const s of slices) {
-      const x0 = Math.max(left, x(s.start));
-      const x1 = Math.min(W - right, x(s.end));
-      if (x1 - x0 < 1) continue;
-      const rating: CallRating = s.dead ? "bad" : (s.call?.rating ?? "bad");
-      const [token, alpha] = RATING_FILL[rating];
-      ctx.fillStyle = cssVar(token);
-      ctx.globalAlpha = alpha;
-      ctx.beginPath();
-      ctx.roundRect(x0 + 1, 2, Math.max(1, x1 - x0 - 2), H - 4, 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      if (x1 - x0 >= 30 && (s.call || s.dead)) {
-        ctx.fillStyle = ink;
-        ctx.fillText(s.dead ? "—" : s.call!.mos.toFixed(1), (x0 + x1) / 2, H / 2 + 0.5);
-      }
-    }
-  }
-
-  private callTip(ev: PointerEvent, strip: HTMLCanvasElement, i: number): void {
-    const { left, right } = this.m;
-    const from = Date.now() - this.windowS * 1000;
-    const t = from + ((pointerIn(ev, strip, this.width).x - left) / (this.width - left - right)) * this.windowS * 1000;
-    const s = (this.calls[i] ?? []).find((c) => t >= c.start && t < c.end);
-    if (!s) return hideTip();
-    const when = `${new Date(s.start).toLocaleTimeString()} – ${new Date(s.end).toLocaleTimeString()}`;
-    const who = this.series[i]!.label ? `${this.series[i]!.label}: ` : "";
-    if (s.dead || !s.call) return showTip(ev.clientX, ev.clientY, when, [{ value: "No packets came back", label: `${who}${s.sent} sent` }]);
-    const c = s.call;
-    const rated = (r: CallRating, mos: number) => `${mos.toFixed(1)} · ${RATING_WORD[r]}`;
-    const rows: TipRow[] = [{ value: rated(c.rating, c.mos), label: `${who}call quality`, color: `var(${RATING_FILL[c.rating][0]})`, shape: "dot" }];
-    if (c.down && c.up) {
-      rows.push({ value: rated(c.down.rating, c.down.mos), label: "you hear" });
-      rows.push({ value: rated(c.up.rating, c.up.mos), label: "the other end hears" });
-    }
-    rows.push({ value: `${c.longest_gap_ms.toLocaleString()} ms`, label: "longest gap" });
-    rows.push({ value: text(pct((s.lost / Math.max(1, s.sent)) * 100)), label: `lost, ${c.late} late` });
-    if (s.frames) rows.push({ value: text(pct((s.frames.hit / Math.max(1, s.frames.total)) * 100)), label: `of ${s.frames.total} video frames hit` });
-    showTip(ev.clientX, ev.clientY, when, rows);
-  }
-
-  private drawStrip(strip: HTMLCanvasElement, data: LiveSample[], from: number, ink: Record<string, string>, series: LiveSeries): void {
+  private drawStrip(strip: HTMLCanvasElement, data: LiveSample[], from: number, ink: Record<string, string>, series: LiveSeries, slices: Slice[]): void {
     const W = this.width;
     const H = 18;
     const ctx = this.setup(strip, H);
@@ -366,12 +308,85 @@ export class LiveChart {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+    this.markCalls(ctx, slices, from, H);
+  }
+
+  /**
+   * A call's 10 seconds on the loss strip, once whole: a line beneath them in its rating's
+   * colour, and its score on a label over their middle where there's room. The seconds'
+   * own loss stays visible around and under them.
+   */
+  private markCalls(ctx: CanvasRenderingContext2D, slices: Slice[], from: number, H: number): void {
+    const W = this.width;
+    const { left, right } = this.m;
+    const x = (t: number) => left + ((t - from) / (this.windowS * 1000)) * (W - left - right);
+    const surface = cssVar("--surface");
+    const ink = cssVar("--ink");
+    ctx.font = "650 10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const s of slices) {
+      const x0 = Math.max(left, x(s.start));
+      const x1 = Math.min(W - right, x(s.end));
+      if (x1 - x0 < 2) continue;
+      const rating: CallRating = s.dead ? "bad" : (s.call?.rating ?? "bad");
+      const color = cssVar(RATING_INK[rating]);
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(x0 + 1.5, H - 2, x1 - x0 - 3, 2, 1);
+      ctx.fill();
+      const label = s.dead ? "—" : s.call!.mos.toFixed(1);
+      const w = ctx.measureText(label).width + 10;
+      if (x1 - x0 < w + 6) continue;
+      const cx = (x0 + x1) / 2;
+      ctx.fillStyle = surface;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.25;
+      ctx.beginPath();
+      ctx.roundRect(cx - w / 2, 2.5, w, H - 6, (H - 6) / 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = ink;
+      ctx.fillText(label, cx, 2.5 + (H - 6) / 2 + 0.5);
+    }
+  }
+
+  /** A second of a loss strip: its loss, and with a call, the score of its 10 seconds. */
+  private stripTip(ev: PointerEvent, strip: HTMLCanvasElement, i: number): void {
+    const { left, right } = this.m;
+    const from = this.now - this.windowS * 1000;
+    const t = from + ((pointerIn(ev, strip, this.width).x - left) / (this.width - left - right)) * this.windowS * 1000;
+    const second = Math.floor((t - from) / 1000);
+    const inSecond = this.visible(i).filter((d) => Math.floor((d.t - from) / 1000) === second);
+    const who = this.series[i]!.label ? `${this.series[i]!.label}: ` : "";
+    const rows: TipRow[] = [];
+    if (inSecond.length) {
+      const lost = inSecond.filter((d) => d.rtt === null).length;
+      rows.push({ value: text(pct((lost / inSecond.length) * 100)), label: `${who}lost in this second (${lost} of ${inSecond.length})` });
+    }
+    const s = (this.calls[i] ?? []).find((c) => t >= c.start && t < c.end);
+    if (s && (s.dead || !s.call)) rows.push({ value: "No packets came back", label: `in these 10 s, ${s.sent} sent` });
+    else if (s?.call) {
+      const c = s.call;
+      const rated = (r: CallRating, mos: number) => `${mos.toFixed(1)} · ${RATING_WORD[r]}`;
+      rows.push({ value: rated(c.rating, c.mos), label: "call quality, these 10 s", color: `var(${RATING_INK[c.rating]})`, shape: "dot" });
+      if (c.down && c.up) {
+        rows.push({ value: rated(c.down.rating, c.down.mos), label: "you hear" });
+        rows.push({ value: rated(c.up.rating, c.up.mos), label: "the other end hears" });
+      }
+      rows.push({ value: `${c.longest_gap_ms.toLocaleString()} ms`, label: "longest gap" });
+      rows.push({ value: text(pct((s.lost / Math.max(1, s.sent)) * 100)), label: `lost, ${c.late} late` });
+      if (s.frames) rows.push({ value: text(pct((s.frames.hit / Math.max(1, s.frames.total)) * 100)), label: `of ${s.frames.total} video frames hit` });
+    }
+    if (!rows.length) return hideTip();
+    const title = s ? `${new Date(s.start).toLocaleTimeString()} – ${new Date(s.end).toLocaleTimeString()}` : new Date(from + second * 1000).toLocaleTimeString();
+    showTip(ev.clientX, ev.clientY, title, rows);
   }
 
   private tip(ev: PointerEvent): void {
     const { left, right } = this.m;
     const W = this.width;
-    const from = Date.now() - this.windowS * 1000;
+    const from = this.now - this.windowS * 1000;
     const t = from + ((pointerIn(ev, this.canvas, W).x - left) / (W - left - right)) * this.windowS * 1000;
     const nearest = (data: LiveSample[]) => {
       let best: LiveSample | undefined;

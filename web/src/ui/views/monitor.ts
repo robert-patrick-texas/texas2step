@@ -6,7 +6,7 @@ import { WsProber } from "../../engine/latency";
 import { RtcProbe } from "../../engine/loss";
 import { appPath, type Endpoint, REFUSED } from "../../engine/net";
 import { jitter, percentile } from "../../engine/stats";
-import { CallStream, framePackets, type ProfileName, type Slice, VIDEO_BYTES, VIDEO_FPS } from "../../engine/stream";
+import { CallStream, framePackets, type ProfileName, SETTLE_MS, type Slice, VIDEO_BYTES, VIDEO_FPS } from "../../engine/stream";
 import type { CallRating, Location, ServerInfo } from "../../types";
 import type { App, View } from "../app";
 import { LiveChart, type LiveSeries } from "../charts/live";
@@ -93,7 +93,7 @@ const SHOWN: Record<ProfileName, [Key, string][]> = {
   ],
   voice: [
     ["mos", "Call quality"],
-    ["worst", "Worst 10 s"],
+    ["worst", "Worst 10s"],
     ["below", "Below good"],
     ["median", "Round trip"],
     ["jitter", "Jitter"],
@@ -101,7 +101,7 @@ const SHOWN: Record<ProfileName, [Key, string][]> = {
   ],
   video: [
     ["mos", "Call quality"],
-    ["worst", "Worst 10 s"],
+    ["worst", "Worst 10s"],
     ["below", "Below good"],
     ["frames", "Frames hit"],
     ["median", "Round trip"],
@@ -113,6 +113,7 @@ export class MonitorView implements View {
   private chart = new LiveChart();
   private dests: Dest[] = [];
   private running = false;
+  private stoppedAt: number | null = null; // Date.now() at Stop: the chart and figures hold there
   private timers: number[] = [];
   private seq = 0;
   private frame = 0;
@@ -413,6 +414,8 @@ export class MonitorView implements View {
     setText(this.transport, "connecting…");
     this.chart.clear();
     this.chart.setCalls([]);
+    this.stoppedAt = null;
+    this.chart.freeze(null);
     const call = this.choice.profile !== "path";
     const dest = (ep: Endpoint, info: ServerInfo | null): Dest => ({ ep, info, probe: null, transport: "", sentAt: new Map(), sent: 0, latest: null, stream: call ? new CallStream(this.choice.every) : null });
     this.dests = sides ? sides.map((loc) => dest(app.endpointFor(loc), null)) : [dest(app.ep, app.info)];
@@ -551,6 +554,11 @@ export class MonitorView implements View {
 
   private stop(): void {
     for (const t of this.timers.splice(1)) clearInterval(t);
+    // Hold the picture where it stopped, to show or take a screenshot of.
+    if (this.running) {
+      this.stoppedAt = Date.now();
+      this.chart.freeze(this.stoppedAt);
+    }
     for (const d of this.dests) {
       d.probe?.close();
       d.probe = null;
@@ -567,7 +575,7 @@ export class MonitorView implements View {
     const data = this.chart.visible(i);
     const got = data.filter((d) => d.rtt !== null).map((d) => d.rtt!);
     const lost = data.length - got.length;
-    const from = Date.now() - this.chart.windowSeconds * 1000;
+    const from = this.chart.now - this.chart.windowSeconds * 1000;
     const shown = slices.filter((s) => s.end > from && (s.call || s.dead));
     const score = (s: Slice) => (s.dead ? 1 : s.call!.mos);
     const scores = shown.map(score);
@@ -604,7 +612,9 @@ export class MonitorView implements View {
   }
 
   private refresh(): void {
-    const slices = this.dests.map((d) => d.stream?.slices() ?? null);
+    // Stopped, the slices that ended by then are scored, and none after.
+    const wall = this.stoppedAt === null ? Date.now() : this.stoppedAt + SETTLE_MS;
+    const slices = this.dests.map((d) => d.stream?.slices(wall) ?? null);
     this.chart.setCalls(slices);
     const figures = this.dests.length ? this.dests.map((_, i) => this.figuresFor(i, slices[i] ?? [])) : [this.figuresFor(0, [])];
     if (this.comparing && this.cells.length) this.refreshCompare(figures);
@@ -626,7 +636,7 @@ export class MonitorView implements View {
     // The packets behind the percentage: red once any are lost.
     count("loss", v.window ? `(${v.lost.toLocaleString()})` : "", `${v.lost.toLocaleString()} of ${v.window.toLocaleString()} probes lost in the window`, v.lost > 0);
     count("mos", v.rating ? RATING_WORD[v.rating] : "", "The median 10-second score in the window, and its rating", v.rating !== null && !["excellent", "good"].includes(v.rating));
-    count("worst", v.worstAt !== null ? ago(v.worstAt) : "", v.worstAt !== null ? `The worst 10 seconds began at ${new Date(v.worstAt).toLocaleTimeString()}` : "");
+    count("worst", v.worstAt !== null ? ago(v.worstAt, this.chart.now) : "", v.worstAt !== null ? `The worst 10 seconds began at ${new Date(v.worstAt).toLocaleTimeString()}` : "");
     count("below", v.slices ? `(${v.belowCount} of ${v.slices})` : "", "10-second slices rated below good (4.0), of those in the window", v.belowCount > 0);
   }
 
@@ -673,9 +683,9 @@ function lede(c: Choice, two: boolean): string {
   return `${what}, about ${rate} each way, echoed by the server. Each 10 seconds is scored as the call would sound, to catch the moments it breaks up.`;
 }
 
-/** How long ago, as "40 s ago" or "3 min ago". */
-function ago(t: number): string {
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+/** How long before `now`, as "40 s ago" or "3 min ago". */
+function ago(t: number, now: number): string {
+  const s = Math.max(0, Math.round((now - t) / 1000));
   return s < 120 ? `${s} s ago` : `${Math.round(s / 60)} min ago`;
 }
 

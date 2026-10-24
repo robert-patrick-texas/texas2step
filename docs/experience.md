@@ -116,9 +116,10 @@ the score at 4.3, excellent; the rule rates it good.
 ### Calls over time
 
 Monitor's call profiles send a call's packets for as long as the page runs, and score each
-10 seconds as a call, so a problem that comes and goes shows as the cells it spoiled.
+10 seconds as a call, so a problem that comes and goes shows in the scores of the 10
+seconds it spoiled.
 **Below good** is the share of the time a caller would have noticed something wrong
-(below 4.0), and **Worst 10 s** the moment they'd remember. A video call also counts
+(below 4.0), and **Worst 10s** the moment they'd remember. A video call also counts
 **frames hit**: video frames with a packet lost or late, each one a freeze or a smear on
 the screen. A video call keeps working with a few frames hit; its voice, scored beside
 it, is what decides whether people can talk.

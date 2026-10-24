@@ -18,7 +18,7 @@ export const VIDEO_BYTES = 1100; // a video packet: under what a browser sends a
 export const VIDEO_FPS = 30;
 export const SLICE_MS = 10_000;
 const BUFFER_MS = 60; // a call's jitter buffer, as quality.ts has it
-const SETTLE_MS = 1500; // a slice is scored once its last packet has had time to come back
+export const SETTLE_MS = 1500; // a slice is scored once its last packet has had time to come back
 const KEEP_MS = 15 * 60_000; // Monitor's longest window
 
 /** Video packets per frame for a rate: a frame is sent as a burst of them. */
@@ -48,9 +48,10 @@ export interface Frames extends FrameCount {
   down?: FrameCount; // what you see
 }
 
-/** One 10-second slice of a call: its quality, or `dead` when no packet came back. */
+/** One 10-second slice of a call, counted from the first packet sent: its quality, or
+ * `dead` when no packet came back. */
 export interface Slice {
-  start: number; // Date.now() at its start, or at the first packet's in a first slice
+  start: number; // Date.now() at its start
   end: number;
   call: CallQuality | null;
   dead: boolean;
@@ -63,6 +64,7 @@ export class CallStream {
   private packets = new Map<number, Packet>(); // by sequence number
   private bySlice = new Map<number, Packet[]>(); // the slices not yet scored
   private last: { seq: number; count: number } | null = null; // the latest stamped echo
+  private origin: number | null = null; // Date.now() at the first packet: slices count from it
   private scored = new Map<number, Slice>();
 
   constructor(readonly voiceIntervalMs: number) {}
@@ -71,9 +73,10 @@ export class CallStream {
   sent(seq: number, frame: number, sent: number, wall: number): void {
     // The server counts from its session's first probe, which is this stream's first.
     this.last ??= { seq: seq - 1, count: 0 };
+    this.origin ??= wall;
     const p: Packet = { seq, frame, wall, sent, rtt: null, server: null, back: null, lostUp: false };
     this.packets.set(seq, p);
-    const k = Math.floor(wall / SLICE_MS);
+    const k = Math.floor((wall - this.origin) / SLICE_MS);
     const list = this.bySlice.get(k);
     if (list) list.push(p);
     else this.bySlice.set(k, [p]);
@@ -103,17 +106,19 @@ export class CallStream {
   }
 
   /** Every slice scored in Monitor's longest window, oldest first, scoring those whose
-   * packets have settled; their packets are then let go. */
+   * packets have settled; their packets are then let go. Only whole slices are scored: one
+   * cut short when monitoring stops is left out. */
   slices(wall = Date.now()): Slice[] {
+    const origin = this.origin ?? wall;
     for (const [k, list] of this.bySlice) {
-      if ((k + 1) * SLICE_MS + SETTLE_MS > wall) continue;
+      if (origin + (k + 1) * SLICE_MS + SETTLE_MS > wall) continue;
       this.scored.set(k, this.score(k, list));
       this.bySlice.delete(k);
       // Kept until here, for echoes and the server's counts placing losses in them. A packet
       // still missing with no stamped echo after it, as in an outage, counts as lost coming back.
       for (const p of list) this.packets.delete(p.seq);
     }
-    for (const k of this.scored.keys()) if ((k + 1) * SLICE_MS < wall - KEEP_MS) this.scored.delete(k);
+    for (const k of this.scored.keys()) if (origin + (k + 1) * SLICE_MS < wall - KEEP_MS) this.scored.delete(k);
     return [...this.scored.values()].sort((a, b) => a.start - b.start);
   }
 
@@ -122,8 +127,8 @@ export class CallStream {
     const video = packets.filter((p) => p.frame >= 0);
     const got = voice.filter((p) => p.rtt !== null);
     const lost = voice.length - got.length;
-    const first = Math.min(...packets.map((p) => p.wall));
-    const slice = { start: Math.max(k * SLICE_MS, Math.floor(first)), end: (k + 1) * SLICE_MS, lost, sent: voice.length, frames: frames(video) };
+    const start = this.origin! + k * SLICE_MS;
+    const slice = { start, end: start + SLICE_MS, lost, sent: voice.length, frames: frames(video) };
     if (!got.length) return { ...slice, call: null, dead: voice.length > 0 };
     const stamped = got.some((p) => p.server !== null);
     const ways = stamped ? delays(voice) : null;
