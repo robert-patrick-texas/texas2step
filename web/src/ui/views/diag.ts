@@ -1,5 +1,5 @@
-// Diagnostics: every way this browser can reach the server, tried once a second for as long
-// as the page is open: HTTPS, WebSocket and UDP, over IPv4 and over IPv6. Each answer also
+// Diagnostics: every way this browser can reach the server, tried once a second while the
+// page is shown: HTTPS, WebSocket and UDP, over IPv4 and over IPv6. Each answer also
 // says what the server saw: the client's address and port, the HTTP version, TLS, the
 // server's own TCP round trip, and its clock.
 import { eui64Mac } from "../../engine/addr";
@@ -95,9 +95,25 @@ abstract class Method {
   }
 
   stop(): void {
+    this.pause();
+    this.lane.dispose();
+  }
+
+  /** No attempts and no connection held open, until resumed; the answers so far stay. */
+  pause(): void {
     this.stopped = true;
     clearTimeout(this.timer);
-    this.lane.dispose();
+  }
+
+  /** Start again after a pause: it has to answer anew, so it's back to trying. */
+  resume(phase: number): void {
+    this.stopped = false;
+    if (this.tone !== "off") {
+      this.tone = "trying";
+      this.lostRun = 0;
+      this.lane.setTone("trying");
+    }
+    this.start(phase);
   }
 
   off(reason: string): void {
@@ -240,9 +256,14 @@ class WsMethod extends Method {
     });
   }
 
-  override stop(): void {
-    super.stop();
+  override pause(): void {
+    super.pause();
     this.prober?.close();
+  }
+
+  override resume(phase: number): void {
+    this.next = 0; // its socket was closed by the pause, not lost: open it again now
+    super.resume(phase);
   }
 }
 
@@ -310,10 +331,15 @@ class UdpMethod extends Method {
       });
   }
 
-  override stop(): void {
-    super.stop();
+  override pause(): void {
+    super.pause();
     this.rtc?.close();
     this.rtc = null;
+  }
+
+  override resume(phase: number): void {
+    this.next = 0; // the pause closed its session and freed the server's port
+    super.resume(phase);
   }
 }
 
@@ -333,6 +359,8 @@ export class DiagView implements View {
   private offsetSpread: number[] = [];
   private events: Event[] = [];
   private logShown = -1;
+  private away = false; // another page is shown
+  private stale = false; // the server was changed while away
   private els!: { you: HTMLElement; server: HTMLElement; clock: HTMLElement; rows: HTMLElement; egress: HTMLElement; log: HTMLElement };
   private readonly onVisibility = () => this.log(null, document.hidden ? "tab hidden: browsers slow down timers in background tabs, so gaps may follow" : "tab visible again");
 
@@ -359,7 +387,7 @@ export class DiagView implements View {
     const card = (title: string, note: string, ...body: (HTMLElement | null)[]) =>
       h("section", { class: "card diag-card" }, h("header", { class: "card-head head-inline" }, h("h2", {}, title), note ? h("p", { class: "wide" }, note) : null), ...body);
     root.append(
-      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "Diag"), h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second for as long as this page is open: HTTPS, WebSocket and UDP, over IPv4 and IPv6."))),
+      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "Diag"), h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second while this page is shown: HTTPS, WebSocket and UDP, over IPv4 and IPv6."))),
       h("section", { class: "card diag-card diag-addresses" }, this.els.you, this.els.server, this.els.clock),
       card(
         "Connection methods",
@@ -383,9 +411,35 @@ export class DiagView implements View {
         h("section", { class: "card" }, h("header", { class: "card-head head-inline diag-log-head" }, h("h2", {}, "Events"), copy), this.els.log),
       ),
     );
-    this.off = this.app.onServer(() => this.restart());
+    this.off = this.app.onServer(() => {
+      if (this.away) this.stale = true;
+      else this.restart();
+    });
     document.addEventListener("visibilitychange", this.onVisibility);
     this.restart();
+    this.timer = window.setInterval(() => this.render(), 1000);
+  }
+
+  /** Another page is shown: the attempts pause, and what they found stays. */
+  hide(): void {
+    this.away = true;
+    clearInterval(this.timer);
+    for (const m of this.methods) m.pause();
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    this.log(null, "paused while another page is shown");
+  }
+
+  show(): void {
+    this.away = false;
+    document.addEventListener("visibilitychange", this.onVisibility);
+    if (this.stale) {
+      this.stale = false;
+      this.restart(); // another server was chosen meanwhile
+    } else {
+      this.log(null, "resumed");
+      for (const [i, m] of this.methods.entries()) m.resume((i * 1000) / this.methods.length);
+      this.render();
+    }
     this.timer = window.setInterval(() => this.render(), 1000);
   }
 

@@ -4,7 +4,7 @@
 // small probes to follow the path, or a voice or video call's packets, scored every 10 s.
 import { WsProber } from "../../engine/latency";
 import { RtcProbe } from "../../engine/loss";
-import { appPath, type Endpoint, REFUSED } from "../../engine/net";
+import { type Endpoint, REFUSED } from "../../engine/net";
 import { jitter, percentile } from "../../engine/stats";
 import { CallStream, framePackets, type ProfileName, SETTLE_MS, type Slice, VIDEO_BYTES, VIDEO_FPS } from "../../engine/stream";
 import type { CallRating, Location, ServerInfo } from "../../types";
@@ -124,6 +124,7 @@ export class MonitorView implements View {
   private pick: { a: string; b: string };
   private seriesKey = "";
   private invited = false; // the Servers toggle has had its one pulse
+  private away = false; // another page is shown
   private off: (() => void) | null = null;
   private startBtn!: HTMLButtonElement;
   private transport!: HTMLElement;
@@ -195,10 +196,23 @@ export class MonitorView implements View {
     this.timers.push(window.setInterval(() => this.refresh(), 500));
   }
 
-  unmount(): void {
+  /** Another page is shown: monitoring stops, as Stop does, and the chart holds still. */
+  hide(): void {
+    this.away = true;
+    if (this.running) this.say("Stopped when you went to another page.");
     this.stop();
+    for (const t of this.timers.splice(0)) clearInterval(t);
+  }
+
+  show(): void {
+    this.away = false;
+    this.refresh();
+    this.timers.push(window.setInterval(() => this.refresh(), 500));
+  }
+
+  unmount(): void {
+    this.hide();
     this.off?.();
-    for (const t of this.timers) clearInterval(t);
   }
 
   // ---- Destinations and profile --------------------------------------------------
@@ -336,8 +350,7 @@ export class MonitorView implements View {
       differs("every", "every");
       if (c.profile === "video") differs("video", "video");
     }
-    const query = q.size ? `?${q}` : "";
-    if (window.location.search !== query) history.replaceState(null, "", appPath("/monitor") + query);
+    this.app.setAddress(`/monitor${q.size ? `?${q}` : ""}`);
   }
 
   private renderTiles(): void {
@@ -422,13 +435,14 @@ export class MonitorView implements View {
     const refused = await Promise.all(this.dests.map((d, i) => this.connect(d, i)));
     this.startBtn.disabled = false;
     const refusal = refused.find((r) => r);
-    if (refusal || !this.dests.some((d) => d.probe)) {
+    // Another page may have been chosen while it connected: then it doesn't start.
+    if (this.away || refusal || !this.dests.some((d) => d.probe)) {
       for (const d of this.dests) d.probe?.close();
       this.dests = [];
       this.seriesKey = "";
       this.layout();
-      setText(this.transport, refusal ? "refused" : sides ? "servers unreachable" : "server unreachable");
-      if (refusal) this.say(refusal.message, refusal.url);
+      setText(this.transport, this.away ? "idle" : refusal ? "refused" : sides ? "servers unreachable" : "server unreachable");
+      if (refusal && !this.away) this.say(refusal.message, refusal.url);
       return;
     }
     this.running = true;

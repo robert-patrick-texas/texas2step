@@ -2759,8 +2759,8 @@ a.brand-org:hover,
   margin-top: 0;
 }
 
-#view > .card,
-#view > div > .card {
+.page > .card,
+.page > div > .card {
   margin-bottom: 20px;
 }
 

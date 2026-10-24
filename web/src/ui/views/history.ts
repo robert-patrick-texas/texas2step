@@ -10,18 +10,26 @@ import { hideTip, showTip } from "../tooltip";
 const TRAFFIC_NOTE = "The bytes the test downloaded and uploaded, as the client counted them. The network carried a few percent more in packet headers.";
 
 export class HistoryView implements View {
+  private body!: HTMLElement;
+  private desk!: HTMLElement;
+
   constructor(private readonly app: App) {}
 
   mount(root: HTMLElement): void {
-    const body = h("div", {}, h("p", { class: "status" }, "Loading…"));
-    const desk = h("div", { class: "desk-tools" });
+    this.body = h("div", {}, h("p", { class: "status" }, "Loading…"));
+    this.desk = h("div", { class: "desk-tools" });
     root.append(
-      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "History"), h("p", { class: "lede" }, "Tests saved on this server, newest first. Browser runs save automatically; use texas2step run --save from the CLI.")), desk),
-      body,
+      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "History"), h("p", { class: "lede" }, "Tests saved on this server, newest first. Browser runs save automatically; use texas2step run --save from the CLI.")), this.desk),
+      this.body,
     );
-    if (this.app.pages.has("test")) desk.append(this.opener());
-    void this.code(desk);
-    void this.load(body);
+    if (this.app.pages.has("test")) this.desk.append(this.opener());
+    this.show();
+  }
+
+  /** Back from another page: a test run there is on the list now, and the code may have changed. */
+  show(): void {
+    void this.code(this.desk);
+    void this.load(this.body);
   }
 
   /** Opens a result by the ID a caller reads out; case and spaces don't matter. */
@@ -48,6 +56,7 @@ export class HistoryView implements View {
     const changes = code.changes_at ? `changes ${at(code.changes_at)}` : "fixed";
     const until = code.previous_until === code.changes_at ? "then" : at(code.previous_until ?? "");
     const before = code.previous && code.previous_until ? ` · ${code.previous} still works until ${until}` : "";
+    desk.querySelector(".desk-code")?.remove();
     desk.prepend(h("p", { class: "desk-code", title: `The code visitors enter (${code.interval}, ${code.timezone})` }, "Access code ", h("strong", {}, code.code), h("span", { class: "cell-sub" }, ` ${changes}${before}`)));
   }
 

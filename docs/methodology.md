@@ -20,6 +20,10 @@ responsiveness), so their results are comparable.
 | 4 | Upload, with latency under load and responsiveness | N parallel `POST /api/v1/up`, WebSocket probes, a new connection a second | 4 streams × 10 s |
 | 5 | Packet loss, UDP RTT and jitter, call quality | WebRTC data channel, unordered, no retransmits | 500 probes of 200 bytes, 10 ms apart |
 
+Each page keeps what it shows while another page is open, but only the page on screen
+measures, so one page's traffic never skews another's figures. Going to another page
+during a test stops it as Stop does, and its partial results stay.
+
 ## Latency
 
 Each probe is a `GET /api/v1/ping` on an already-open keep-alive connection, so TCP and
@@ -294,7 +298,8 @@ the TCP fallback only the voice packets are sent.
 
 **Stop** holds the chart and its figures where they stopped, to show or to take a
 screenshot of. The window can still be changed, to look back over the last 15 minutes.
-The 10 seconds cut short by Stop aren't scored.
+The 10 seconds cut short by Stop aren't scored. Going to another page stops the monitor
+the same way, and the page says so when you come back to it.
 
 Voice and Video calls count toward a [traffic limit](traffic.md#monitors-call-profiles).
 When one is reached, the server holds the session to path probes and says so, and the
@@ -313,8 +318,9 @@ the client's own link, and both would read low.
 
 ## Diag
 
-The Diag page tries each way of reaching the server once a second, for as long as the
-page is open: HTTPS, WebSocket and UDP, over IPv4 and IPv6.
+The Diag page tries each way of reaching the server once a second while the page is
+shown: HTTPS, WebSocket and UDP, over IPv4 and IPv6. Going to another page pauses it
+and closes its connections. Its rows and events stay, and the timelines show the gap.
 
 * **HTTPS** is a small request to `/api/v1/diag/http` on the server's IPv4-only or
   IPv6-only address ([IPv4 and IPv6](configuration.md#ipv4-and-ipv6)). The answer gives

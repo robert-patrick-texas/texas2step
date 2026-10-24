@@ -17,7 +17,28 @@ export interface Settings {
 
 export interface View {
   mount(root: HTMLElement, params: Record<string, string>): void;
+  /** Another page is shown: stop measuring, and keep what's on screen to come back to. */
+  hide?(): void;
+  /** Back from another page, at the address it was left at. */
+  show?(): void;
+  /** Built anew: let go of everything. */
   unmount?(): void;
+}
+
+/** A page built once and kept, hidden while another is shown. */
+interface Page {
+  name: string;
+  view: View;
+  el: HTMLElement;
+  /** Where it was: its address (a saved result's, Monitor's choices) and how far down. */
+  address: string;
+  scroll: number;
+}
+
+interface Route {
+  page: string;
+  pattern: RegExp;
+  make: () => View;
 }
 
 type ServerListener = () => void;
@@ -37,15 +58,17 @@ export class App {
   /** Where an address with no page of its own lands: the first page shown. */
   readonly home = this.pages.has("test") ? "/" : `/${[...this.pages][0]}`;
   private listeners = new Set<ServerListener>();
-  private current: View | null = null;
-  private routes: [RegExp, () => View][] = [];
+  private current: Page | null = null;
+  private kept = new Map<string, Page>();
+  private routes: Route[] = [];
 
   constructor() {
     this.settings = store<Settings>("t2s.settings", { streams: 4, seconds: 10, packets: 500, intervalMs: 10, oneStream: null, family: "auto" });
   }
 
-  route(pattern: RegExp, view: () => View): this {
-    this.routes.push([pattern, view]);
+  /** A route to `page`; a page with several (Test's / and /r/<id>) is one page, kept once. */
+  route(page: string, pattern: RegExp, make: () => View): this {
+    this.routes.push({ page, pattern, make });
     return this;
   }
 
@@ -79,18 +102,54 @@ export class App {
       this.navigate(routeOf(new URL(a.href).pathname));
     });
     window.addEventListener("popstate", () => this.render());
+    clear($("#view")); // the access-code screen, where there was one
     this.render();
     await this.loadLocations();
   }
 
   /** Go to an in-app route such as "/monitor". */
   navigate(route: string, replace = false): void {
-    if (route === routeOf(window.location.pathname)) return;
+    // Another page's plain address (its tab) brings it back as it was left; a saved
+    // result's address opens that result.
+    const to = this.match(route);
+    const kept = to && to.page !== this.current?.name && !Object.keys(to.params).length ? this.kept.get(to.page) : undefined;
+    if (kept) route = kept.address;
+    if (route === this.address()) return;
     if (replace) history.replaceState(null, "", appPath(route));
     else history.pushState(null, "", appPath(route));
     this.render();
   }
 
+  /**
+   * A page's own address, as what it shows changes: in the address bar while it's shown,
+   * and kept for its tab while it's hidden.
+   */
+  setAddress(route: string): void {
+    const page = this.kept.get(this.match(route)?.page ?? "");
+    if (!page) return;
+    page.address = route;
+    if (page === this.current && route !== this.address()) history.replaceState(null, "", appPath(route));
+  }
+
+  /** The route and query shown in the address bar. */
+  private address(): string {
+    return routeOf(window.location.pathname) + window.location.search;
+  }
+
+  private match(route: string): (Route & { params: Record<string, string> }) | null {
+    const path = route.split("?")[0]!;
+    for (const r of this.routes) {
+      const match = r.pattern.exec(path);
+      if (match) return { ...r, params: match.groups ?? {} };
+    }
+    return null;
+  }
+
+  /**
+   * Show the page for the address. Each page is built once and kept: going to another
+   * hides it, and coming back to where it was left shows it again as it was. Any other
+   * address of a page (another saved result, or a new test after one) builds it anew.
+   */
   private render(): void {
     const path = routeOf(window.location.pathname);
     for (const a of document.querySelectorAll<HTMLAnchorElement>(".tabs a")) {
@@ -99,17 +158,33 @@ export class App {
       a.toggleAttribute("aria-current", active);
       if (active) a.setAttribute("aria-current", "page");
     }
-    for (const [pattern, make] of this.routes) {
-      const match = pattern.exec(path);
-      if (!match) continue;
-      this.current?.unmount?.();
-      const root = $("#view");
-      clear(root);
-      this.current = make();
-      this.current.mount(root, match.groups ?? {});
+    const to = this.match(path);
+    if (!to) return this.navigate(this.home, true);
+    const address = this.address();
+    const from = this.current;
+    let page = this.kept.get(to.page);
+    if (page === from && page?.address === address) return;
+    if (from && from !== page) {
+      from.scroll = window.scrollY;
+      from.view.hide?.();
+      from.el.hidden = true;
+    }
+    if (page && page !== from && page.address === address) {
+      this.current = page;
+      page.el.hidden = false;
+      page.view.show?.();
+      window.scrollTo(0, page.scroll);
       return;
     }
-    this.navigate(this.home, true);
+    if (page) {
+      page.view.unmount?.();
+      page.el.remove();
+    }
+    page = { name: to.page, view: to.make(), el: h("div", { class: "page" }), address, scroll: 0 };
+    this.kept.set(to.page, page);
+    this.current = page;
+    $("#view").append(page.el);
+    page.view.mount(page.el, to.params);
   }
 
   saveSettings(): void {

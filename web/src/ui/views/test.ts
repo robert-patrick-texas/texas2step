@@ -1,5 +1,5 @@
 // The main view: run a test (or show a saved one) with live instruments and charts.
-import { appPath, Refused, REFUSED, routeOf } from "../../engine/net";
+import { appPath, Refused, REFUSED } from "../../engine/net";
 import { callQuality, responsiveness } from "../../engine/quality";
 import { type Phase, PHASES, type RunEvents, TestRun } from "../../engine/runner";
 import type { CallQuality, CallRating, CallSide, Direction, Level, Readiness, Responsiveness, ResponsivenessSide, TestResult, ThroughputResult } from "../../types";
@@ -126,6 +126,8 @@ export class TestView implements View {
   /** Whether the page shows a saved result (/r/<id>) rather than a test from this visit. */
   private showingSaved = false;
   private trafficNoted = false; // the status line says the server's traffic limit is reached
+  private away = false; // another page is shown
+  private left = false; // the test running was stopped by going to another page
   private off: (() => void) | null = null;
 
   constructor(private readonly app: App) {}
@@ -201,6 +203,19 @@ export class TestView implements View {
     this.noteTraffic();
     this.renderResult(null);
     if (params.rid) void this.load(params.rid);
+  }
+
+  /** Another page is shown: a test running stops, as Stop does, and the results stay. */
+  hide(): void {
+    this.away = true;
+    if (this.run) {
+      this.left = true;
+      this.run.abort();
+    }
+  }
+
+  show(): void {
+    this.away = false;
   }
 
   unmount(): void {
@@ -309,9 +324,11 @@ export class TestView implements View {
       this.refused(traffic.message, traffic.url);
       return;
     }
+    if (this.away) return; // another page was chosen meanwhile
     this.trafficNoted = false;
-    // Leave a saved-result URL without re-routing (that would unmount this view).
-    if (routeOf(window.location.pathname) !== "/") history.replaceState(null, "", appPath("/"));
+    this.left = false;
+    // Leave a saved-result URL without re-routing (that would build this page anew).
+    app.setAddress("/");
     this.banner.hidden = true;
     this.result = null;
     this.showingSaved = false;
@@ -370,7 +387,7 @@ export class TestView implements View {
     this.gauge.setRunning(false, true);
     this.gauge.button.removeAttribute("aria-label");
     this.link.setMode("idle");
-    if (aborted) setText(this.status, "Stopped. Partial results are shown below.");
+    if (aborted) setText(this.status, this.left ? "Stopped when you went to another page. Partial results are shown below." : "Stopped. Partial results are shown below.");
     if (aborted || !result) {
       for (const li of this.rail.querySelectorAll<HTMLElement>("[data-state=active]")) li.dataset.state = "pending";
       return;
@@ -409,7 +426,7 @@ export class TestView implements View {
       result.id = saved.id;
       setText(this.status, `${this.status.textContent ?? ""} Saved as ${saved.id}.`.trim());
       // A visitor without the desk's functions can't open /r/ links; the desk can.
-      if (this.app.desk) history.replaceState(null, "", appPath(`/r/${saved.id}`));
+      if (this.app.desk) this.app.setAddress(`/r/${saved.id}`);
     } catch (err) {
       console.warn("could not save result", err);
     }
