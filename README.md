@@ -21,11 +21,12 @@ works on air-gapped and internal networks.
 | **Latency** | 20 keep-alive pings, timed with Resource Timing, server time removed | HTTP |
 | **Jitter** | Mean absolute difference between consecutive RTTs | HTTP |
 | **Download / upload** | N parallel streams for T seconds, 100 ms timeline, ramp-up excluded | HTTP |
+| **One stream** | One stream's download for the same time: what a single file copy gets | HTTP |
 | **Latency under load** | Probes every 250 ms on a separate connection during each transfer, graded A+ to F | WebSocket |
-| **Packet loss** | Numbered probes on an unreliable data channel, echoed; up- and downstream loss separated | UDP (WebRTC) |
+| **Packet loss** | Numbered probes on an unreliable data channel, echoed and stamped by the server; each direction's loss and delay apart | UDP (WebRTC) |
 | **Stream fairness** | Per-stream rates and Jain's index | HTTP |
-| **Call quality** | A G.711 call's MOS (1 to 5) from the ITU-T E-model: delay, and packets lost, late or in bursts | derived |
-| **Responsiveness** | Round trips per minute under load, as the IETF draft and macOS's `networkQuality` count them | derived |
+| **Call quality** | A G.711 call's MOS (1 to 5) each way, from the ITU-T E-model: delay, and packets lost, late or in bursts | derived |
+| **Responsiveness** | Round trips per minute under load, on new connections and the loaded one, as the IETF draft and macOS's `networkQuality` count them | HTTP, WebSocket |
 | **Readiness** | Grades for streaming, video calls, reaction time/VDI/SSH and bulk transfers | derived |
 
 Details and definitions: [docs/methodology.md](docs/methodology.md). What the scores mean
@@ -104,12 +105,13 @@ texas2step loss     https://www.example.net/texas2step --packets 1000 --interval
 client 127.0.0.1 (IPv4, HTTP/1.1)
 this computer 127.0.0.1
 
-  Latency               1.95 ms   jitter 0.16 ms   (min 1.65 · p90 2.27 · 20 samples)
-  Download         5,475.2 Mbps   peak 6,071.5   (2 streams · loaded -1.0 ms)
-  Upload          12,131.0 Mbps   peak 12,888.0   (2 streams · loaded -0.6 ms)
-  Loss                   0.00 %   (0/200 lost · ↑ 0.00 % ↓ 0.00 % · UDP RTT 1.06 ms · jitter 0.10 ms)
-  Call quality          4.4 MOS   excellent   (late 0.00 % · longest gap 0 ms · from round trips)
-  Responsiveness     41,838 RPM   (↓ 56,929 · ↑ 41,838, under load)
+  Latency               1.85 ms   jitter 0.08 ms   (min 1.63 · p90 2.03 · 20 samples)
+  Download         4,893.9 Mbps   peak 5,554.3   (2 streams · loaded -0.8 ms)
+  One stream       5,720.1 Mbps   peak 6,167.7   (a single file copy · 117 % of 2 streams)
+  Upload           8,681.2 Mbps   peak 11,391.7   (2 streams · loaded +0.1 ms)
+  Loss                   0.00 %   (0/200 lost · ↑ 0.00 % ↓ 0.00 % · UDP RTT 1.19 ms · jitter 0.12 ms)
+  Call quality          4.4 MOS   excellent   (you hear 4.4 · they hear 4.4 · longest gap ↓ 0 ↑ 0 ms · late ↓ 0.00 % ↑ 0.00 %)
+  Responsiveness     28,501 RPM   (↓ 50,014 · ↑ 28,501 · a new connection 1.0 ms idle, 4.7 ms under load)
   Bufferbloat                A+
 ```
 

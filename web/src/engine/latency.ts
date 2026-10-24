@@ -23,23 +23,9 @@ export async function measureHttpLatency(
   let protocol: string | null = null;
 
   const once = async (): Promise<number | null> => {
-    const url = ep.url("/ping", { r: nonce() });
-    const ctrl = linked(signal, 3000);
-    const t0 = performance.now();
-    try {
-      const res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
-      await res.arrayBuffer();
-      const t1 = performance.now();
-      const entry = await timingFor(url);
-      if (entry?.nextHopProtocol) protocol = entry.nextHopProtocol;
-      if (entry && entry.requestStart > 0 && entry.responseStart > entry.requestStart) {
-        return Math.max(0, entry.responseStart - entry.requestStart - serverTiming(entry));
-      }
-      return Math.max(0, t1 - t0 - serverTiming(res.headers.get("server-timing")));
-    } catch (err) {
-      if (signal?.aborted) throw err;
-      return null;
-    }
+    const ping = await pingOnce(ep, signal);
+    if (ping?.protocol) protocol = ping.protocol;
+    return ping?.rtt ?? null;
   };
 
   await once(); // connection setup and TLS are not latency
@@ -53,6 +39,101 @@ export async function measureHttpLatency(
     await sleep(25);
   }
   return { samples, lost, protocol };
+}
+
+/**
+ * One GET of /ping: its round trip, the server's own time taken out, and the HTTP version
+ * it went over; null if it failed. Throws only when `signal` aborts it.
+ */
+export async function pingOnce(ep: Endpoint, signal?: AbortSignal, timeoutMs = 3000): Promise<{ rtt: number; protocol: string | null } | null> {
+  const url = ep.url("/ping", { r: nonce() });
+  const ctrl = linked(signal, timeoutMs);
+  const t0 = performance.now();
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+    await res.arrayBuffer();
+    const t1 = performance.now();
+    const entry = await timingFor(url);
+    const protocol = entry?.nextHopProtocol || null;
+    if (entry && entry.requestStart > 0 && entry.responseStart > entry.requestStart) {
+      return { rtt: Math.max(0, entry.responseStart - entry.requestStart - serverTiming(entry)), protocol };
+    }
+    return { rtt: Math.max(0, t1 - t0 - serverTiming(res.headers.get("server-timing"))), protocol };
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    return null;
+  }
+}
+
+/**
+ * How long a new connection takes to open: a WebSocket's TCP connect, TLS handshake and
+ * HTTP upgrade, which browsers always make on a connection of its own. Null if it didn't
+ * open within `timeoutMs`.
+ */
+export function openTime(url: string, timeoutMs = 5000): Promise<number | null> {
+  return new Promise((resolve) => {
+    const t0 = performance.now();
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch {
+      resolve(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      ws.close();
+      resolve(null);
+    }, timeoutMs);
+    ws.onopen = () => {
+      clearTimeout(timer);
+      resolve(performance.now() - t0);
+      ws.close();
+    };
+    ws.onerror = () => {
+      clearTimeout(timer);
+      resolve(null);
+    };
+  });
+}
+
+export interface ResponsivenessProbes {
+  setup: number[]; // new connections: open times
+  lost: number; // new connections that didn't open
+  loaded: number[]; // round trips on the loaded connection
+}
+
+/**
+ * The responsiveness test's probes while a transfer runs (draft-ietf-ippm-responsiveness):
+ * a new connection opened every `everyMs`, and with `loaded` (HTTP/2 or 3, where requests
+ * share the transfer's connection) a GET of /ping on it every `pingMs`.
+ */
+export function responsivenessWhile(ep: Endpoint, loaded: boolean, everyMs = 1000, pingMs = 250): () => ResponsivenessProbes {
+  const probes: ResponsivenessProbes = { setup: [], lost: 0, loaded: [] };
+  let running = true;
+  const every = async (delay: number, period: number, once: () => Promise<void>) => {
+    await sleep(delay);
+    while (running) {
+      const started = performance.now();
+      await once();
+      await sleep(Math.max(0, period - (performance.now() - started)));
+    }
+  };
+  void every(500, everyMs, async () => {
+    const t = await openTime(ep.wsUrl("/ws"));
+    if (!running) return;
+    if (t === null) probes.lost++;
+    else probes.setup.push(t);
+  });
+  if (loaded) {
+    void every(125, pingMs, async () => {
+      const ping = await pingOnce(ep);
+      if (running && ping) probes.loaded.push(ping.rtt);
+    });
+  }
+  return () => {
+    running = false;
+    return probes;
+  };
 }
 
 const PROBE_BYTES = 12; // u32 sequence + f64 send time

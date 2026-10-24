@@ -97,6 +97,47 @@ async def test_control_channel_reports_both_ends_of_the_udp_path(peers):
         await echo.stop()
 
 
+async def test_stamps_on_request(peers):
+    from texas2step.rtc import STAMP, STAMP_AT
+
+    echo = RtcEcho([], max_sessions=4, timeout=60, port_range=RANGE)
+    echo.start()
+    try:
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        peers.append(pc)
+        probe = pc.createDataChannel("probe", ordered=False, maxRetransmits=0)
+        control = pc.createDataChannel("control")
+        await pc.setLocalDescription(await pc.createOffer())
+        answer = await echo.answer(pc.localDescription.sdp)
+
+        opened = asyncio.Event()
+        replies: asyncio.Queue[Any] = asyncio.Queue()
+        echoes: asyncio.Queue[bytes] = asyncio.Queue()
+        control.on("open", opened.set)
+        control.on("message", lambda m: replies.put_nowait(json.loads(m)))
+        probe.on("message", echoes.put_nowait)
+        await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
+        await asyncio.wait_for(opened.wait(), 10)
+
+        body = bytes(range(40))
+        probe.send(body)  # unchanged until asked
+        assert await asyncio.wait_for(echoes.get(), 5) == body
+        control.send(json.dumps({"op": "stamp"}))
+        assert await asyncio.wait_for(replies.get(), 5) == {"op": "stamp"}
+        probe.send(body)
+        stamped = await asyncio.wait_for(echoes.get(), 5)
+        # The client's own header and padding stay; the server's clock and count go between.
+        assert len(stamped) == len(body)
+        assert stamped[:STAMP_AT] == body[:STAMP_AT]
+        assert stamped[STAMP_AT + STAMP.size :] == body[STAMP_AT + STAMP.size :]
+        at, count = STAMP.unpack_from(stamped, STAMP_AT)
+        assert count == 2 and at > 0
+        probe.send(b"short")  # too short to carry a stamp: echoed as it came
+        assert await asyncio.wait_for(echoes.get(), 5) == b"short"
+    finally:
+        await echo.stop()
+
+
 def test_addresses_are_null_before_a_path_exists():
     from texas2step.rtc import Session
 

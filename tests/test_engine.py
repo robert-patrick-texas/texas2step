@@ -49,8 +49,27 @@ async def test_run_all_shape(live_server):
     assert {"latency", "download", "upload", "loss", "bufferbloat"} <= set(r)
     assert r["bufferbloat"]["grade"] is not None
     assert r["responsiveness"]["rpm"] > 0
+    # streams=1: no second, one-stream download
+    assert r["config"]["one_stream"] is False and "one_stream" not in r
     # A call's quality comes from the packet-loss test's round trips.
     assert ("call" in r) == bool(r["loss"].get("packets"))
     # The CLI's own end of the connection the server saw; loopback has no MAC.
     assert r["client"]["local_ip"] == r["client"]["ip"] == "127.0.0.1"
     assert "mac" not in r["client"]
+
+
+async def test_run_all_measures_one_stream_and_responsiveness(live_server):
+    r = await engine.run_all(live_server, seconds=1.5, streams=2, packets=40, interval_ms=5)
+    assert r["config"]["one_stream"] is True
+    assert r["one_stream"]["streams"] == 1 and r["one_stream"]["mbps"] > 0
+    assert r["one_stream"]["loaded_latency"] is None
+    # New connections, timed step by step, during each transfer; one idle before them.
+    assert r["latency"]["setup_ms"] > 0
+    for direction in ("download", "upload"):
+        c = r[direction]["connections"]
+        assert c["tls"] is False and "tls_ms" not in c
+        assert len(c["setup_ms"]) == len(c["tcp_ms"]) == len(c["http_ms"]) >= 1
+    assert r["responsiveness"]["basis"] == "ippm"
+    assert r["responsiveness"]["download"]["loaded_on"] == "own connection"
+    no_one = await engine.run_all(live_server, seconds=1, streams=2, loss=False, one_stream=False)
+    assert "one_stream" not in no_one and no_one["config"]["one_stream"] is False

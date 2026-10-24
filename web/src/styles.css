@@ -1249,7 +1249,7 @@ a.brand-org:hover,
   margin: 22px 0 18px;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 8px;
 }
 
@@ -1770,6 +1770,10 @@ a.brand-org:hover,
   stroke-linecap: round;
 }
 
+.chart-svg .line.dashed {
+  stroke-dasharray: 5 4;
+}
+
 .chart-svg .ref {
   stroke-width: 1;
   opacity: 0.75;
@@ -1832,6 +1836,12 @@ a.brand-org:hover,
   width: 14px;
   height: 2.5px;
   border-radius: 2px;
+}
+
+.legend-key.dash {
+  width: 14px;
+  height: 2.5px;
+  background: repeating-linear-gradient(90deg, var(--key) 0 4px, transparent 4px 7px);
 }
 
 .legend-key.square {

@@ -3,9 +3,11 @@
 Browsers cannot send raw UDP, but a WebRTC data channel opened with
 ``ordered: false, maxRetransmits: 0`` is delivered over SCTP/DTLS/UDP without
 retransmission, so a packet the network drops stays dropped. The client sends
-numbered probes on the ``probe`` channel; we echo each one unchanged and keep
-receive/transmit counters so the client can separate upstream from downstream
-loss by asking on the reliable ``control`` channel.
+numbered probes on the ``probe`` channel; we echo each one and keep receive/transmit
+counters so the client can separate upstream from downstream loss by asking on the
+reliable ``control`` channel. Echoes are unchanged unless the client asks for stamps:
+then each carries the time it arrived here and how many probes had, so the client can
+time each direction and place each loss in one.
 
 By default the OS picks the UDP ports. Given a port range, every host socket of an
 answered session is bound inside it instead, so a firewall can allow exactly that range.
@@ -23,6 +25,7 @@ import logging
 import random
 import secrets
 import socket
+import struct
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -59,6 +62,10 @@ _PORT_RANGE: contextvars.ContextVar[tuple[int, int] | None] = contextvars.Contex
     "rtc_port_range", default=None
 )
 _RCVBUF = 256 * 1024  # the receive buffer aioice gives its own sockets
+# With stamps on, an echo carries the server's clock when the probe arrived (ms) and the
+# probes received so far, this one included, after the client's u32 sequence and f64 time.
+STAMP = struct.Struct("<dI")
+STAMP_AT = 12
 
 
 def _bind_in_range(address: str, ports: tuple[int, int]) -> socket.socket | None:
@@ -171,6 +178,7 @@ class Session:
     rx: int = 0
     tx: int = 0
     rx_bytes: int = 0
+    stamp: bool = False
 
     def counters(self) -> dict[str, int]:
         return {"rx": self.rx, "tx": self.tx, "rx_bytes": self.rx_bytes}
@@ -243,9 +251,14 @@ class RtcEcho:
 
                 @channel.on("message")
                 def on_probe(message: bytes | str) -> None:
+                    now = time.monotonic()
                     session.rx += 1
                     session.rx_bytes += len(message)
-                    session.last_seen = time.monotonic()
+                    session.last_seen = now
+                    end = STAMP_AT + STAMP.size
+                    if session.stamp and isinstance(message, bytes) and len(message) >= end:
+                        stamp = STAMP.pack(now * 1000, session.rx & 0xFFFFFFFF)
+                        message = message[:STAMP_AT] + stamp + message[end:]
                     channel.send(message)
                     session.tx += 1
 
@@ -266,6 +279,9 @@ class RtcEcho:
                     elif op == "reset":
                         session.rx = session.tx = session.rx_bytes = 0
                         channel.send(json.dumps({"op": "reset"}))
+                    elif op == "stamp":
+                        session.stamp = True
+                        channel.send(json.dumps({"op": "stamp"}))
 
         @pc.on("connectionstatechange")
         async def on_state() -> None:

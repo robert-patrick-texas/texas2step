@@ -56,6 +56,24 @@ def test_report_gives_call_quality_and_responsiveness():
         " · from round trips)" in lines
     )
     assert "  Responsiveness      1,500 RPM   (↓ 3,000 · ↑ 1,500, under load)" in lines
+    ippm = {
+        **judged["responsiveness"],
+        "download": {"setup_ms": 40.0},
+        "upload": {"setup_ms": 120.25},
+        "idle_setup_ms": 25.0,
+    }
+    assert (
+        "  Responsiveness      1,500 RPM   (↓ 3,000 · ↑ 1,500"
+        " · a new connection 25.0 ms idle, 120.2 ms under load)"
+        in cli._report({**judged, "responsiveness": ippm}).splitlines()
+    )
+    side = {"mos": 4.4, "rating": "excellent", "longest_gap_ms": 0.0, "late_pct": 0.0}
+    each = {**judged["call"], "basis": "each way", "up": side, "down": {**side, "mos": 4.3}}
+    assert (
+        "  Call quality          4.4 MOS   excellent   (you hear 4.3 · they hear 4.4"
+        " · longest gap ↓ 0 ↑ 0 ms · late ↓ 0.00 % ↑ 0.00 %)"
+        in cli._report({**judged, "call": each}).splitlines()
+    )
     gap = {**judged["call"], "mos_rating": "excellent", "rating": "good", "longest_gap_ms": 140.0}
     lines = cli._report({**judged, "call": gap}).splitlines()
     assert any(
@@ -64,6 +82,17 @@ def test_report_gives_call_quality_and_responsiveness():
         )
         for line in lines
     )
+
+
+def test_report_gives_one_stream_beside_the_download():
+    multi = {"mbps": 800.0, "peak_mbps": 900.0, "streams": 4}
+    one = {"mbps": 200.0, "peak_mbps": 250.0, "streams": 1}
+    lines = cli._report({**RESULT, "download": multi, "one_stream": one}).splitlines()
+    at = next(i for i, line in enumerate(lines) if line.startswith("  Download"))
+    assert lines[at + 1] == (
+        "  One stream         200.0 Mbps   peak 250.0   (a single file copy · 25 % of 4 streams)"
+    )
+    assert not any(line.startswith("  One stream") for line in cli._report(RESULT).splitlines())
 
 
 def test_results_clear(tmp_path, monkeypatch, capsys):

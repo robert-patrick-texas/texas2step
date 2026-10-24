@@ -8,6 +8,7 @@ from texas2step.quality import (
     heard,
     longest_run,
     mos,
+    one_way,
     r_factor,
     rating,
     responsiveness,
@@ -187,3 +188,112 @@ def test_rpm_and_responsiveness():
         "upload_rpm": None,
         "basis": "latency under load",
     }
+
+
+def stamped(n, up=None, down=None, lost_up=(), lost_down=(), offset=1000.0, total=None):
+    """Probes 10 ms apart, each way 5 ms plus `up`/`down` extra, as one_way's inputs; the
+    server's clock runs `offset` ms apart from the client's."""
+    up, down = up or {}, down or {}
+    sent, server, back, counts, had = [], [], [], [], 0
+    for i in range(n):
+        t = i * 10.0
+        sent.append(t)
+        if i in lost_up:
+            server.append(None), back.append(None), counts.append(None)
+            continue
+        had += 1
+        arrive = t + 5 + up.get(i, 0)
+        if i in lost_down:
+            server.append(None), back.append(None), counts.append(None)
+            continue
+        server.append(arrive + offset)
+        back.append(arrive + 5 + down.get(i, 0))
+        counts.append(had)
+    return sent, server, back, counts, had if total is None else total
+
+
+def test_one_way_takes_out_the_clocks_and_places_losses():
+    ways = one_way(*stamped(10, up={3: 70}, down={5: 20}, lost_up={2}, lost_down={7}))
+    assert ways["up_ms"] == [0, 0, None, 70, 0, 0, 0, None, 0, 0]
+    assert ways["down_ms"] == [0, 0, None, 0, 0, 20, 0, None, 0, 0]
+    assert ways["lost_upstream"] == [2]  # 7 reached the server, and its echo was lost
+
+
+def test_one_way_with_losses_at_both_ends():
+    # Lost on the way there before the first echo, and after the last.
+    ways = one_way(*stamped(10, lost_up={0, 1, 9}))
+    assert ways["lost_upstream"] == [0, 1, 9]
+    # One lost each way in the same gap: which went which way can't be told, and the
+    # one lost on the way there is taken to be the first.
+    ways = one_way(*stamped(10, lost_up={9}, lost_down={8}))
+    assert ways["lost_upstream"] == [8]
+    # Without the server's total, the probes after the last echo count as lost there.
+    sent, server, back, counts, _ = stamped(10, lost_down={8, 9})
+    assert one_way(sent, server, back, counts, None)["lost_upstream"] == [8, 9]
+    assert one_way(sent, server, back, counts, 10)["lost_upstream"] == []
+    assert one_way([0.0], [None], [None], [None], 0) is None
+
+
+def test_a_gap_in_one_direction_rates_that_direction():
+    n = 1000
+    ways = one_way(*stamped(n, lost_down=set(range(400, 408))))  # 80 ms gone on the way back
+    loss_result = {**loss([10.0] * n), **ways}
+    for i in range(400, 408):
+        loss_result["packets"][i] = None
+    call = call_quality(loss_result)
+    assert call["basis"] == "each way"
+    assert call["up"]["impaired_pct"] == 0 and call["up"]["rating"] == "excellent"
+    assert call["down"]["longest_gap_ms"] == 80 and call["down"]["rating"] == "good"
+    # The figures at the top are the worse direction's: what you hear.
+    assert call["worse"] == "down"
+    assert call["rating"] == "good" and call["longest_gap_ms"] == 80
+
+
+def test_late_one_way_is_late_only_that_way():
+    n = 500
+    ways = one_way(*stamped(n, up={i: 80 for i in range(0, 500, 10)}))  # 50 late upstream
+    call = call_quality({**loss([10.0] * n), **ways})
+    assert call["up"]["late"] == 50 and call["down"]["late"] == 0
+    assert call["worse"] == "up"
+    assert call["late"] == 50 and call["late_pct"] == 10.0
+
+
+def test_responsiveness_by_the_drafts_method():
+    # The command line times each step of a new connection; over HTTP/1.1 the loaded round
+    # trips are the probes on their own connection beside the load.
+    download = {
+        "connections": {
+            "setup_ms": [30.0] * 20,
+            "tcp_ms": [10.0] * 20,
+            "tls_ms": [10.0] * 19 + [500.0],  # the slowest 5 % left out
+            "http_ms": [10.0] * 20,
+            "lost": 0,
+            "tls": True,
+        },
+        "loaded_latency": {"samples": [20.0] * 40},
+    }
+    # A browser times a new connection as one: its open time is split among its 3 steps.
+    # On HTTP/2 its loaded probes share the transfer's own connection.
+    upload = {
+        "connections": {"setup_ms": [120.0] * 10, "lost": 1, "tls": True},
+        "loaded_latency": {"samples": [20.0] * 40},
+        "loaded_probes": [60.0] * 40,
+    }
+    got = responsiveness({"latency": {"setup_ms": 25.0}, "download": download, "upload": upload})
+    assert got["basis"] == "ippm" and got["idle_setup_ms"] == 25.0
+    assert got["download"] == {
+        "rpm": 4500,  # the mean of 6,000 (10 ms) and 3,000 (20 ms)
+        "foreign_rpm": 6000,
+        "loaded_rpm": 3000,
+        "setup_ms": 30.0,
+        "loaded_ms": 20.0,
+        "loaded_on": "own connection",
+    }
+    assert got["upload"]["foreign_rpm"] == 1500  # 120 ms over 3 steps
+    assert got["upload"]["loaded_rpm"] == 1000  # 60 ms
+    assert got["upload"]["loaded_on"] == "loaded connection"
+    assert got["upload"]["rpm"] == 1250
+    assert (got["rpm"], got["download_rpm"], got["upload_rpm"]) == (1250, 4500, 1250)
+    # Plain HTTP: a new connection takes 2 steps.
+    plain = {"connections": {"setup_ms": [20.0], "lost": 0, "tls": False}}
+    assert responsiveness({"download": plain})["download"]["foreign_rpm"] == 6000

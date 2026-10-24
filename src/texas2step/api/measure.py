@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .. import engine
-from ..store import DIRECTIONS
+from ..store import TRANSFERS
 from ..traffic import INSIDE, LOCAL, OUTSIDE, Closed, TrafficMeter
 
 router = APIRouter(prefix="/api/v1/measure", tags=["measure"])
@@ -43,7 +43,7 @@ class ThroughputRequest(Target):
 class LossRequest(Target):
     packets: int = Field(500, ge=1, le=10_000)
     interval_ms: float = Field(10.0, ge=1, le=1000)
-    size: int = Field(64, ge=12, le=1200)
+    size: int = Field(engine.PROBE_BYTES, ge=12, le=1200)
 
 
 class FullRequest(Target):
@@ -52,6 +52,7 @@ class FullRequest(Target):
     packets: int = Field(500, ge=0, le=10_000)
     interval_ms: float = Field(10.0, ge=1, le=1000)
     loss: bool = True
+    one_stream: bool = True
 
 
 async def _run(
@@ -102,7 +103,7 @@ async def _whose(target: str, meter: TrafficMeter) -> str:
 
 def _count(meter: TrafficMeter, kind: str, result: dict[str, Any]) -> None:
     """This server's side of a test it ran: what it downloaded, it received."""
-    parts = [result] if "direction" in result else [result.get(d) or {} for d in DIRECTIONS]
+    parts = [result] if "direction" in result else [result.get(d) or {} for d in TRANSFERS]
     for part in parts:
         moved = part.get("bytes")
         if not isinstance(moved, int | float):
@@ -168,6 +169,7 @@ async def full(body: FullRequest, request: Request) -> dict[str, Any]:
             body.packets,
             body.interval_ms,
             loss=body.loss and body.packets > 0,
+            one_stream=body.one_stream,
         ),
         moves=True,
     )

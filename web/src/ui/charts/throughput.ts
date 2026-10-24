@@ -1,4 +1,5 @@
-// Throughput over time: download and upload on one Mbps axis, ramp-up shaded.
+// Throughput over time: download, upload and one stream's download on one Mbps axis,
+// ramp-up shaded.
 import type { Direction } from "../../types";
 import { clear, h, onResize, pointerIn, s } from "../dom";
 import { mbpsTick, rate, text } from "../format";
@@ -13,35 +14,32 @@ export interface ThroughputSeries {
   stable: number | null; // null while still running
 }
 
-const LABEL: Record<Direction, string> = { download: "Download", upload: "Upload" };
-const COLOR: Record<Direction, string> = { download: "var(--dl)", upload: "var(--ul)" };
+export type Series = Direction | "one";
+
+const LABEL: Record<Series, string> = { download: "Download", upload: "Upload", one: "One stream" };
+const COLOR: Record<Series, string> = { download: "var(--dl)", upload: "var(--ul)", one: "var(--dl)" };
+const ORDER: Series[] = ["download", "one", "upload"]; // for the stable rates' labels
 const LABEL_STEP = 15; // baseline to baseline for the 12px direct labels
 const LABEL_TOP = 11; // the highest baseline that keeps a label inside the chart
 
 export class ThroughputChart {
   readonly el: HTMLElement;
   private plot: HTMLElement;
-  private data: Partial<Record<Direction, ThroughputSeries>> = {};
+  private key: HTMLElement;
+  private data: Partial<Record<Series, ThroughputSeries>> = {};
   private width = 0;
 
   constructor() {
     this.plot = h("div", { class: "chart-plot", role: "img", "aria-label": "Throughput over time" });
-    this.el = h(
-      "div",
-      { class: "chart" },
-      legend([
-        { label: "Download", color: COLOR.download, shape: "line" },
-        { label: "Upload", color: COLOR.upload, shape: "line" },
-      ]),
-      this.plot,
-    );
+    this.key = h("div", {});
+    this.el = h("div", { class: "chart" }, this.key, this.plot);
     onResize(this.plot, (w) => {
       this.width = w;
       this.render();
     });
   }
 
-  set(direction: Direction, series: ThroughputSeries | undefined): void {
+  set(direction: Series, series: ThroughputSeries | undefined): void {
     if (series) this.data[direction] = series;
     else delete this.data[direction];
     this.render();
@@ -53,11 +51,18 @@ export class ThroughputChart {
   }
 
   private render(): void {
+    this.key.replaceChildren(
+      legend([
+        { label: "Download", color: COLOR.download, shape: "line" },
+        ...(this.data.one ? [{ label: "One stream", color: COLOR.one, shape: "dash" as const }] : []),
+        { label: "Upload", color: COLOR.upload, shape: "line" },
+      ]),
+    );
     const W = this.width;
     if (!W) return;
     const H = 210;
     const m = { top: 16, right: 16, bottom: 30, left: 52 };
-    const series = (Object.entries(this.data) as [Direction, ThroughputSeries][]).filter(([, d]) => d.timeline.length || d.stable !== null);
+    const series = ORDER.filter((k) => this.data[k]).map((k): [Series, ThroughputSeries] => [k, this.data[k]!]).filter(([, d]) => d.timeline.length || d.stable !== null);
     const duration = Math.max(1, ...series.map(([, d]) => d.durationS));
     const peak = Math.max(1, ...series.flatMap(([, d]) => d.timeline));
     const x = linear(0, duration, m.left, W - m.right);
@@ -78,12 +83,13 @@ export class ThroughputChart {
       svg.append(s("line", { x1: m.left, x2: W - m.right, y1: y(0), y2: y(0), class: "baseline" }));
     }
 
-    const labels: { dir: Direction; y: number; label: string }[] = [];
+    const labels: { dir: Series; y: number; label: string }[] = [];
     for (const [dir, d] of series) {
       const pts = d.timeline.map((v, i): [number, number] => [x(((i + 0.5) * d.binMs) / 1000), y(v)]);
       if (pts.length) {
-        svg.append(s("path", { d: areaPath(pts, y(0)), class: "area", style: `fill:${COLOR[dir]}` }));
-        svg.append(s("path", { d: linePath(pts), class: "line", style: `stroke:${COLOR[dir]}` }));
+        // One stream is a dashed line over the download's area, without one of its own.
+        if (dir !== "one") svg.append(s("path", { d: areaPath(pts, y(0)), class: "area", style: `fill:${COLOR[dir]}` }));
+        svg.append(s("path", { d: linePath(pts), class: dir === "one" ? "line dashed" : "line", style: `stroke:${COLOR[dir]}` }));
       }
       if (d.stable !== null && d.stable > 0) {
         const sy = y(d.stable);
@@ -91,14 +97,18 @@ export class ThroughputChart {
         labels.push({ dir, y: sy - 7, label: `${LABEL[dir]} ${text(rate(d.stable))}` });
       }
     }
-    // Each stable rate is labelled just above its line, Download first. Upload, when its
-    // label would overlap Download's, stacks above it, or below Download's line if the
-    // chart has no room above.
+    // Each stable rate is labelled just above its line, Download first. A later label that
+    // would overlap one already placed stacks above it, or below if the chart has no room.
     const placed: number[] = [];
-    const first = (l: (typeof labels)[number]) => (l.dir === "download" ? 0 : 1);
+    const first = (l: (typeof labels)[number]) => ORDER.indexOf(l.dir);
+    const clashing = (y: number) => placed.find((p) => Math.abs(y - p) < LABEL_STEP);
     for (const l of labels.sort((a, b) => first(a) - first(b))) {
-      const near = placed.find((p) => Math.abs(l.y - p) < LABEL_STEP);
-      const ly = near === undefined ? l.y : near - LABEL_STEP >= LABEL_TOP ? near - LABEL_STEP : near + LABEL_STEP + 4;
+      let ly = l.y;
+      for (let near = clashing(ly); near !== undefined; near = clashing(ly)) ly = near - LABEL_STEP;
+      if (ly < LABEL_TOP) {
+        ly = l.y;
+        for (let near = clashing(ly); near !== undefined; near = clashing(ly)) ly = near + LABEL_STEP + 4;
+      }
       placed.push(ly);
       svg.append(s("text", { x: W - m.right - 4, y: ly, class: "direct-label", "text-anchor": "end" }, l.label));
     }

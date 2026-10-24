@@ -13,12 +13,13 @@ import contextvars
 import itertools
 import json
 import secrets
+import ssl
 import struct
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 
@@ -28,6 +29,8 @@ from .stats import bufferbloat_grade, summarize, summarize_throughput
 API = "/api/v1"
 BIN_MS = 100
 PROBE = struct.Struct("<Id")  # sequence number, sender clock (ms)
+STAMP = struct.Struct("<dI")  # with stamps on: the server's clock on arrival (ms), its count
+PROBE_BYTES = 200  # at least a voice packet: a path that can't carry these can't carry calls
 USER_AGENT = f"texas2step-engine/{__version__}"
 
 Progress = Callable[[str, dict[str, Any]], Awaitable[None] | None]
@@ -125,6 +128,85 @@ async def measure_latency(
     return summarize(samples, lost)
 
 
+async def new_connection(base: str, limit: float = 5.0) -> dict[str, float] | None:
+    """Time a new connection's steps, in ms: the TCP connect, the TLS handshake (https
+    only) and a first request, as the IETF's responsiveness draft does. None if one failed."""
+    url = urlsplit(base)
+    tls = url.scheme == "https"
+    host = url.hostname or ""
+    path = f"{url.path.rstrip('/')}{API}/ping"
+    if PASS.get():
+        path += "?" + urlencode({"pass": PASS.get()})
+    request = (
+        f"GET {path} HTTP/1.1\r\nHost: {url.netloc}\r\nUser-Agent: {USER_AGENT}\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode()
+    try:
+        async with asyncio.timeout(limit):
+            t0 = time.perf_counter()
+            reader, writer = await asyncio.open_connection(host, url.port or (443 if tls else 80))
+            t1 = time.perf_counter()
+            try:
+                if tls:
+                    await writer.start_tls(ssl.create_default_context(), server_hostname=host)
+                t2 = time.perf_counter()
+                writer.write(request)
+                await writer.drain()
+                status = await reader.readline()
+                t3 = time.perf_counter()
+            finally:
+                writer.close()
+                with contextlib.suppress(Exception):
+                    await writer.wait_closed()
+    except (OSError, TimeoutError):
+        return None
+    if not status.startswith(b"HTTP/"):
+        return None
+    steps = {"tcp": (t1 - t0) * 1000, "http": (t3 - t2) * 1000}
+    return steps | {"tls": (t2 - t1) * 1000} if tls else steps
+
+
+class _NewConnections:
+    """New connections opened while a transfer runs, one a second: the responsiveness
+    test's probes away from the load."""
+
+    def __init__(self, base: str, every: float = 1.0) -> None:
+        self.base = base
+        self.every = every
+        self.found: list[dict[str, float]] = []
+        self.lost = 0
+
+    async def run(self, stop: asyncio.Event) -> None:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), 0.5)
+        while not stop.is_set():
+            started = time.perf_counter()
+            steps = await new_connection(self.base)
+            if stop.is_set():
+                break
+            if steps:
+                self.found.append(steps)
+            else:
+                self.lost += 1
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(
+                    stop.wait(), max(0, self.every - (time.perf_counter() - started))
+                )
+
+    def summary(self) -> dict[str, Any]:
+        tls = urlsplit(self.base).scheme == "https"
+        out: dict[str, Any] = {
+            "setup_ms": [round(sum(s.values()), 3) for s in self.found],
+            "tcp_ms": [round(s["tcp"], 3) for s in self.found],
+            "http_ms": [round(s["http"], 3) for s in self.found],
+            "lost": self.lost,
+            "tls": tls,
+        }
+        if tls:
+            out["tls_ms"] = [round(s["tls"], 3) for s in self.found]
+        return out
+
+
 class _WsProber:
     """RTT probes over a dedicated WebSocket, used to measure latency under load."""
 
@@ -185,6 +267,7 @@ async def _throughput(
     per_stream = [0] * streams
     stop = asyncio.Event()
     prober = _WsProber(base) if loaded_latency else None
+    connections = _NewConnections(base) if loaded_latency else None
     test = TEST.get() or secrets.token_hex(8)
 
     async with _client(streams, timeout=seconds + 10) as client:
@@ -241,6 +324,8 @@ async def _throughput(
         side = [asyncio.create_task(ticker())]
         if prober:
             side.append(asyncio.create_task(prober.run(stop)))
+        if connections:
+            side.append(asyncio.create_task(connections.run(stop)))
         try:
             results = await asyncio.gather(
                 *(worker(i) for i in range(streams)), return_exceptions=True
@@ -261,6 +346,8 @@ async def _throughput(
         "per_stream_mbps": [b * 8 / (elapsed * 1e6) for b in per_stream],
         "loaded_latency": prober.summary() if prober else None,
     }
+    if connections:
+        out["connections"] = connections.summary()
     return out
 
 
@@ -291,11 +378,12 @@ async def measure_loss(
     target: str,
     packets: int = 500,
     interval_ms: float = 10.0,
-    size: int = 64,
+    size: int = PROBE_BYTES,
     wait_ms: float = 2000.0,
     progress: Progress | None = None,
 ) -> dict[str, Any]:
-    """Send numbered UDP probes over an unreliable data channel and count the echoes."""
+    """Send numbered UDP probes over an unreliable data channel and count the echoes. A
+    server that stamps its echoes also gives each direction's delays and losses."""
     from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
 
     base = _base(target)
@@ -303,15 +391,22 @@ async def measure_loss(
     pad = bytes(size - PROBE.size)
     sent_at: dict[int, float] = {}
     rtts: list[float | None] = [None] * packets
+    server: list[float | None] = [None] * packets
+    back: list[float | None] = [None] * packets
+    counts: list[int | None] = [None] * packets
+    stamped = False
     order: list[int] = []
     duplicates = 0
     loop = asyncio.get_running_loop()
     opened = asyncio.Event()
+    control_opened = asyncio.Event()
     all_back = asyncio.Event()
     control_reply: asyncio.Future[dict[str, Any]] = loop.create_future()
+    stamp_reply: asyncio.Future[dict[str, Any]] = loop.create_future()
 
     async with _client() as client:
         info = (await client.get(f"{base}{API}/info")).json()
+    stamps = size >= PROBE.size + STAMP.size and info.get("capabilities", {}).get("stamps")
     ice = [RTCIceServer(urls=s["urls"]) for s in info.get("ice_servers", [])]
     pc = RTCPeerConnection(RTCConfiguration(iceServers=ice))  # never the implicit public STUN
     probe = pc.createDataChannel("probe", ordered=False, maxRetransmits=0)
@@ -326,16 +421,24 @@ async def measure_loss(
         nonlocal duplicates
         if not isinstance(message, bytes) or len(message) < PROBE.size:
             return
+        now = time.perf_counter() * 1000
         seq, _ = PROBE.unpack_from(message)
         if seq >= packets or seq not in sent_at:
             return
         if rtts[seq] is not None:
             duplicates += 1
             return
-        rtts[seq] = (time.perf_counter() * 1000) - sent_at[seq]
+        rtts[seq] = now - sent_at[seq]
+        back[seq] = now
+        if stamped and len(message) >= PROBE.size + STAMP.size:
+            server[seq], counts[seq] = STAMP.unpack_from(message, PROBE.size)
         order.append(seq)
         if len(order) == packets:
             all_back.set()
+
+    @control.on("open")
+    def _on_control_open() -> None:
+        control_opened.set()
 
     @control.on("message")
     def _on_control(message: bytes | str) -> None:
@@ -343,6 +446,8 @@ async def measure_loss(
             reply = json.loads(message)
             if reply.get("op") == "stats" and not control_reply.done():
                 control_reply.set_result(reply)
+            elif reply.get("op") == "stamp" and not stamp_reply.done():
+                stamp_reply.set_result(reply)
 
     try:
         await pc.setLocalDescription(await pc.createOffer())
@@ -355,6 +460,11 @@ async def measure_loss(
             answer = r.json()
         await pc.setRemoteDescription(RTCSessionDescription(sdp=answer["sdp"], type="answer"))
         await asyncio.wait_for(opened.wait(), timeout=10)
+        if stamps:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(control_opened.wait(), timeout=2)
+                control.send(json.dumps({"op": "stamp"}))
+                stamped = bool(await asyncio.wait_for(stamp_reply, timeout=2))
 
         start = time.perf_counter()
         for seq in range(packets):
@@ -374,13 +484,19 @@ async def measure_loss(
 
         control.send(json.dumps({"op": "stats"}))
         try:
-            server = await asyncio.wait_for(control_reply, timeout=3)
+            server_counts = await asyncio.wait_for(control_reply, timeout=3)
         except TimeoutError:
-            server = None
+            server_counts = None
     finally:
         await pc.close()
 
-    return loss_summary(rtts, order, duplicates, server, "webrtc", interval_ms, size)
+    result = loss_summary(rtts, order, duplicates, server_counts, "webrtc", interval_ms, size)
+    if stamped:
+        sent = [sent_at.get(i, 0.0) for i in range(packets)]
+        total = server_counts["rx"] if server_counts else None
+        if ways := quality.one_way(sent, server, back, counts, total):
+            result |= ways
+    return result
 
 
 def loss_summary(
@@ -430,11 +546,14 @@ async def run_all(
     loss: bool = True,
     progress: Progress | None = None,
     local: bool = False,
+    one_stream: bool = True,
 ) -> dict[str, Any]:
     """A full test toward ``target``. With ``local``, the result also gives this host's
     own address on the connection the server saw, as the socket was bound, and the MAC
     of the NIC the kernel routes it out of (the CLI's; a server measuring for an API
-    caller keeps them to itself)."""
+    caller keeps them to itself). With ``one_stream``, one stream's download follows the
+    download, unless the test already uses one."""
+    one_stream = one_stream and streams > 1
     base = _base(target)
     started = datetime.now(UTC)
     async with _client() as client:
@@ -461,6 +580,7 @@ async def run_all(
             "seconds": seconds,
             "packets": packets if loss else 0,
             "interval_ms": interval_ms,
+            "one_stream": one_stream,
         },
     }
     if mine:
@@ -468,9 +588,19 @@ async def run_all(
         if mac := await asyncio.to_thread(iface.mac_of, mine[0], theirs[0] if theirs else None):
             result["client"] |= {"mac": mac, "mac_source": "nic"}
     result["latency"] = await measure_latency(base, progress=progress)
+    if steps := await new_connection(base):  # what a new connection costs, idle
+        result["latency"]["setup_ms"] = round(sum(steps.values()), 3)
     test = TEST.set(secrets.token_hex(8))  # one test: the upload goes on if the download did
     try:
         result["download"] = await measure_download(base, seconds, streams, progress=progress)
+        if one_stream:  # what a single file copy gets
+
+            async def one(_: str, data: dict[str, Any]) -> None:
+                await _emit(progress, "1 stream", data)
+
+            result["one_stream"] = await measure_download(
+                base, seconds, 1, loaded_latency=False, progress=one if progress else None
+            )
         result["upload"] = await measure_upload(base, seconds, streams, progress=progress)
     finally:
         TEST.reset(test)

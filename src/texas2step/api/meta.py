@@ -71,6 +71,8 @@ async def info(request: Request) -> dict[str, Any]:
         "capabilities": {
             "websocket": True,
             "webrtc": s.webrtc_enabled and rtc.AVAILABLE,
+            # The UDP probe's echoes can carry the server's stamps (docs/api.md).
+            "stamps": s.webrtc_enabled and rtc.AVAILABLE,
             "results": s.results_enabled,
             "measure": s.measure_enabled,
         },

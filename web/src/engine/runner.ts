@@ -1,7 +1,7 @@
-// Orchestrates a full test: idle latency → download → upload → packet loss.
-import type { Direction, LatencyStats, ServerInfo, TestResult, ThroughputResult, WhoAmI } from "../types";
+// Orchestrates a full test: idle latency → download → one stream → upload → packet loss.
+import type { Direction, LatencyStats, NewConnections, ServerInfo, TestResult, ThroughputResult, WhoAmI } from "../types";
 import { eui64Mac } from "./addr";
-import { measureHttpLatency, probeWhile, WsProber } from "./latency";
+import { measureHttpLatency, probeWhile, responsivenessWhile, WsProber } from "./latency";
 import { measureLossRtc, measureLossWs, RtcProbe } from "./loss";
 import { clearTimings, type Endpoint, nonce } from "./net";
 import { callQuality, responsiveness } from "./quality";
@@ -9,20 +9,21 @@ import { bufferbloat, readiness } from "./scores";
 import { summarize, summarizeThroughput } from "./stats";
 import { BIN_MS, type LiveThroughput, measureDownload, measureUpload } from "./throughput";
 
-export type Phase = "latency" | "download" | "upload" | "loss";
-export const PHASES: Phase[] = ["latency", "download", "upload", "loss"];
+export type Phase = "latency" | "download" | "one" | "upload" | "loss";
+export const PHASES: Phase[] = ["latency", "download", "one", "upload", "loss"];
 
 export interface RunConfig {
   streams: number;
   seconds: number;
   packets: number;
   intervalMs: number;
+  oneStream: boolean; // after the download, one stream's: skipped when the test uses one
 }
 
 export interface RunEvents {
   phase(phase: Phase): void;
   latency(kind: "idle" | Direction, rtt: number): void;
-  throughput(direction: Direction, live: LiveThroughput): void;
+  throughput(direction: Direction | "one", live: LiveThroughput): void;
   packetSent(seq: number): void;
   packetEcho(seq: number, rtt: number): void;
   partial(result: TestResult): void;
@@ -43,6 +44,7 @@ export function uiVersion(): string {
 export class TestRun {
   private ctrl = new AbortController();
   private readonly test = nonce(); // sent with each transfer, so a traffic limit lets it finish
+  private multiplexed = false; // HTTP/2 or 3: a request shares the transfer's connection
   readonly result: TestResult;
 
   constructor(
@@ -69,6 +71,7 @@ export class TestRun {
         seconds: config.seconds,
         packets: config.packets,
         interval_ms: config.intervalMs,
+        one_stream: config.oneStream && config.streams > 1,
       },
     };
   }
@@ -92,10 +95,13 @@ export class TestRun {
       const idle = await measureHttpLatency(this.ep, 20, (rtt) => this.on.latency("idle", rtt), signal);
       r.latency = summarize(idle.samples, idle.lost);
       if (idle.protocol) r.client.protocol = idle.protocol;
+      this.multiplexed = /^h[23]$/i.test(idle.protocol ?? "");
       this.on.partial(r);
       clearTimings();
 
-      await prober.open(this.ep.wsUrl("/ws"));
+      // Opening the probe's own connection, idle, is what each new connection costs.
+      const opening = performance.now();
+      if (await prober.open(this.ep.wsUrl("/ws"))) r.latency.setup_ms = performance.now() - opening;
       for (const direction of ["download", "upload"] as const) {
         if (signal.aborted) break;
         this.on.phase(direction);
@@ -104,6 +110,12 @@ export class TestRun {
         this.judge();
         this.on.partial(r);
         clearTimings();
+        if (direction === "download" && r.config.one_stream && !signal.aborted) {
+          this.on.phase("one");
+          r.one_stream = await this.oneStream(signal);
+          this.on.partial(r);
+          clearTimings();
+        }
       }
 
       if (this.config.packets > 0 && !signal.aborted) {
@@ -136,6 +148,7 @@ export class TestRun {
     const { seconds, streams } = this.config;
     const limits = this.info.limits;
     const stopProbe = prober.ready ? probeWhile(prober, 250, (rtt) => this.on.latency(direction, rtt)) : null;
+    const stopResponsiveness = responsivenessWhile(this.ep, this.multiplexed);
     const measure = direction === "download" ? measureDownload : measureUpload;
     const raw = await measure(this.ep, {
       seconds,
@@ -146,13 +159,38 @@ export class TestRun {
       onTick: (live) => this.on.throughput(direction, live),
     });
     const loaded = stopProbe?.();
+    const probes = stopResponsiveness();
     const loadedStats: LatencyStats | null = loaded?.samples.length ? summarize(loaded.samples, loaded.lost) : null;
+    const rounded = (values: number[]) => values.map((v) => Math.round(v * 1000) / 1000);
+    const connections: NewConnections = { setup_ms: rounded(probes.setup), lost: probes.lost, tls: this.ep.base.startsWith("https:") };
     return {
       direction,
       ...summarizeThroughput(raw.bins, BIN_MS, seconds),
       streams,
       per_stream_mbps: raw.perStream.map((b) => (b * 8) / (raw.elapsed * 1e6)),
       loaded_latency: loadedStats,
+      connections,
+      ...(probes.loaded.length ? { loaded_probes: rounded(probes.loaded) } : {}),
+    };
+  }
+
+  /** One stream's download, for the same time: what a single file copy gets. */
+  private async oneStream(signal: AbortSignal): Promise<ThroughputResult> {
+    const { seconds } = this.config;
+    const raw = await measureDownload(this.ep, {
+      seconds,
+      streams: 1,
+      maxBytes: this.info.limits.max_download_bytes,
+      test: this.test,
+      signal,
+      onTick: (live) => this.on.throughput("one", live),
+    });
+    return {
+      direction: "download",
+      ...summarizeThroughput(raw.bins, BIN_MS, seconds),
+      streams: 1,
+      per_stream_mbps: raw.perStream.map((b) => (b * 8) / (raw.elapsed * 1e6)),
+      loaded_latency: null,
     };
   }
 
@@ -160,8 +198,9 @@ export class TestRun {
     const opts = {
       packets: this.config.packets,
       intervalMs: this.config.intervalMs,
-      size: 64,
+      size: 200, // at least a voice packet: a path that can't carry these can't carry calls
       waitMs: 2000,
+      stamps: this.info.capabilities.stamps === true,
       signal,
       onSent: (seq: number) => this.on.packetSent(seq),
       onEcho: (seq: number, rtt: number) => this.on.packetEcho(seq, rtt),

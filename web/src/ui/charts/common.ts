@@ -67,7 +67,7 @@ export function hashJitter(i: number): number {
   return (x - Math.floor(x)) * 2 - 1;
 }
 
-export function legend(items: { label: string; color: string; shape: "line" | "square" }[]): HTMLElement {
+export function legend(items: { label: string; color: string; shape: "line" | "dash" | "square" }[]): HTMLElement {
   const el = document.createElement("div");
   el.className = "legend";
   for (const item of items) {

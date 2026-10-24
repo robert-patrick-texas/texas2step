@@ -2,7 +2,7 @@
 import { appPath, Refused, REFUSED, routeOf } from "../../engine/net";
 import { callQuality, responsiveness } from "../../engine/quality";
 import { type Phase, PHASES, type RunEvents, TestRun } from "../../engine/runner";
-import type { CallQuality, CallRating, Direction, Level, Readiness, Responsiveness, TestResult, ThroughputResult } from "../../types";
+import type { CallQuality, CallRating, CallSide, Direction, Level, Readiness, Responsiveness, ResponsivenessSide, TestResult, ThroughputResult } from "../../types";
 import type { App, Settings, View } from "../app";
 import { LatencyChart } from "../charts/latency";
 import { PacketGrid } from "../charts/packets";
@@ -16,6 +16,7 @@ import { LinkView } from "../link";
 const PHASE_LABEL: Record<Phase, string> = {
   latency: "Latency",
   download: "Download",
+  one: "One stream",
   upload: "Upload",
   loss: "Packet loss",
 };
@@ -72,6 +73,15 @@ const RATING: Record<CallRating, string> = {
   bad: "Bad",
 };
 
+/** Whether a gap a caller would hear rated this call below its score's own rating. */
+const gapped = (c: CallSide) => c.rating !== (c.mos_rating ?? c.rating);
+
+/** A call's rating in words, and why when a gap lowered it. */
+const rated = (c: CallSide) => (gapped(c) ? `${RATING[c.rating].toLowerCase()} for its gap (the score alone: ${RATING[c.mos_rating].toLowerCase()})` : RATING[c.rating].toLowerCase());
+
+/** Each direction's figure, what you hear first: "↓ 0 · ↑ 2". */
+const ways = (call: CallQuality, f: (side: CallSide) => string) => `↓ ${f(call.down!)} · ↑ ${f(call.up!)}`;
+
 const USE_ICON: Record<Readiness["id"], string> = {
   streaming: "M3 5h18v12H3zM8 21h8M10 8.5v5l4.5-2.5z",
   calls: "M3 7h12v10H3zM15 10.5l6-3.5v10l-6-3.5",
@@ -95,7 +105,7 @@ export class TestView implements View {
   private link!: LinkView;
   private rail!: HTMLElement;
   private status!: HTMLElement;
-  private tiles!: Record<"download" | "upload" | "latency" | "jitter" | "loss" | "bloat" | "call" | "rpm", Tile>;
+  private tiles!: Record<"download" | "upload" | "latency" | "jitter" | "loss" | "bloat" | "call" | "rpm" | "one", Tile>;
   private throughput!: ThroughputChart;
   private latency!: LatencyChart;
   private packets!: PacketGrid;
@@ -134,6 +144,7 @@ export class TestView implements View {
       bloat: tile("bloat", "Under load"),
       call: tile("call", "Call quality"),
       rpm: tile("rpm", "Responsiveness"),
+      one: tile("one", "One stream", "var(--dl)"),
     };
     this.banner = h("div", { class: "banner", hidden: true });
     this.options = this.renderOptions();
@@ -166,7 +177,7 @@ export class TestView implements View {
       h(
         "div",
         { class: "grid" },
-        card("Throughput", "Aggregate rate across parallel streams, sampled every 100 ms. The stable figure excludes TCP ramp-up.", this.throughput.el, "span-2"),
+        card("Throughput", "Aggregate rate across parallel streams, and one stream's (dashed), sampled every 100 ms. The stable figure excludes TCP ramp-up.", this.throughput.el, "span-2"),
         card("Latency", "Round-trip time idle (HTTP) and under load (WebSocket probes during each transfer). Growth under load is bufferbloat.", this.latency.el),
         card("Packet loss", "Numbered UDP probes over an unreliable WebRTC data channel, echoed by the server. Each square is one packet.", h("div", { class: "packet-body" }, this.packets.el, this.packetStats)),
         card("Parallel streams", "How evenly concurrent flows shared the path.", this.streams.el),
@@ -218,6 +229,7 @@ export class TestView implements View {
         seg("seconds", "Duration", [[5, "5 s"], [10, "10 s"], [15, "15 s"], [20, "20 s"]], "Length of each of the download and upload phases."),
         seg("packets", "UDP probes", [[0, "Skip"], [200, "200"], [500, "500"], [1000, "1000"]], "Packets sent in the loss test."),
         seg("intervalMs", "Probe spacing", [[5, "5 ms"], [10, "10 ms"], [20, "20 ms"]], "Time between UDP probes."),
+        seg("oneStream", "One stream", [[true, "Download"], [false, "Skip"]], "After the download, one stream for the same time: what a single file copy gets. Skipped when the test uses one stream."),
       ),
     );
   }
@@ -289,7 +301,7 @@ export class TestView implements View {
     this.showingSaved = false;
     this.describeEndpoints();
     this.renderResult(null);
-    const { streams, seconds, packets, intervalMs } = app.settings;
+    const { streams, seconds, packets, intervalMs, oneStream } = app.settings;
     this.packets.reset(packets);
     this.options.removeAttribute("open");
 
@@ -304,9 +316,9 @@ export class TestView implements View {
         }
       },
       throughput: (dir, live) => {
-        this.gauge.set(live.mbps, dir);
+        this.gauge.set(live.mbps, dir === "one" ? "download" : dir);
         this.link.setRate(live.mbps);
-        this.link.setLabel(`${dir === "download" ? "↓" : "↑"} ${text(rate(live.mbps))}`);
+        this.link.setLabel(`${dir === "upload" ? "↑" : "↓"} ${text(rate(live.mbps))}`);
         put(this.tiles[dir], rate(live.mbps), `${live.elapsed.toFixed(1)} s of ${seconds} s`);
         this.throughput.set(dir, { timeline: live.timeline, binMs: 100, warmupS: 0, durationS: seconds, stable: null });
       },
@@ -322,7 +334,7 @@ export class TestView implements View {
       partial: (r) => this.renderResult(r, true),
     };
 
-    this.run = new TestRun(app.ep, app.info, app.whoami, { streams, seconds, packets, intervalMs }, events);
+    this.run = new TestRun(app.ep, app.info, app.whoami, { streams, seconds, packets, intervalMs, oneStream }, events);
     this.gauge.setRunning(true);
     this.gauge.button.setAttribute("aria-label", "Stop test");
     let result: TestResult | null = null;
@@ -362,14 +374,15 @@ export class TestView implements View {
     const say: Record<Phase, string> = {
       latency: "Measuring idle round-trip time…",
       download: "Downloading in parallel streams; probing latency under load…",
+      one: "Downloading over one stream, as a single file copy does…",
       upload: "Uploading; probing latency under load…",
       loss: "Sending numbered UDP probes…",
     };
     setText(this.status, say[p]);
     this.gauge.setCaption(PHASE_LABEL[p]);
-    if (p === "download" || p === "upload") this.gauge.set(0, p);
+    if (p === "download" || p === "upload" || p === "one") this.gauge.set(0, p === "one" ? "download" : p);
     else this.gauge.set(0, p === "latency" ? "latency" : "loss");
-    this.link.setMode(p, p === "latency" ? "round trips" : p === "loss" ? "UDP probes" : "");
+    this.link.setMode(p === "one" ? "download" : p, p === "latency" ? "round trips" : p === "loss" ? "UDP probes" : p === "one" ? "one stream" : "");
   }
 
   private async save(result: TestResult): Promise<void> {
@@ -450,6 +463,19 @@ export class TestView implements View {
       this.streams.set(dir, t.per_stream_mbps);
       railValue(dir, text(rate(t.mbps)));
     }
+    const one = r.one_stream;
+    if (one) {
+      const multi = r.download?.mbps;
+      const share = multi ? `${Math.round((one.mbps / multi) * 100)} % of ${r.download!.streams} streams · ` : "";
+      put(this.tiles.one, rate(one.mbps), `${share}peak ${text(rate(one.peak_mbps))}`);
+      this.tiles.one.el.title = "One stream's download, after the download over several: what a single file copy, backup or remote-desktop session gets.";
+      this.throughput.set("one", { timeline: one.timeline, binMs: one.bin_ms, warmupS: one.warmup_s, durationS: one.duration_s, stable: one.mbps });
+      railValue("one", text(rate(one.mbps)));
+    } else if (!partial) {
+      railValue("one", "");
+      const why = r.config.streams === 1 ? "the test used one stream" : r.config.one_stream === false ? "skipped" : "not measured";
+      put(this.tiles.one, { value: "—", unit: "" }, why);
+    }
     const bloat = r.bufferbloat;
     if (bloat?.grade) {
       const worst = Math.max(bloat.added_download_ms ?? -Infinity, bloat.added_upload_ms ?? -Infinity);
@@ -482,18 +508,23 @@ export class TestView implements View {
     put(this.tiles.call, { value: call.mos.toFixed(1), unit: "MOS" });
     const chip = h("span", { class: "grade", "data-rating": call.rating }, RATING[call.rating]);
     const seconds = (call.packets * call.interval_ms) / 1000;
+    const each = call.basis === "each way" && call.up && call.down;
+    const where = each ? (call.worse === "up" ? " ↑" : " ↓") : "";
     // A gap a caller would hear lowers the rating below the score's own; say which gap.
-    const down = call.rating !== (call.mos_rating ?? call.rating);
-    this.tiles.call.sub.replaceChildren(chip, down ? ` ${call.longest_gap_ms.toLocaleString()} ms gap` : ` ${seconds.toLocaleString()} s snapshot`);
-    this.tiles.call.el.title = down
-      ? `The E-model scores this ${RATING[call.mos_rating].toLowerCase()}, but its longest gap, ${call.longest_gap_ms} ms, is long enough for a caller to hear, so it is rated ${RATING[call.rating].toLowerCase()}.`
-      : `A G.711 voice call scored with the ITU-T E-model, over the packet-loss test's ${seconds.toLocaleString()} seconds.`;
+    let sub = ` ${seconds.toLocaleString()} s snapshot`;
+    if (gapped(call)) sub = ` ${call.longest_gap_ms.toLocaleString()} ms gap${where}`;
+    else if (each) sub = ` ${ways(call, (c) => c.mos.toFixed(1))}`;
+    this.tiles.call.sub.replaceChildren(chip, sub);
+    const about = each ? `You hear ${call.down!.mos.toFixed(1)} (${rated(call.down!)}); the other end hears ${call.up!.mos.toFixed(1)} (${rated(call.up!)}).` : gapped(call) ? `The E-model scores this ${RATING[call.mos_rating].toLowerCase()}, but its longest gap, ${call.longest_gap_ms} ms, is long enough for a caller to hear, so it is rated ${RATING[call.rating].toLowerCase()}.` : "";
+    this.tiles.call.el.title = `A G.711 voice call scored with the ITU-T E-model, over the packet-loss test's ${seconds.toLocaleString()} seconds. ${about}`.trim();
   }
 
   private renderRpm(rpm: Responsiveness): void {
     const n = (v: number | null) => (v === null ? "—" : v.toLocaleString());
     put(this.tiles.rpm, { value: n(rpm.rpm), unit: "RPM" }, `↓ ${n(rpm.download_rpm)} · ↑ ${n(rpm.upload_rpm)}`);
-    this.tiles.rpm.el.title = "Round trips per minute under load, as the IETF's responsiveness measure counts them: higher is better. The slower direction's.";
+    const setups = [rpm.download, rpm.upload].filter((s): s is ResponsivenessSide => !!s).map((s) => s.setup_ms);
+    const opening = setups.length ? ` A new connection took ${rpm.idle_setup_ms !== undefined ? `${text(ms(rpm.idle_setup_ms))} idle and ` : ""}${text(ms(Math.max(...setups)))} under load.` : "";
+    this.tiles.rpm.el.title = `Round trips per minute under load, as the IETF's responsiveness measure counts them: higher is better. The slower direction's.${opening}`;
   }
 
   private renderLoss(loss: NonNullable<TestResult["loss"]>, railValue: (p: Phase, v: string) => void, call: CallQuality | null): void {
@@ -511,12 +542,17 @@ export class TestView implements View {
     row("Out of order", String(loss.out_of_order));
     row("Round trip", `${text(ms(loss.rtt.median))} median`);
     row("Jitter", text(ms(loss.rtt.jitter)));
-    if (call) {
+    if (call?.basis === "each way" && call.up && call.down) {
+      row("Late for a call", ways(call, (c) => String(c.late)));
+      row("Longest gap", ways(call, (c) => `${c.longest_gap_ms.toLocaleString()} ms`));
+      row("Burst ratio", ways(call, (c) => c.burst_ratio?.toFixed(2) ?? "—"));
+      row("You hear", `${call.down.mos.toFixed(1)} MOS · ${rated(call.down)}`);
+      row("They hear", `${call.up.mos.toFixed(1)} MOS · ${rated(call.up)}`);
+    } else if (call) {
       row("Late for a call", `${call.late} (${text(pct(call.late_pct))})`);
       row("Longest gap", `${call.longest_gap_ms.toLocaleString()} ms`);
       row("Burst ratio", call.burst_ratio === null ? "no loss" : call.burst_ratio.toFixed(2));
-      const down = call.rating !== (call.mos_rating ?? call.rating);
-      row("Call quality", `${call.mos.toFixed(1)} MOS · ${RATING[call.rating].toLowerCase()}${down ? ` for its gap (the score alone: ${RATING[call.mos_rating].toLowerCase()})` : ""}`);
+      row("Call quality", `${call.mos.toFixed(1)} MOS · ${rated(call)}`);
     }
     if (loss.note) this.packetStats.append(h("p", { class: "note" }, loss.note));
   }
@@ -547,7 +583,7 @@ export class TestView implements View {
     // Browser results from before mac_source read theirs from EUI-64 too.
     add("MAC", r.client.mac && `${r.client.mac}, ${r.client.mac_source === "nic" ? "of the NIC the connection left by" : "read from the IPv6 address (EUI-64)"}`);
     add("Started", when(r.started_at));
-    add("Configuration", `${r.config.streams} streams · ${r.config.seconds} s per direction · ${r.config.packets} UDP probes every ${r.config.interval_ms} ms`);
+    add("Configuration", `${r.config.streams} streams · ${r.config.seconds} s per direction${r.config.one_stream ? " · one stream's download" : ""} · ${r.config.packets} UDP probes every ${r.config.interval_ms} ms`);
     const lat = r.latency;
     if (lat) add("Idle latency", `median ${text(ms(lat.median))} · min ${text(ms(lat.min))} · p90 ${text(ms(lat.p90))} · max ${text(ms(lat.max))} · jitter ${text(ms(lat.jitter))} · ${lat.count} samples${lat.lost ? `, ${lat.lost} lost` : ""}`);
     const tp = (t: ThroughputResult | undefined, d: Direction) => {
@@ -557,15 +593,24 @@ export class TestView implements View {
       if (loaded) add(`Latency during ${d}`, `median ${text(ms(loaded.median))} · p90 ${text(ms(loaded.p90))} · jitter ${text(ms(loaded.jitter))} · ${loaded.count} probes`);
     };
     tp(r.download, "download");
+    const one = r.one_stream;
+    if (one) add("One stream", `${text(rate(one.mbps))} stable · peak ${text(rate(one.peak_mbps))} · ${bytes(one.bytes)} in ${one.duration_s} s${r.download?.mbps ? ` · ${Math.round((one.mbps / r.download.mbps) * 100)} % of the ${r.download.streams}-stream rate` : ""}`);
     tp(r.upload, "upload");
     if (r.bufferbloat?.grade) add("Bufferbloat", `grade ${r.bufferbloat.grade}`);
     const l = r.loss;
     if (l) add("Packet loss", `${text(pct(l.loss_pct))} (${l.lost}/${l.sent}) over ${l.transport === "webrtc" ? "UDP" : "TCP"}${l.up_loss_pct !== null ? ` · up ${text(pct(l.up_loss_pct))} · down ${text(pct(l.down_loss_pct))}` : ""} · ${l.out_of_order} out of order · RTT ${text(ms(l.rtt.median))} · jitter ${text(ms(l.rtt.jitter))}`);
     const call = r.call ?? callQuality(l);
-    const rated = (c: CallQuality) => (c.rating !== (c.mos_rating ?? c.rating) ? `${RATING[c.rating].toLowerCase()} for its gap (the score alone: ${RATING[c.mos_rating].toLowerCase()})` : RATING[c.rating].toLowerCase());
-    if (call) add("Call quality", `${call.mos.toFixed(2)} MOS, ${rated(call)} · R ${call.r.toFixed(1)} · ${text(ms(call.delay_ms))} mouth to ear · ${text(pct(call.impaired_pct))} lost or late (${call.late} late) · longest gap ${call.longest_gap_ms} ms · burst ratio ${call.burst_ratio?.toFixed(2) ?? "—"} · ${call.packets} packets every ${call.interval_ms} ms, from round trips`);
+    const side = (c: CallSide) => `${c.mos.toFixed(2)} MOS, ${rated(c)} · R ${c.r.toFixed(1)} · ${text(pct(c.impaired_pct))} lost or late (${c.late} late) · longest gap ${c.longest_gap_ms} ms · burst ratio ${c.burst_ratio?.toFixed(2) ?? "—"}`;
+    if (call?.basis === "each way" && call.up && call.down) {
+      add("Call, you hear", side(call.down));
+      add("Call, they hear", side(call.up));
+      add("Call", `${text(ms(call.delay_ms))} mouth to ear · ${call.packets} packets every ${call.interval_ms} ms, each direction timed with the server's stamps`);
+    } else if (call) add("Call quality", `${side(call)} · ${text(ms(call.delay_ms))} mouth to ear · ${call.packets} packets every ${call.interval_ms} ms, from round trips`);
     const rpm = r.responsiveness ?? responsiveness(r);
-    if (rpm) add("Responsiveness", `${rpm.rpm.toLocaleString()} RPM · download ${rpm.download_rpm?.toLocaleString() ?? "—"} · upload ${rpm.upload_rpm?.toLocaleString() ?? "—"} · from the latency-under-load probes`);
+    const how = (s: ResponsivenessSide | undefined, v: number | null) =>
+      s ? `${s.rpm.toLocaleString()} (new connections ${text(ms(s.setup_ms))}, ${s.loaded_ms === null ? "no loaded round trips" : `round trips ${text(ms(s.loaded_ms))} ${s.loaded_on === "loaded connection" ? "on the loaded connection" : "beside the load"}`})` : (v?.toLocaleString() ?? "—");
+    if (rpm?.basis === "ippm") add("Responsiveness", `${rpm.rpm.toLocaleString()} RPM by the IETF draft's method · download ${how(rpm.download, rpm.download_rpm)} · upload ${how(rpm.upload, rpm.upload_rpm)}${rpm.idle_setup_ms !== undefined ? ` · a new connection idle: ${text(ms(rpm.idle_setup_ms))}` : ""}`);
+    else if (rpm) add("Responsiveness", `${rpm.rpm.toLocaleString()} RPM · download ${rpm.download_rpm?.toLocaleString() ?? "—"} · upload ${rpm.upload_rpm?.toLocaleString() ?? "—"} · from the latency-under-load probes`);
     clear(this.details);
     const table = h("table", { class: "table" }, h("tbody", {}, ...rows.map(([k, v]) => h("tr", {}, h("th", { scope: "row" }, k), h("td", {}, v)))));
     this.details.append(table);

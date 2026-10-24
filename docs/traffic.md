@@ -7,13 +7,15 @@ already running finish.
 
 ## What a test moves
 
-A test moves as much as the path carries, for 10 seconds each way by default:
+A test moves as much as the path carries, for 10 seconds each way by default, and 10
+seconds more for [one stream's download](methodology.md#one-stream), which moves at
+most as much as the download:
 
-| Speed of the path | Download | Upload | One test |
-|---|---|---|---|
-| 100 Mbps | 125 MB | 125 MB | 250 MB |
-| 1 Gbps | 1.25 GB | 1.25 GB | 2.5 GB |
-| 10 Gbps | 12.5 GB | 12.5 GB | 25 GB |
+| Speed of the path | Download | One stream, at most | Upload | One test, at most |
+|---|---|---|---|---|
+| 100 Mbps | 125 MB | 125 MB | 125 MB | 375 MB |
+| 1 Gbps | 1.25 GB | 1.25 GB | 1.25 GB | 3.75 GB |
+| 10 Gbps | 12.5 GB | 12.5 GB | 12.5 GB | 37.5 GB |
 
 History's Traffic column shows what each saved test moved.
 

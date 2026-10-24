@@ -65,6 +65,22 @@ def _throughput_line(label: str, t: dict[str, Any] | None, idle: float | None) -
     )
 
 
+def _one_stream_line(result: dict[str, Any]) -> list[str]:
+    """One stream's download, beside the multi-stream rate; nothing when not measured."""
+    one, multi = result.get("one_stream"), result.get("download") or {}
+    if not one:
+        return []
+    share = (
+        f" · {one['mbps'] / multi['mbps'] * 100:.0f} % of {multi['streams']} streams"
+        if multi.get("mbps")
+        else ""
+    )
+    return [
+        f"  {'One stream':<14} {_fmt(one['mbps'], ' Mbps', 1):>14}"
+        f"   peak {_fmt(one['peak_mbps'], '', 1)}   (a single file copy{share})"
+    ]
+
+
 def _loss_line(loss: dict[str, Any] | None) -> str:
     if not loss:
         return f"  {'Loss':<14} —"
@@ -79,29 +95,46 @@ def _loss_line(loss: dict[str, Any] | None) -> str:
     return f"  {'Loss':<14} {_fmt(loss['loss_pct'], ' %'):>14}   ({' · '.join(parts)})"
 
 
-_BASIS = {"round trip": "from round trips"}
+def _rated(side: dict[str, Any]) -> str:
+    """A call's rating, and why when a gap a caller would hear lowered it."""
+    rated = side["rating"]
+    if rated != side.get("mos_rating", rated):
+        rated += f", for its gap (the score alone: {side['mos_rating']})"
+    return rated
 
 
 def _call_line(call: dict[str, Any] | None) -> str:
     if not call:
         return f"  {'Call quality':<14} —"
-    rated = call["rating"]
-    if rated != call.get("mos_rating", rated):  # a gap a caller would hear
-        rated += f", for its gap (the score alone: {call['mos_rating']})"
+    up, down = call.get("up"), call.get("down")
+    if up and down:  # each direction timed with the server's stamps
+        detail = (
+            f"you hear {down['mos']:.1f} · they hear {up['mos']:.1f}"
+            f" · longest gap ↓ {down['longest_gap_ms']:g} ↑ {up['longest_gap_ms']:g} ms"
+            f" · late ↓ {_fmt(down['late_pct'], ' %')} ↑ {_fmt(up['late_pct'], ' %')}"
+        )
+    else:
+        detail = (
+            f"late {_fmt(call['late_pct'], ' %')} · longest gap {call['longest_gap_ms']:g} ms"
+            " · from round trips"
+        )
     return (
-        f"  {'Call quality':<14} {_fmt(call['mos'], ' MOS', 1):>14}   {rated}"
-        f"   (late {_fmt(call['late_pct'], ' %')} · longest gap {call['longest_gap_ms']:g} ms"
-        f" · {_BASIS.get(call['basis'], call['basis'])})"
+        f"  {'Call quality':<14} {_fmt(call['mos'], ' MOS', 1):>14}   {_rated(call)}   ({detail})"
     )
 
 
 def _rpm_line(rpm: dict[str, Any] | None) -> str:
     if not rpm:
         return f"  {'Responsiveness':<14} —"
-    return (
-        f"  {'Responsiveness':<14} {rpm['rpm']:>10,} RPM   (↓ {_fmt(rpm['download_rpm'], '', 0)}"
-        f" · ↑ {_fmt(rpm['upload_rpm'], '', 0)}, under load)"
-    )
+    detail = f"↓ {_fmt(rpm['download_rpm'], '', 0)} · ↑ {_fmt(rpm['upload_rpm'], '', 0)}"
+    setups = [rpm[d]["setup_ms"] for d in ("download", "upload") if rpm.get(d)]
+    if setups:  # the IETF draft's method, with new connections
+        idle = rpm.get("idle_setup_ms")
+        opened = f"{_fmt(idle, ' ms', 1)} idle, " if idle is not None else ""
+        detail += f" · a new connection {opened}{_fmt(max(setups), ' ms', 1)} under load"
+    else:
+        detail += ", under load"
+    return f"  {'Responsiveness':<14} {rpm['rpm']:>10,} RPM   ({detail})"
 
 
 def _report(result: dict[str, Any]) -> str:
@@ -113,6 +146,7 @@ def _report(result: dict[str, Any]) -> str:
         "",
         _latency_line("Latency", result.get("latency")),
         _throughput_line("Download", result.get("download"), idle),
+        *_one_stream_line(result),
         _throughput_line("Upload", result.get("upload"), idle),
         _loss_line(result.get("loss")),
     ]
@@ -957,6 +991,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             loss=not args.no_loss,
             progress=live,
             local=not args.no_local,
+            one_stream=not args.no_one_stream,
         )
     )
     live.clear()
@@ -1271,6 +1306,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--packets", type=int, default=500)
     run.add_argument("--interval", type=float, default=10.0, help="ms between UDP probes")
     run.add_argument("--no-loss", action="store_true", help="skip the UDP packet-loss test")
+    run.add_argument(
+        "--no-one-stream",
+        action="store_true",
+        help="skip the download over one stream that follows the multi-stream one",
+    )
     run.add_argument("--save", action="store_true", help="store the result on the server")
     run.add_argument(
         "--no-local",
@@ -1306,7 +1346,9 @@ def build_parser() -> argparse.ArgumentParser:
     target(loss)
     loss.add_argument("--packets", type=int, default=500)
     loss.add_argument("--interval", type=float, default=10.0, help="ms between probes")
-    loss.add_argument("--size", type=int, default=64, help="probe size in bytes")
+    loss.add_argument(
+        "--size", type=int, default=engine.PROBE_BYTES, help="probe size in bytes (default: 200)"
+    )
     loss.set_defaults(
         func=_discrete(
             engine.measure_loss,

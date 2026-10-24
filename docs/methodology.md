@@ -15,9 +15,10 @@ responsiveness), so their results are comparable.
 | Step | What | Transport | Default |
 |---|---|---|---|
 | 1 | Idle latency and jitter | HTTP keep-alive `GET /api/v1/ping` | 20 probes after 1 warm-up |
-| 2 | Download, with latency under load | N parallel `GET /api/v1/down` + WebSocket probes | 4 streams × 10 s |
-| 3 | Upload, with latency under load | N parallel `POST /api/v1/up` + WebSocket probes | 4 streams × 10 s |
-| 4 | Packet loss, UDP RTT and jitter | WebRTC data channel, unordered, no retransmits | 500 probes, 10 ms apart |
+| 2 | Download, with latency under load and responsiveness | N parallel `GET /api/v1/down`, WebSocket probes, a new connection a second | 4 streams × 10 s |
+| 3 | One stream's download | One `GET /api/v1/down` | 1 stream × 10 s, skipped when the test uses one |
+| 4 | Upload, with latency under load and responsiveness | N parallel `POST /api/v1/up`, WebSocket probes, a new connection a second | 4 streams × 10 s |
+| 5 | Packet loss, UDP RTT and jitter, call quality | WebRTC data channel, unordered, no retransmits | 500 probes of 200 bytes, 10 ms apart |
 
 ## Latency
 
@@ -73,6 +74,15 @@ From the 100 ms timeline:
 * **Per-stream rate** is each stream's bytes over the test, and **fairness** is
   Jain's index over streams: (Σx)² / (n·Σx²). 100 % means every flow got an equal share.
 
+### One stream
+
+After the download, the test downloads over **one stream** for the same time, measured in
+the same way: what a single file copy, backup or remote-desktop session gets, as each of
+those uses one connection. It is shown beside the multi-stream rate, as a share of it.
+It is skipped when the test itself uses one stream, and Test options or the command line's
+`--no-one-stream` can leave it out. Why one stream can get less than several is in
+[Quality and user experience](experience.md#one-stream).
+
 ### Streams and HTTP versions
 
 Browsers open at most **six HTTP/1.1 connections** per server, so more than six streams
@@ -110,15 +120,26 @@ busy, in **RPM**: 60,000 divided by the round trip in milliseconds, so higher is
 [Responsiveness under Working Conditions](https://datatracker.ietf.org/doc/draft-ietf-ippm-responsiveness/),
 which macOS's `networkQuality` also reports.
 
-texas2step works it out from the latency-under-load probes above. As the draft does, it
-takes the mean of the fastest 95 % of each direction's round trips, leaving out the
-slowest 5 %. Each direction gets a figure, and the Results tile shows the lower of the
-two.
+texas2step measures it as the draft does, during each transfer:
 
-The draft also times connections opened while the load runs, and requests on the loaded
-connections themselves. texas2step's probes travel on a connection of their own that is
-already open, so its figure can read somewhat higher than `networkQuality`'s on the same
-path.
+* **New connections.** One a second, each timed from the start of its TCP connect to the
+  answer to its first request. The browser opens a WebSocket for this, as a WebSocket
+  always gets a connection of its own, and can only time it as a whole: that is three
+  round trips with TLS (the TCP connect, the TLS handshake and the request) and two
+  without, and the draft's mean of the steps is the open time divided by them. The
+  command line times each step on its own.
+* **Round trips on the loaded connection.** Over HTTP/2 or HTTP/3 a request shares the
+  transfer's connection, so the browser sends a `GET /api/v1/ping` on it every 250 ms.
+  Over HTTP/1.1 a request can't, and the latency-under-load probes, on a connection of
+  their own beside the transfer, stand in. The command line uses HTTP/1.1.
+
+Each kind is taken as the mean of its fastest 95 %, leaving out the slowest 5 %, and
+turned into RPM. A direction's responsiveness is the mean of the two RPM figures, and the
+Results tile shows the lower direction's. A new connection is also timed before the
+load: what each new connection costs, idle.
+
+Results saved before new connections were timed get their responsiveness from the
+latency-under-load probes alone.
 
 ## Packet loss (UDP)
 
@@ -129,11 +150,15 @@ retransmits, so a packet the network drops stays dropped.
 1. The client creates a peer connection with two channels, `probe` (unreliable) and
    `control` (reliable), gathers ICE candidates, and posts the offer to
    `POST /api/v1/rtc/offer`. The server (aiortc) answers.
-2. The client sends numbered probes (`u32 sequence | f64 send time | padding`, 64 bytes
-   by default) on a fixed schedule. Pacing works against the schedule, not
+2. The client asks the server to **stamp** its echoes, where the server can.
+3. The client sends numbered probes (`u32 sequence | f64 send time | padding`) on a fixed
+   schedule. They are 200 bytes, at least the size of a voice call's packets, so a path
+   that can't carry them can't carry calls. Pacing works against the schedule, not
    `setInterval`, so timer clamping cannot drop probes.
-3. The server echoes each probe unchanged and counts what it receives and sends.
-4. After the last probe the client waits 2 s for stragglers, then asks over `control`
+4. The server echoes each probe and counts what it receives and sends. A stamped echo
+   also carries the server's clock when the probe arrived, and how many probes had
+   arrived by then ([UDP probe protocol](api.md#udp-probe-protocol)).
+5. After the last probe the client waits 2 s for stragglers, then asks over `control`
    for the server's counters.
 
 Reported:
@@ -143,6 +168,15 @@ Reported:
 * **Downstream loss** = 1 − (client received ÷ server sent).
 * **Out of order**: echoes arriving with a lower sequence number than the previous one.
 * **UDP RTT and jitter**: same definitions as above, over the echoed probes.
+* **Each direction's delay**, from the stamps: each probe's one-way delay above the
+  fastest probe's in that direction. Upstream is the server's arrival time less the
+  client's send time, downstream the client's receipt less the server's arrival. The two
+  computers' clocks needn't agree: their difference is the same for every probe and drops
+  out.
+* **Which way each loss went**, from the stamps: between two echoes, the server's counts
+  say how many of the probes in between reached it, and the rest were lost on the way
+  there. The count each way is exact. Where one gap lost probes both ways, which went
+  which way can't be told, and those lost on the way there are taken to be the first.
 
 When the visitor chooses **IPv4 only** or **IPv6 only**, the client drops the server's
 candidates of the other family from the answer before connecting, so ICE can only form
@@ -161,8 +195,9 @@ a G.711 call with packet-loss concealment. The definitions are in
 `web/src/engine/quality.ts` and `src/texas2step/quality.py`.
 
 1. **Late packets.** A call plays its packets out of a jitter buffer, 60 ms here. A probe
-   that came back more than 60 ms behind the fastest one would have missed its turn, so
-   it counts as lost.
+   that arrived more than 60 ms behind the fastest one would have missed its turn, so it
+   counts as lost. With stamps this is measured in each direction; from a server without
+   them, or over the TCP fallback, on the round trip.
 2. **The call's own packets.** A call sends a packet every 20 ms, so bursts are counted
    on the probes at that spacing: every other probe at the default 10 ms, every fourth at
    5 ms, every probe at 20 ms. A 100 ms outage is then the 5 packets a call loses, not 10
@@ -183,6 +218,9 @@ a G.711 call with packet-loss concealment. The definitions are in
    excellent from 4.3, good from 4.0, fair from 3.6, poor from 3.1, and bad below. A gap a
    caller would hear lowers the rating: the longest gap above 60 ms allows at most good,
    200 ms or more at most fair.
+5. **Each direction.** With stamps, each direction is a call of its own: what you hear
+   is the downstream probes that reached the server, and what the other end hears is the
+   upstream. The tile shows the worse of the two, by rating and then by score.
 
 *BurstR*, the **burst ratio**, is the average run of lost or late packets divided by the
 run random loss would give, 1 / (1 − *p*) for a share *p*. It is 1 for random loss and

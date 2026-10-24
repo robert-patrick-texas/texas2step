@@ -201,11 +201,12 @@ def test_server_to_server_tests_count_this_servers_side(tmp_path):
     full = {
         "latency": {"median": 9.0},
         "download": {"direction": "download", "bytes": 100},
+        "one_stream": {"direction": "download", "bytes": 50},
         "upload": {"direction": "upload", "bytes": 20},
     }
     _count(m, OUTSIDE, full)
     day, _ = m.periods(NOON)
-    assert (day.usage.sent, day.usage.received) == (20, 400)
+    assert (day.usage.sent, day.usage.received) == (20, 450)
     targets = ("http://127.0.0.1:9", "https://10.2.3.4", "https://203.0.113.5/speedtest")
     assert [asyncio.run(_whose(t, m)) for t in targets] == [LOCAL, INSIDE, OUTSIDE]
 
@@ -215,13 +216,20 @@ def test_history_shows_each_tests_traffic(tmp_path):
     both = store.add({"download": {"bytes": 1_250_000_000}, "upload": {"bytes": 6e8}}, None)
     neither = store.add({"latency": {"median": 9.0}}, None)
     odd = store.add({"download": {"bytes": "lots"}, "upload": {"bytes": 5}}, None)
+    one = store.add({"download": {"bytes": 100}, "one_stream": {"bytes": 40}}, None)
     assert (both["traffic_bytes"], neither["traffic_bytes"], odd["traffic_bytes"]) == (
         1_850_000_000,
         None,
         5,
     )
+    assert one["traffic_bytes"] == 140  # one stream's download counts too
     listed = {r["id"]: r["traffic_bytes"] for r in store.recent()}
-    assert listed == {both["id"]: 1_850_000_000, neither["id"]: None, odd["id"]: 5}
+    assert listed == {
+        both["id"]: 1_850_000_000,
+        neither["id"]: None,
+        odd["id"]: 5,
+        one["id"]: 140,
+    }
 
 
 def test_traffic_settings_are_checked():

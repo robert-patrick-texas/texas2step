@@ -64,14 +64,14 @@ PAYLOAD_SQL = ", ".join(
     f"THEN json_extract(payload, '$.{a}.{b}') END AS {name}"
     for name, (a, b) in PAYLOAD_FIELDS.items()
 )
-# And the bytes the test moved, download plus upload, as the client counted them.
-DIRECTIONS = ("download", "upload")
+# And the bytes the test moved, its downloads plus its upload, as the client counted them.
+TRANSFERS = ("download", "one_stream", "upload")
 _NUMBER = "json_type(payload, '$.{}.bytes') IN ('integer', 'real')"
 TRAFFIC_SQL = (
-    f"CASE WHEN {' OR '.join(_NUMBER.format(d) for d in DIRECTIONS)} THEN "
+    f"CASE WHEN {' OR '.join(_NUMBER.format(d) for d in TRANSFERS)} THEN "
     + " + ".join(
         f"(CASE WHEN {_NUMBER.format(d)} THEN json_extract(payload, '$.{d}.bytes') ELSE 0 END)"
-        for d in DIRECTIONS
+        for d in TRANSFERS
     )
     + " END AS traffic_bytes"
 )
@@ -119,7 +119,7 @@ def _dig(data: Any, *path: str) -> float | None:
 
 
 def _traffic(result: dict[str, Any]) -> int | None:
-    found = [n for d in DIRECTIONS if (n := _dig(result, d, "bytes")) is not None]
+    found = [n for d in TRANSFERS if (n := _dig(result, d, "bytes")) is not None]
     return round(sum(found)) if found else None
 
 

@@ -4,9 +4,18 @@ import type { LossResult } from "../types";
 import { revealed } from "./addr";
 import type { WsProber } from "./latency";
 import { type Endpoint, type Family, sleep } from "./net";
+import { oneWay } from "./quality";
 import { summarize } from "./stats";
 
 const HEADER = 12; // u32 sequence + f64 send time
+const STAMPED = HEADER + 12; // and, with stamps on, the server's f64 arrival time + u32 count
+
+/** What the server stamped into an echo: its clock when the probe arrived (ms), and how
+ * many probes it had received by then, this one included. */
+export interface Stamp {
+  at: number;
+  count: number;
+}
 
 function waitFor(target: EventTarget, event: string, timeoutMs: number, ok: () => boolean): Promise<boolean> {
   if (ok()) return Promise.resolve(true);
@@ -36,7 +45,8 @@ export interface UdpAddress {
 type ControlReply = Record<string, unknown>;
 
 export class RtcProbe {
-  onEcho: ((seq: number, rtt: number) => void) | null = null;
+  onEcho: ((seq: number, rtt: number, now: number, stamp: Stamp | null) => void) | null = null;
+  private stamping = false;
   private controlWaiters: { op: string; done: (msg: ControlReply) => void }[] = [];
 
   private constructor(
@@ -49,7 +59,8 @@ export class RtcProbe {
       const now = performance.now();
       if (!(ev.data instanceof ArrayBuffer) || ev.data.byteLength < HEADER) return;
       const view = new DataView(ev.data);
-      this.onEcho?.(view.getUint32(0, true), now - view.getFloat64(4, true));
+      const stamp = this.stamping && ev.data.byteLength >= STAMPED ? { at: view.getFloat64(HEADER, true), count: view.getUint32(HEADER + 8, true) } : null;
+      this.onEcho?.(view.getUint32(0, true), now - view.getFloat64(4, true), now, stamp);
     };
     control.onmessage = (ev) => {
       try {
@@ -125,12 +136,21 @@ export class RtcProbe {
     return { address, port: typeof remote?.port === "number" ? remote.port : null, family: address.includes(":") ? "IPv6" : "IPv4", local };
   }
 
-  send(seq: number, size: number): void {
+  /** Sends probe `seq`, `size` bytes long; when it was sent. */
+  send(seq: number, size: number): number {
     const buf = new ArrayBuffer(Math.max(size, HEADER));
     const view = new DataView(buf);
+    const now = performance.now();
     view.setUint32(0, seq >>> 0, true);
-    view.setFloat64(4, performance.now(), true);
+    view.setFloat64(4, now, true);
     this.probe.send(buf);
+    return now;
+  }
+
+  /** Asks the server to stamp each echo; whether it will. */
+  async stamp(timeoutMs = 2000): Promise<boolean> {
+    this.stamping = (await this.ask("stamp", timeoutMs)) !== null;
+    return this.stamping;
   }
 
   async counters(timeoutMs = 2000): Promise<{ rx: number; tx: number } | null> {
@@ -195,6 +215,7 @@ export interface LossOptions {
   intervalMs: number;
   size: number;
   waitMs: number;
+  stamps?: boolean; // ask the server to stamp its echoes, where it can
   signal: AbortSignal;
   onSent?: (seq: number) => void;
   onEcho?: (seq: number, rtt: number) => void;
@@ -255,27 +276,42 @@ async function paced(opts: LossOptions, send: (seq: number) => void): Promise<vo
 }
 
 export async function measureLossRtc(probe: RtcProbe, opts: LossOptions): Promise<LossResult> {
-  const rtts: (number | null)[] = new Array<number | null>(opts.packets).fill(null);
+  const n = opts.packets;
+  const rtts: (number | null)[] = new Array<number | null>(n).fill(null);
+  const sent: number[] = new Array<number>(n).fill(0);
+  const server: (number | null)[] = new Array<number | null>(n).fill(null);
+  const back: (number | null)[] = new Array<number | null>(n).fill(null);
+  const counts: (number | null)[] = new Array<number | null>(n).fill(null);
   const order: number[] = [];
   let duplicates = 0;
-  let pending = opts.packets;
-  probe.onEcho = (seq, rtt) => {
-    if (seq >= opts.packets) return;
+  let pending = n;
+  const stamped = opts.stamps ? await probe.stamp() : false;
+  probe.onEcho = (seq, rtt, now, stamp) => {
+    if (seq >= n) return;
     if (rtts[seq] !== null) {
       duplicates++;
       return;
     }
     rtts[seq] = rtt;
+    back[seq] = now;
+    if (stamp) {
+      server[seq] = stamp.at;
+      counts[seq] = stamp.count;
+    }
     order.push(seq);
     pending--;
     opts.onEcho?.(seq, rtt);
   };
-  await paced(opts, (seq) => probe.send(seq, opts.size));
+  await paced(opts, (seq) => {
+    sent[seq] = probe.send(seq, opts.size);
+  });
   const waitUntil = performance.now() + opts.waitMs;
   while (pending > 0 && performance.now() < waitUntil && !opts.signal.aborted) await sleep(50);
   probe.onEcho = null;
   const counters = await probe.counters();
-  return finish(rtts, order, duplicates, counters, "webrtc", opts);
+  const result = finish(rtts, order, duplicates, counters, "webrtc", opts);
+  const ways = stamped ? oneWay(sent, server, back, counts, counters?.rx ?? null) : null;
+  return ways ? { ...result, ...ways } : result;
 }
 
 /** TCP fallback: delivery is reliable, so only probes that time out count as lost. */
