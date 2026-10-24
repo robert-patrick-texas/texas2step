@@ -218,17 +218,43 @@ gh release create "v$v" "dist/texas2step-$v-1-amd64.deb" dist/texas2step-setup \
     --title "texas2step $v" --generate-notes
 ```
 
-6. Publish the Python package to [PyPI](https://pypi.org/project/texas2step/), for
-   `uv tool install texas2step` and `pipx install texas2step`, with a PyPI API token:
+6. Publishing the release publishes the Python package to
+   [PyPI](https://pypi.org/project/texas2step/) too, for `uv tool install texas2step` and
+   `pipx install texas2step`. `.github/workflows/pypi.yml` checks that the tag is
+   `v<version>`, runs the tests, builds the sdist and wheel from the tag, checks their
+   metadata, installs the wheel on its own and tests the server it starts. Then it uploads
+   both files with PyPI's trusted publishing, with no API token. Watch it, then check the
+   version's page on PyPI:
+
+```bash
+gh run watch "$(gh run list --workflow pypi.yml --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+```
+
+A version can be uploaded to PyPI only once. A run that fails before the upload can be
+run again (`gh run rerun --failed <id>`). A fix that needs a new commit needs a new
+version. To rehearse everything but the upload, run the workflow by hand: Actions →
+pypi → Run workflow, or `gh workflow run pypi.yml`.
+
+PyPI's copy of the README has its links made absolute, to GitHub, by
+`hatch-fancy-pypi-readme` (`pyproject.toml`).
+
+### Trusted publishing: the one-time setup
+
+PyPI accepts the workflow's uploads because the project trusts it:
+
+* On PyPI, under the project's **Settings → Publishing**, a GitHub trusted publisher
+  with the repository's owner and name, the workflow `pypi.yml` and the environment
+  `pypi`.
+* On GitHub, under **Settings → Environments**, an environment named `pypi` whose
+  deployments are limited to tags matching `v*`, so only a release tag can publish.
+
+Without the workflow, a maintainer with a PyPI API token can still publish by hand:
 
 ```bash
 uv build --out-dir build/pypi
 UV_PUBLISH_TOKEN=<token> uv publish build/pypi/*
 rm -rf build/pypi
 ```
-
-PyPI's copy of the README has its links made absolute, to GitHub, by
-`hatch-fancy-pypi-readme` (`pyproject.toml`). A version can be uploaded to PyPI only once.
 
 `texas2step update` finds the two files on the release by their names
 (`texas2step-<version>-<revision>-<arch>.deb` and `texas2step-setup`) and checks each
