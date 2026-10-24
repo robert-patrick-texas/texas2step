@@ -308,6 +308,24 @@ screenshot of. The window can still be changed, to look back over the last 15 mi
 The 10 seconds cut short by Stop aren't scored. Going to another page stops the monitor
 the same way, and the page says so when you come back to it.
 
+**Outages.** A server that hasn't answered for 3 seconds has gone quiet: when Wi-Fi or
+mobile data drops while you move around, say, or when the server restarts. The line
+beside the chart's title says so. Its probes keep their places and count as lost, so
+the 10 seconds of a call through an outage score as a dropped call would. Monitor then
+asks the server over HTTPS, with a small request, every 2 seconds, or every 10 once a
+minute has passed. It also keeps one probe a second going on the old session, which
+picks up again by itself after a short blip. Once the server answers over HTTPS but not
+to its probes, as after a restart or a change of network, Monitor opens a new session.
+It opens one at a time, and waits 5, then 10, then 30 seconds between tries that fail,
+since each holds a port on the server for up to 30 seconds. Where only TCP gets through,
+it carries on over the WebSocket and tries UDP again every 30 seconds. When the server
+answers again, the line says how long it was gone and how many outages there have been
+since Start.
+
+A server closes the session of a browser that has gone away after about 30 seconds of
+unanswered consent checks (RFC 7675), or after `rtc_session_timeout` (120 seconds)
+without a probe.
+
 Voice and Video calls count toward a [traffic limit](traffic.md#monitors-call-profiles).
 When one is reached, the server holds the session to path probes and says so, and the
 monitor carries on with the Path profile and shows the site's message.

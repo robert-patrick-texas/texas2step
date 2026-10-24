@@ -2541,6 +2541,13 @@ a.brand-org:hover,
 }
 
 .lede.wide,
+/* Monitor's chart: a server gone quiet, or the latest outage, where its description was. */
+.card-head p.chart-status {
+  max-width: none;
+  color: var(--ink);
+  font-weight: 550;
+}
+
 .card-head p.wide {
   max-width: none;
 }

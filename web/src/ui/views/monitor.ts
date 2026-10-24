@@ -29,7 +29,23 @@ interface Dest {
   sent: number;
   latest: number | null;
   stream: CallStream | null; // with a call profile
+  lastEcho: number; // Date.now() of its latest echo, or of Start
+  beat: number; // Date.now() of the latest probe sent while it's quiet
+  down: Down | null; // gone quiet: no echo for SILENT_MS
+  busy: boolean; // an HTTPS check or a new session under way
+  udpAt: number; // over TCP, when to try UDP again
 }
+
+/** A server gone quiet, and how Monitor is getting it back. */
+interface Down {
+  since: number; // Date.now() of its last echo
+  check: number; // when to ask the server again over HTTPS
+  answered: number | null; // when it answered over HTTPS, while its probes still don't
+  wait: number; // ms between new sessions, growing while they fail
+  next: number; // the earliest time for the next new session
+}
+
+type Refusal = { message: string; url: string | null };
 
 /** What each profile sends: a desk can change these, a visitor just picks the profile. */
 interface Choice {
@@ -62,6 +78,16 @@ interface Figures {
   slices: number;
   frames: number | null; // percent of video frames hit, the worse direction's
 }
+
+// Getting a server back after an outage (docs/methodology.md, "Live monitor"). A new UDP
+// session holds a server port for up to 30 s if it never opens, so new sessions go one at a
+// time and only once the server answers over HTTPS; the HTTPS checks are small.
+const SILENT_MS = 3000; // no echo for this long: the server has gone quiet
+const CHECK_MS = 2000; // between HTTPS checks while it's quiet
+const CHECK_SLOW_MS = 10_000; // between them once it has been quiet a minute
+const GRACE_MS = 1500; // after the server answers, for its session to come back by itself
+const WAIT_MS = [5000, 30_000]; // between new sessions that fail: from 5 s, doubling to 30 s
+const UDP_RETRY_MS = 30_000; // over the TCP fallback, between tries of UDP
 
 const RATES = [5, 10, 20, 50];
 const WINDOWS: [number, string][] = [
@@ -126,6 +152,10 @@ export class MonitorView implements View {
   private seriesKey = "";
   private invited = false; // the Servers toggle has had its one pulse
   private away = false; // another page is shown
+  private runId = 0; // which Start a reconnect belongs to
+  private outages = 0; // since Start, all servers
+  private lastOutage = ""; // what the chart's note said about the latest one
+  private leftRunning = false; // stopped by going to another page
   private off: (() => void) | null = null;
   private startBtn!: HTMLButtonElement;
   private transport!: HTMLElement;
@@ -180,7 +210,7 @@ export class MonitorView implements View {
     this.awakeOpt = awakeSwitch(this.app);
     this.tiles = h("div", { class: "tiles six" });
     this.compare = h("div", { class: "table-wrap compare-wrap" });
-    this.chartHead = h("p", {});
+    this.chartHead = h("p", { role: "status" });
 
     root.append(
       h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "Monitor"), this.lede, this.notice), h("div", { class: "head-actions" }, this.profileBox, this.startBtn)),
@@ -203,7 +233,7 @@ export class MonitorView implements View {
   /** Another page is shown: monitoring stops, as Stop does, and the chart holds still. */
   hide(): void {
     this.away = true;
-    if (this.running) this.say("Stopped when you went to another page.");
+    this.leftRunning ||= this.running;
     this.stop();
     for (const t of this.timers.splice(0)) clearInterval(t);
     this.app.awake.hold("monitor", false);
@@ -251,7 +281,7 @@ export class MonitorView implements View {
     const comparing = this.comparing && sides !== null;
     const c = this.choice;
     setText(this.lede, lede(c, comparing));
-    setText(this.chartHead, c.profile === "path" ? "One dot per probe. Red ticks along the top mark probes that never came back." : "One dot per voice packet, red ticks for lost ones; the strip scores each 10 seconds.");
+    this.renderChartHead();
     this.tiles.hidden = comparing;
     this.compare.hidden = !comparing;
 
@@ -432,13 +462,32 @@ export class MonitorView implements View {
     this.startBtn.disabled = true;
     this.lock(true);
     this.say(null);
+    this.runId++;
+    this.outages = 0;
+    this.lastOutage = "";
+    this.leftRunning = false;
+    this.renderChartHead();
     setText(this.transport, "connecting…");
     this.chart.clear();
     this.chart.setCalls([]);
     this.stoppedAt = null;
     this.chart.freeze(null);
     const call = this.choice.profile !== "path";
-    const dest = (ep: Endpoint, info: ServerInfo | null): Dest => ({ ep, info, probe: null, transport: "", sentAt: new Map(), sent: 0, latest: null, stream: call ? new CallStream(this.choice.every) : null });
+    const dest = (ep: Endpoint, info: ServerInfo | null): Dest => ({
+      ep,
+      info,
+      probe: null,
+      transport: "",
+      sentAt: new Map(),
+      sent: 0,
+      latest: null,
+      stream: call ? new CallStream(this.choice.every) : null,
+      lastEcho: 0,
+      beat: 0,
+      down: null,
+      busy: false,
+      udpAt: 0,
+    });
     this.dests = sides ? sides.map((loc) => dest(app.endpointFor(loc), null)) : [dest(app.ep, app.info)];
     const refused = await Promise.all(this.dests.map((d, i) => this.connect(d, i)));
     this.startBtn.disabled = false;
@@ -455,8 +504,16 @@ export class MonitorView implements View {
     }
     this.running = true;
     this.startBtn.textContent = "Stop";
-    setText(this.transport, sides ? this.dests.map((d, i) => `${SIDES[i]!.short} ${d.transport.split(" ")[0]}`).join(" · ") : this.dests[0]!.transport);
+    for (const d of this.dests) d.lastEcho = Date.now();
+    this.showTransport();
     this.schedule();
+  }
+
+  /** How each server is reached: UDP or TCP, or why not just now. */
+  private showTransport(): void {
+    const state = (d: Dest, short: boolean) => (d.transport === "reconnecting…" ? d.transport : d.down ? "no answer" : short ? d.transport.split(" ")[0]! : d.transport);
+    const two = this.dests.length > 1;
+    setText(this.transport, two ? this.dests.map((d, i) => `${SIDES[i]!.short} ${state(d, true)}`).join(" · ") : state(this.dests[0]!, false));
   }
 
   /**
@@ -464,39 +521,14 @@ export class MonitorView implements View {
    * call profile, ask for the server's stamps and for the profile; why a server refused
    * it, if it did.
    */
-  private async connect(d: Dest, series: number): Promise<{ message: string; url: string | null } | null> {
-    const record = (seq: number, rtt: number) => {
-      const t = d.sentAt.get(seq);
-      if (t === undefined) return;
-      d.sentAt.delete(seq);
-      d.latest = rtt;
-      this.chart.push({ t, rtt }, series);
-    };
-    const profile = this.choice.profile;
+  private async connect(d: Dest, series: number): Promise<Refusal | null> {
     try {
       d.info ??= await d.ep.info();
       if (!d.info.capabilities.webrtc) throw new Error("WebRTC disabled");
-      const rtc = await RtcProbe.connect(d.ep, d.info.ice_servers);
-      if (profile !== "path") {
-        const answer = await rtc.profile(profile);
-        if (answer && !answer.ok) {
-          rtc.close();
-          if (answer.reason === "traffic limit") return { message: answer.message ?? REFUSED, url: answer.url ?? null };
-          return { message: `${d.info.server.name} doesn't offer Monitor's ${profile === "video" ? "Video call" : "Voice call"} profile.`, url: null };
-        }
-        if (d.info.capabilities.stamps) await rtc.stamp();
-        // At a traffic limit the server holds the session to path probes: follow it.
-        rtc.onNotice = (msg) => {
-          if (msg.op === "limit") this.limited(typeof msg.message === "string" ? msg.message : REFUSED, typeof msg.url === "string" ? msg.url : null);
-        };
-      }
-      rtc.onEcho = (seq, rtt, now, stamp) => {
-        record(seq, rtt);
-        d.stream?.echo(seq, rtt, now, stamp);
-      };
-      d.probe = { send: (seq, size) => rtc.send(seq, size), close: () => rtc.close() };
-      const family = await rtc.family().catch(() => null);
-      d.transport = ["UDP · WebRTC", family].filter(Boolean).join(" · ");
+      const got = await this.udp(d, series);
+      if ("message" in got) return got;
+      d.probe = got.probe;
+      d.transport = got.transport;
     } catch {
       const ws = new WsProber();
       if (!(await ws.open(d.ep.wsUrl("/ws")))) {
@@ -508,14 +540,189 @@ export class MonitorView implements View {
         send: (seq) =>
           void ws.ping(1000).then((rtt) => {
             if (rtt === null) return;
-            record(seq, rtt);
+            this.record(d, series, seq, rtt);
             d.stream?.echo(seq, rtt, performance.now(), null);
           }),
         close: () => ws.close(),
       };
       d.transport = "TCP · WebSocket (UDP unavailable)";
+      d.udpAt = Date.now() + UDP_RETRY_MS;
     }
     return null;
+  }
+
+  /** A UDP session to one server, set up for the profile, or why the server refused it;
+   * throws when UDP can't get through. */
+  private async udp(d: Dest, series: number): Promise<{ probe: Probe; transport: string } | Refusal> {
+    const info = d.info!;
+    const profile = this.choice.profile;
+    const rtc = await RtcProbe.connect(d.ep, info.ice_servers);
+    if (profile !== "path") {
+      const answer = await rtc.profile(profile);
+      if (answer && !answer.ok) {
+        rtc.close();
+        if (answer.reason === "traffic limit") return { message: answer.message ?? REFUSED, url: answer.url ?? null };
+        return { message: `${info.server.name} doesn't offer Monitor's ${profile === "video" ? "Video call" : "Voice call"} profile.`, url: null };
+      }
+      if (info.capabilities.stamps) await rtc.stamp();
+      // At a traffic limit the server holds the session to path probes: follow it.
+      rtc.onNotice = (msg) => {
+        if (msg.op === "limit") this.limited(typeof msg.message === "string" ? msg.message : REFUSED, typeof msg.url === "string" ? msg.url : null);
+      };
+    }
+    rtc.onEcho = (seq, rtt, now, stamp) => {
+      this.record(d, series, seq, rtt);
+      d.stream?.echo(seq, rtt, now, stamp);
+    };
+    const family = await rtc.family().catch(() => null);
+    return { probe: { send: (seq, size) => rtc.send(seq, size), close: () => rtc.close() }, transport: ["UDP · WebRTC", family].filter(Boolean).join(" · ") };
+  }
+
+  /** An echo: on the chart if its probe is still waiting, and proof the server answers. */
+  private record(d: Dest, series: number, seq: number, rtt: number): void {
+    d.lastEcho = Date.now();
+    const t = d.sentAt.get(seq);
+    if (t === undefined) return;
+    d.sentAt.delete(seq);
+    d.latest = rtt;
+    this.chart.push({ t, rtt }, series);
+  }
+
+  // ---- Outages -------------------------------------------------------------------
+
+  /**
+   * Twice a second: a server whose echoes stopped SILENT_MS ago has gone quiet. Monitor asks
+   * it over HTTPS, and once it answers there while its probes still don't, opens a new
+   * session to it: over UDP, or TCP if UDP doesn't get through. Over TCP it tries UDP again
+   * every UDP_RETRY_MS.
+   */
+  private watch(): void {
+    const now = Date.now();
+    for (const [i, d] of this.dests.entries()) {
+      if (d.busy) continue;
+      const quiet = now - d.lastEcho > SILENT_MS;
+      if (!d.down) {
+        if (quiet) {
+          d.down = { since: d.lastEcho, check: now, answered: null, wait: 0, next: now };
+          this.showTransport();
+          this.renderChartHead();
+        } else if (d.transport.startsWith("TCP") && d.info?.capabilities.webrtc && now >= d.udpAt) {
+          void this.tryUdp(d, i);
+        }
+      } else if (!quiet) {
+        this.restored(d);
+      } else if (d.down.answered !== null && now - d.down.answered >= GRACE_MS && now >= d.down.next) {
+        void this.reconnect(d, i);
+      } else if (now >= d.down.check) {
+        void this.check(d);
+      }
+    }
+  }
+
+  /** Whether the quiet server answers over HTTPS: the network, and the server, are back. */
+  private async check(d: Dest): Promise<void> {
+    d.busy = true;
+    const ok = await d.ep.json("/health", { signal: AbortSignal.timeout(2000) }).then(
+      () => true,
+      () => false,
+    );
+    d.busy = false;
+    const down = d.down;
+    if (!down) return;
+    const now = Date.now();
+    down.answered = ok ? (down.answered ?? now) : null;
+    // A little earlier or later each time, so browsers don't all ask a restarted server at once.
+    down.check = now + (now - down.since < 60_000 ? CHECK_MS : CHECK_SLOW_MS) * (0.8 + Math.random() * 0.4);
+  }
+
+  /** A new session to a server that answers over HTTPS but not to its probes. */
+  private async reconnect(d: Dest, series: number): Promise<void> {
+    const run = this.runId;
+    d.busy = true;
+    this.drop(d);
+    d.info = null; // a restarted server may have new settings
+    d.transport = "reconnecting…";
+    this.showTransport();
+    const refusal = await this.connect(d, series).catch(() => null);
+    d.busy = false;
+    if (run !== this.runId || !this.running) {
+      this.drop(d); // stopped meanwhile
+      return;
+    }
+    d.stream?.newSession();
+    const down = d.down;
+    if (down) {
+      // Until its first echo, it's still down; if none comes, the next try waits longer.
+      const now = Date.now();
+      down.wait = down.wait ? Math.min(down.wait * 2, WAIT_MS[1]!) : WAIT_MS[0]!;
+      down.next = now + down.wait;
+      down.answered = null;
+      down.check = now + SILENT_MS;
+    }
+    if (refusal) this.limited(refusal.message, refusal.url);
+    this.showTransport();
+  }
+
+  private drop(d: Dest): void {
+    d.probe?.close();
+    d.probe = null;
+  }
+
+  /** Over the TCP fallback, a try of UDP; it takes over if it opens. */
+  private async tryUdp(d: Dest, series: number): Promise<void> {
+    const run = this.runId;
+    d.busy = true;
+    d.udpAt = Date.now() + UDP_RETRY_MS;
+    const got = await this.udp(d, series).catch(() => null);
+    d.busy = false;
+    if (!got || "message" in got) return;
+    if (run !== this.runId || !this.running || !d.transport.startsWith("TCP")) {
+      got.probe.close();
+      return;
+    }
+    d.probe?.close();
+    d.probe = got.probe;
+    d.transport = got.transport;
+    d.stream?.newSession();
+    this.showTransport();
+  }
+
+  /** A quiet server answers its probes again: say for how long it was gone. */
+  private restored(d: Dest): void {
+    const down = d.down!;
+    d.down = null;
+    this.outages++;
+    const at = (t: number) => new Date(t).toLocaleTimeString();
+    const gap = Math.max(0, Math.round((d.lastEcho - down.since) / 1000));
+    const span = gap < 120 ? `${gap}s` : `${Math.round(gap / 60)}\u00a0min`;
+    this.lastOutage = `${this.serverName(d)} didn't answer from ${at(down.since)} to ${at(d.lastEcho)}, for ${span}.`;
+    this.showTransport();
+    this.renderChartHead();
+  }
+
+  /**
+   * The line beside the chart's title: what the chart shows, or, in its place, a server
+   * quiet now, a stop by going to another page, or the latest outage and how many so far.
+   * It's the one line those take, so Monitor still fits a laptop's screen.
+   */
+  private renderChartHead(): void {
+    const about = this.choice.profile === "path" ? "One dot per probe. Red ticks along the top mark probes that never came back." : "One dot per voice packet, red ticks for lost ones; the strip scores each 10 seconds.";
+    const quiet = this.running ? this.dests.find((d) => d.down) : undefined;
+    let note = "";
+    if (quiet) {
+      note = `${this.serverName(quiet)} hasn't answered since ${new Date(quiet.down!.since).toLocaleTimeString()}. Monitor reconnects as soon as it answers again.`;
+    } else {
+      const outage = this.lastOutage && (this.outages > 1 ? `${this.lastOutage} ${this.outages} outages since Start.` : this.lastOutage);
+      note = [this.leftRunning ? "Stopped when you went to another page." : "", outage].filter(Boolean).join(" ");
+    }
+    setText(this.chartHead, note || about);
+    this.chartHead.classList.toggle("chart-status", Boolean(note));
+  }
+
+  private serverName(d: Dest): string {
+    const i = this.dests.indexOf(d);
+    const name = d.info?.server.name ?? new URL(d.ep.base).host;
+    return this.dests.length > 1 ? `${SIDES[i]!.short} (${name})` : name;
   }
 
   /** A server's traffic limit is reached: carry on with path probes, and say why. */
@@ -538,13 +745,16 @@ export class MonitorView implements View {
       const wall = Date.now();
       const now = performance.now();
       for (const d of this.dests) {
-        if (!d.probe) continue;
         if (frame >= 0 && d.transport.startsWith("TCP")) continue;
+        // Every probe keeps its place, so an outage counts as loss.
         if (charted) {
           d.sentAt.set(seq, wall);
           d.sent++;
         }
         d.stream?.sent(seq, frame, now, wall);
+        // A quiet server gets a probe a second, enough to see it come back by itself.
+        if (!d.probe || (d.down && wall - d.beat < 1000)) continue;
+        d.beat = wall;
         d.probe.send(seq, size);
       }
     };
@@ -559,6 +769,7 @@ export class MonitorView implements View {
         }, 1000 / VIDEO_FPS),
       );
     }
+    this.timers.push(window.setInterval(() => this.watch(), 500));
     // Probes not back within a second are lost.
     this.timers.push(
       window.setInterval(() => {
@@ -586,6 +797,8 @@ export class MonitorView implements View {
       d.probe = null;
     }
     this.running = false;
+    this.runId++;
+    if (this.chartHead) this.renderChartHead();
     if (this.startBtn) this.startBtn.textContent = "Start monitoring";
     if (this.transport) setText(this.transport, "idle");
     if (this.destBox) this.lock(false);

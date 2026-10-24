@@ -69,6 +69,11 @@ export class CallStream {
 
   constructor(readonly voiceIntervalMs: number) {}
 
+  /** A new session to the server, after an outage: its counts start again from its first probe. */
+  newSession(): void {
+    this.last = null;
+  }
+
   /** A packet sent: voice (`frame` -1) or one of a video frame's. */
   sent(seq: number, frame: number, sent: number, wall: number): void {
     // The server counts from its session's first probe, which is this stream's first.

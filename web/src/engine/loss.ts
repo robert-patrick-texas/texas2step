@@ -9,6 +9,9 @@ import { summarize } from "./stats";
 
 const HEADER = 12; // u32 sequence + f64 send time
 const STAMPED = HEADER + 12; // and, with stamps on, the server's f64 arrival time + u32 count
+// Probes held in the browser's send queue before more are dropped instead: past this, the
+// network has stopped taking them (an outage), and they would only arrive late.
+const MAX_QUEUED = 1 << 20;
 
 /** What the server stamped into an echo: its clock when the probe arrived (ms), and how
  * many probes it had received by then, this one included. */
@@ -148,11 +151,13 @@ export class RtcProbe {
     return { address, port: typeof remote?.port === "number" ? remote.port : null, family: address.includes(":") ? "IPv6" : "IPv4", local };
   }
 
-  /** Sends probe `seq`, `size` bytes long; when it was sent. */
+  /** Sends probe `seq`, `size` bytes long; when it was sent. On a channel that has closed,
+   * or that the network has stopped draining, the probe is dropped: it counts as lost. */
   send(seq: number, size: number): number {
+    const now = performance.now();
+    if (this.probe.readyState !== "open" || this.probe.bufferedAmount > MAX_QUEUED) return now;
     const buf = new ArrayBuffer(Math.max(size, HEADER));
     const view = new DataView(buf);
-    const now = performance.now();
     view.setUint32(0, seq >>> 0, true);
     view.setFloat64(4, now, true);
     this.probe.send(buf);
