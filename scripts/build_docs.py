@@ -59,6 +59,7 @@ LEADING: list[tuple[str, str | None]] = [
     ("docs/roadmap.md", None),
 ]
 TRAILING: list[tuple[str, str | None]] = [
+    ("SECURITY.md", "Security policy"),
     ("LICENSE.md", "License"),
     ("legacy/README.md", "Legacy prototype"),
 ]
