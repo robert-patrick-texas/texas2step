@@ -2178,6 +2178,18 @@ a.brand-org:hover,
   max-width: 88ch;
 }
 
+/* Monitor: a server refused a profile, or held it to path probes at a traffic limit. */
+.monitor-notice {
+  margin: 6px 0 0;
+  max-width: 88ch;
+  color: var(--ink);
+  font-weight: 550;
+}
+
+.monitor-notice[hidden] {
+  display: none;
+}
+
 .head-actions {
   display: flex;
   gap: 10px;
@@ -2223,6 +2235,17 @@ a.brand-org:hover,
   display: contents;
 }
 
+/* Monitor's exact sizes and rates: a fold at the end of the toolbar, a row of its own open. */
+.options.monitor-sizes {
+  align-self: flex-end;
+  margin: 0 0 9px;
+}
+
+.options.monitor-sizes[open] {
+  flex-basis: 100%;
+  margin-bottom: 0;
+}
+
 /* The Servers switch: an accent ring, and on "Two" the dots of A and B. While on One,
    it pulses twice when the page opens. */
 .seg.seg-feature {
@@ -2263,6 +2286,12 @@ a.brand-org:hover,
 
 .card-head.head-inline p {
   margin: 0;
+}
+
+/* Monitor's connection, at the end of the chart's header. */
+.card-head.head-inline .chip {
+  margin-left: auto;
+  align-self: center;
 }
 
 .loss-strip + .loss-strip {

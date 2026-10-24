@@ -74,6 +74,15 @@ sending the offer. The offer must include data channels:
   server's clock is its own: compare its stamps with each other, not with the client's
   clock. Servers that can stamp say so with `capabilities.stamps` in `/api/v1/info`.
 
+  `{"op":"profile","name":"voice"}` (or `"video"`, or `"path"`) says which of Monitor's
+  profiles the session runs. A voice or video session counts toward a
+  [traffic limit](traffic.md#monitors-call-profiles). The answer is
+  `{"op":"profile","ok":true,"name":"voice"}`, or `"ok": false` with a `reason`: the
+  server withholds video (`monitor_video = false`), or a traffic limit is reached, when
+  the site's `message` and `url` come with it. Past a limit while a session runs, the
+  server sends `{"op":"limit","message":…,"url":…}` unasked and from then on echoes only
+  probes of up to 64 bytes.
+
 Sessions close when the peer disconnects or after `rtc_session_timeout` seconds idle.
 The server answers `503` when it already holds `max_rtc_sessions` sessions, or when
 every port in its `rtc_port_min`–`rtc_port_max` range is taken.
@@ -82,7 +91,7 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/v1/info` | name, version, server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes), limits, ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise); with a [traffic limit](traffic.md), `traffic` (below) |
+| GET | `/api/v1/info` | name, version, server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes), limits, ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `monitor` (`profile`: Monitor's until a visitor picks; `video`: whether the Video call profile is offered); with a [traffic limit](traffic.md), `traffic` (below) |
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |

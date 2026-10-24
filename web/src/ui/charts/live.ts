@@ -1,11 +1,14 @@
 // Scrolling RTT chart for the monitor: one dot per probe, lost probes as ticks on top,
-// and a per-second loss strip underneath. It draws one series, or two (one per server)
-// on shared axes, so two paths can be compared directly.
+// and a per-second loss strip underneath; for a call, a strip of its quality every 10
+// seconds below that. It draws one series, or two (one per server) on shared axes, so two
+// paths can be compared directly.
+import type { Slice } from "../../engine/stream";
+import type { CallRating } from "../../types";
 import { clear, cssVar, h, onResize, pointerIn } from "../dom";
 import { compact, ms, niceTicks, pct, text } from "../format";
 import { onSizeChange } from "../size";
 import { onThemeChange } from "../theme";
-import { hideTip, showTip } from "../tooltip";
+import { hideTip, showTip, type TipRow } from "../tooltip";
 import { log125 } from "./common";
 
 export interface LiveSample {
@@ -21,11 +24,24 @@ export interface LiveSeries {
 
 const LONE: LiveSeries = { label: "", short: "", token: "--idle" };
 
+// A call's rating as a slice's fill: the grades' colours, paler for the better ratings.
+const RATING_FILL: Record<CallRating, [string, number]> = {
+  excellent: ["--good", 0.5],
+  good: ["--good", 0.25],
+  fair: ["--warning", 0.45],
+  poor: ["--serious", 0.5],
+  bad: ["--critical", 0.55],
+};
+const RATING_WORD: Record<CallRating, string> = { excellent: "Excellent", good: "Good", fair: "Fair", poor: "Poor", bad: "Bad" };
+
 export class LiveChart {
   readonly el: HTMLElement;
   private canvas: HTMLCanvasElement;
   private strips: HTMLCanvasElement[] = [];
   private stripBox: HTMLElement;
+  private callBox: HTMLElement;
+  private callStrips: HTMLCanvasElement[] = [];
+  private calls: (Slice[] | null)[] = []; // per series, with a call profile
   private series: (LiveSeries & { samples: LiveSample[] })[] = [];
   private windowS = 60;
   private log = false;
@@ -37,7 +53,8 @@ export class LiveChart {
   constructor() {
     this.canvas = h("canvas", { class: "live-canvas", role: "img", "aria-label": "Round-trip time over the monitoring window" });
     this.stripBox = h("div", {});
-    this.el = h("div", { class: "chart live" }, this.canvas, this.stripBox);
+    this.callBox = h("div", { hidden: true });
+    this.el = h("div", { class: "chart live" }, this.canvas, this.stripBox, this.callBox);
     this.setSeries([LONE]);
     onResize(this.el, (w) => {
       this.width = w;
@@ -72,7 +89,32 @@ export class LiveChart {
       this.stripBox.append(strip);
       return strip;
     });
+    clear(this.callBox);
+    this.callBox.append(h("div", { class: "strip-label" }, "Call quality per 10 s"));
+    this.callStrips = this.series.map((s, i) => {
+      const strip = h("canvas", { class: "loss-strip", role: "img", "aria-label": s.label ? `Call quality every 10 seconds, ${s.label}` : "Call quality every 10 seconds" });
+      strip.addEventListener("pointermove", (ev) => this.callTip(ev, strip, i));
+      strip.addEventListener("pointerleave", () => hideTip());
+      this.callBox.append(strip);
+      return strip;
+    });
+    this.calls = this.series.map(() => null);
     this.draw();
+  }
+
+  /** A call's 10-second slices, per series; all null for the path profile. A call's strips
+   * take the place of the loss strips: lost packets still show along the top. */
+  setCalls(calls: (Slice[] | null)[]): void {
+    this.calls = calls;
+    const call = calls.some((c) => c);
+    if (this.callBox.hidden === !call) return void this.draw();
+    this.callBox.hidden = !call;
+    this.stripBox.hidden = call;
+    this.draw();
+  }
+
+  get windowSeconds(): number {
+    return this.windowS;
   }
 
   setWindow(seconds: number): void {
@@ -121,7 +163,8 @@ export class LiveChart {
   private plotHeight(): number {
     const box = this.canvas.getBoundingClientRect();
     const k = box.width ? this.width / box.width : 1; // layout pixels per screen pixel
-    const below = 74 + 22 * this.series.length; // the loss strips, their label and the card's padding
+    // The loss strips (or a call's), their label and the card's padding.
+    const below = 74 + 22 * this.series.length;
     const room = (window.innerHeight - box.top - window.scrollY) * k - below;
     return Math.round(Math.min(340, Math.max(this.series.length > 1 ? 140 : 170, room)));
   }
@@ -226,7 +269,67 @@ export class LiveChart {
       ctx.stroke();
     }
 
-    for (const [i, strip] of this.strips.entries()) this.drawStrip(strip, data[i] ?? [], from, ink, this.series[i]!);
+    if (!this.stripBox.hidden) for (const [i, strip] of this.strips.entries()) this.drawStrip(strip, data[i] ?? [], from, ink, this.series[i]!);
+    if (!this.callBox.hidden) for (const [i, strip] of this.callStrips.entries()) this.drawCalls(strip, this.calls[i] ?? [], from, this.series[i]!);
+  }
+
+  /** One cell per 10-second slice, coloured by its rating, its score written in when it fits. */
+  private drawCalls(strip: HTMLCanvasElement, slices: Slice[], from: number, series: LiveSeries): void {
+    const W = this.width;
+    const H = 18;
+    const ctx = this.setup(strip, H);
+    const { left, right } = this.m;
+    const x = (t: number) => left + ((t - from) / (this.windowS * 1000)) * (W - left - right);
+    if (this.series.length > 1) {
+      ctx.fillStyle = cssVar(series.token);
+      ctx.font = "600 10px system-ui, sans-serif";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText(series.short, left - 8, H / 2);
+    }
+    ctx.font = "600 10px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const ink = cssVar("--ink");
+    for (const s of slices) {
+      const x0 = Math.max(left, x(s.start));
+      const x1 = Math.min(W - right, x(s.end));
+      if (x1 - x0 < 1) continue;
+      const rating: CallRating = s.dead ? "bad" : (s.call?.rating ?? "bad");
+      const [token, alpha] = RATING_FILL[rating];
+      ctx.fillStyle = cssVar(token);
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.roundRect(x0 + 1, 2, Math.max(1, x1 - x0 - 2), H - 4, 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      if (x1 - x0 >= 30 && (s.call || s.dead)) {
+        ctx.fillStyle = ink;
+        ctx.fillText(s.dead ? "—" : s.call!.mos.toFixed(1), (x0 + x1) / 2, H / 2 + 0.5);
+      }
+    }
+  }
+
+  private callTip(ev: PointerEvent, strip: HTMLCanvasElement, i: number): void {
+    const { left, right } = this.m;
+    const from = Date.now() - this.windowS * 1000;
+    const t = from + ((pointerIn(ev, strip, this.width).x - left) / (this.width - left - right)) * this.windowS * 1000;
+    const s = (this.calls[i] ?? []).find((c) => t >= c.start && t < c.end);
+    if (!s) return hideTip();
+    const when = `${new Date(s.start).toLocaleTimeString()} – ${new Date(s.end).toLocaleTimeString()}`;
+    const who = this.series[i]!.label ? `${this.series[i]!.label}: ` : "";
+    if (s.dead || !s.call) return showTip(ev.clientX, ev.clientY, when, [{ value: "No packets came back", label: `${who}${s.sent} sent` }]);
+    const c = s.call;
+    const rated = (r: CallRating, mos: number) => `${mos.toFixed(1)} · ${RATING_WORD[r]}`;
+    const rows: TipRow[] = [{ value: rated(c.rating, c.mos), label: `${who}call quality`, color: `var(${RATING_FILL[c.rating][0]})`, shape: "dot" }];
+    if (c.down && c.up) {
+      rows.push({ value: rated(c.down.rating, c.down.mos), label: "you hear" });
+      rows.push({ value: rated(c.up.rating, c.up.mos), label: "the other end hears" });
+    }
+    rows.push({ value: `${c.longest_gap_ms.toLocaleString()} ms`, label: "longest gap" });
+    rows.push({ value: text(pct((s.lost / Math.max(1, s.sent)) * 100)), label: `lost, ${c.late} late` });
+    if (s.frames) rows.push({ value: text(pct((s.frames.hit / Math.max(1, s.frames.total)) * 100)), label: `of ${s.frames.total} video frames hit` });
+    showTip(ev.clientX, ev.clientY, when, rows);
   }
 
   private drawStrip(strip: HTMLCanvasElement, data: LiveSample[], from: number, ink: Record<string, string>, series: LiveSeries): void {

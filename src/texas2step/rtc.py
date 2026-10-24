@@ -66,6 +66,16 @@ _RCVBUF = 256 * 1024  # the receive buffer aioice gives its own sockets
 # probes received so far, this one included, after the client's u32 sequence and f64 time.
 STAMP = struct.Struct("<dI")
 STAMP_AT = 12
+# Monitor's profiles. Path probes are small and uncounted, as they always were. Voice and
+# video sessions count toward a traffic limit; past it a session is held to path probes.
+PROFILES = ("path", "voice", "video")
+PATH_BYTES = 64
+LIMIT_CHECK = 5.0  # seconds between checks that a counted session is still within a limit
+# A traffic limit counts what the network carries: each probe's bytes, its SCTP, DTLS, UDP
+# and IP headers, and the acknowledgements, which this server sends one of per probe. Per
+# probe, measured over IPv6 for voice and video sessions (IPv4 carries a little less).
+SENT_OVERHEAD = 230
+RECEIVED_OVERHEAD = 150
 
 
 def _bind_in_range(address: str, ports: tuple[int, int]) -> socket.socket | None:
@@ -179,6 +189,10 @@ class Session:
     tx: int = 0
     rx_bytes: int = 0
     stamp: bool = False
+    whose: str | None = None  # the client's kind for a traffic limit (traffic.TrafficMeter.kind)
+    profile: str = "path"
+    limited: bool = False  # held to path probes by a traffic limit
+    control: Any = None  # the control channel, to tell the client of a limit reached
 
     def counters(self) -> dict[str, int]:
         return {"rx": self.rx, "tx": self.tx, "rx_bytes": self.rx_bytes}
@@ -207,8 +221,12 @@ class RtcEcho:
         timeout: float,
         enabled: bool = True,
         port_range: tuple[int, int] | None = None,
+        video: bool = True,
     ) -> None:
         self.enabled = enabled and AVAILABLE
+        self.video = video
+        self.meter: Any = None  # a traffic.TrafficMeter, when the server has a traffic limit
+        self._replies: set[asyncio.Future[None]] = set()
         self.ice_servers = ice_servers
         self.max_sessions = max_sessions
         self.timeout = timeout
@@ -232,7 +250,45 @@ class RtcEcho:
             self._reaper = None
         await asyncio.gather(*(self._close(s) for s in list(self.sessions.values())))
 
-    async def answer(self, sdp: str, kind: str = "offer") -> dict[str, str]:
+    def counted(self, session: Session) -> bool:
+        """Whether a traffic limit counts this session's voice or video traffic."""
+        return (
+            self.meter is not None
+            and session.whose is not None
+            and self.meter.counted_for(session.whose)
+        )
+
+    def past_limit(self) -> dict[str, Any] | None:
+        """The site's notice while a traffic limit is reached, as a refused test gets it;
+        None within it. Reads the limit's file: call it off the event loop."""
+        meter = self.meter
+        return meter.notice() if meter is not None and meter.refusal(*meter.periods()) else None
+
+    async def choose(self, session: Session, name: Any) -> dict[str, Any]:
+        """The reply to {"op": "profile", "name": …}: whether the session may run it."""
+        if name not in PROFILES:
+            return {
+                "op": "profile",
+                "ok": False,
+                "reason": f"expected one of {', '.join(PROFILES)}",
+            }
+        if name == "video" and not self.video:
+            return {"op": "profile", "ok": False, "reason": "this server doesn't offer video"}
+        counted = name != "path" and self.counted(session)
+        if counted and (notice := await asyncio.to_thread(self.past_limit)):
+            return {"op": "profile", "ok": False, "reason": "traffic limit", **notice}
+        session.profile = name
+        session.limited = False
+        return {"op": "profile", "ok": True, "name": name}
+
+    async def _reply(self, channel: Any, session: Session, name: Any) -> None:
+        reply = await self.choose(session, name)
+        with contextlib.suppress(Exception):
+            channel.send(json.dumps(reply))
+
+    async def answer(
+        self, sdp: str, kind: str = "offer", whose: str | None = None
+    ) -> dict[str, str]:
         if not self.enabled:
             raise RtcUnavailable("WebRTC probing is disabled or aiortc is not installed")
         if len(self.sessions) >= self.max_sessions:
@@ -242,7 +298,7 @@ class RtcEcho:
         # STUN server, which an internal deployment should not contact unasked.
         config = RTCConfiguration(iceServers=[RTCIceServer(urls=url) for url in self.ice_servers])
         pc = RTCPeerConnection(configuration=config)
-        session = Session(id=secrets.token_urlsafe(8), pc=pc)
+        session = Session(id=secrets.token_urlsafe(8), pc=pc, whose=whose)
         self.sessions[session.id] = session
 
         @pc.on("datachannel")
@@ -255,14 +311,23 @@ class RtcEcho:
                     session.rx += 1
                     session.rx_bytes += len(message)
                     session.last_seen = now
+                    counted = session.profile != "path"
+                    if session.limited and len(message) > PATH_BYTES:
+                        return  # past a traffic limit: only path probes are echoed
                     end = STAMP_AT + STAMP.size
                     if session.stamp and isinstance(message, bytes) and len(message) >= end:
                         stamp = STAMP.pack(now * 1000, session.rx & 0xFFFFFFFF)
                         message = message[:STAMP_AT] + stamp + message[end:]
                     channel.send(message)
                     session.tx += 1
+                    if counted and self.meter is not None and session.whose is not None:
+                        n = len(message)
+                        self.meter.add(
+                            session.whose, sent=n + SENT_OVERHEAD, received=n + RECEIVED_OVERHEAD
+                        )
 
             elif channel.label == "control":
+                session.control = channel
 
                 @channel.on("message")
                 def on_control(message: bytes | str) -> None:
@@ -282,6 +347,12 @@ class RtcEcho:
                     elif op == "stamp":
                         session.stamp = True
                         channel.send(json.dumps({"op": "stamp"}))
+                    elif op == "profile":
+                        task = asyncio.ensure_future(
+                            self._reply(channel, session, request.get("name"))
+                        )
+                        self._replies.add(task)
+                        task.add_done_callback(self._replies.discard)
 
         @pc.on("connectionstatechange")
         async def on_state() -> None:
@@ -305,9 +376,21 @@ class RtcEcho:
             with contextlib.suppress(Exception):
                 await session.pc.close()
 
+    async def hold(self) -> None:
+        """Past a traffic limit, hold the sessions it counts to path probes, and say why."""
+        counted = [s for s in self.sessions.values() if s.profile != "path" and self.counted(s)]
+        if not counted or not (notice := await asyncio.to_thread(self.past_limit)):
+            return
+        for session in counted:
+            session.profile = "path"
+            session.limited = True
+            with contextlib.suppress(Exception):
+                session.control.send(json.dumps({"op": "limit", **notice}))
+
     async def _reap(self) -> None:
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(LIMIT_CHECK)
+            await self.hold()
             now = time.monotonic()
             for session in list(self.sessions.values()):
                 idle = now - session.last_seen

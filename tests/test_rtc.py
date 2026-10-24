@@ -138,6 +138,84 @@ async def test_stamps_on_request(peers):
         await echo.stop()
 
 
+class FakeMeter:
+    """A traffic limit that counts outsiders, and is reached when `past` is set."""
+
+    def __init__(self) -> None:
+        self.past = False
+        self.added: list[tuple[str, int, int]] = []
+
+    def counted_for(self, kind: str) -> bool:
+        return kind == "outside"
+
+    def periods(self) -> tuple[None, None]:
+        return None, None
+
+    def refusal(self, *_: Any) -> object | None:
+        return object() if self.past else None
+
+    def notice(self) -> dict[str, Any]:
+        return {
+            "detail": "Testing temporarily disabled.",
+            "message": "Testing temporarily disabled.",
+            "url": None,
+        }
+
+    def add(self, kind: str, sent: int = 0, received: int = 0) -> None:
+        self.added.append((kind, sent, received))
+
+
+async def test_profiles_count_toward_a_traffic_limit(peers):
+    echo = RtcEcho([], max_sessions=4, timeout=60, port_range=RANGE, video=False)
+    echo.meter = meter = FakeMeter()
+    echo.start()
+    try:
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        peers.append(pc)
+        probe = pc.createDataChannel("probe", ordered=False, maxRetransmits=0)
+        control = pc.createDataChannel("control")
+        await pc.setLocalDescription(await pc.createOffer())
+        answer = await echo.answer(pc.localDescription.sdp, whose="outside")
+
+        opened = asyncio.Event()
+        replies: asyncio.Queue[Any] = asyncio.Queue()
+        echoes: asyncio.Queue[bytes] = asyncio.Queue()
+        control.on("open", opened.set)
+        control.on("message", lambda m: replies.put_nowait(json.loads(m)))
+        probe.on("message", echoes.put_nowait)
+        await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
+        await asyncio.wait_for(opened.wait(), 10)
+
+        async def ask(name: str) -> dict[str, Any]:
+            control.send(json.dumps({"op": "profile", "name": name}))
+            return await asyncio.wait_for(replies.get(), 5)
+
+        # Path probes, as before: echoed and not counted.
+        probe.send(bytes(64))
+        assert await asyncio.wait_for(echoes.get(), 5) == bytes(64)
+        assert meter.added == []
+        # This server withholds video; voice is counted both ways.
+        assert (await ask("video"))["ok"] is False
+        assert await ask("voice") == {"op": "profile", "ok": True, "name": "voice"}
+        probe.send(bytes(200))
+        await asyncio.wait_for(echoes.get(), 5)
+        assert meter.added == [("outside", 200 + 230, 200 + 150)]  # with headers and acks
+        # Past the limit: the client is told, and only path probes come back.
+        meter.past = True
+        await echo.hold()
+        told = await asyncio.wait_for(replies.get(), 5)
+        assert told["op"] == "limit" and told["message"] == "Testing temporarily disabled."
+        probe.send(bytes(200))
+        probe.send(bytes(64))
+        assert await asyncio.wait_for(echoes.get(), 5) == bytes(64)
+        assert echoes.empty()
+        refused = await ask("voice")
+        assert refused["ok"] is False and refused["reason"] == "traffic limit"
+        assert len(meter.added) == 1
+    finally:
+        await echo.stop()
+
+
 def test_addresses_are_null_before_a_path_exists():
     from texas2step.rtc import Session
 

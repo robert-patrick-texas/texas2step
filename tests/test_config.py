@@ -123,3 +123,11 @@ def test_branding_rejects_unsafe_or_unknown_values(tmp_path):
     path.write_text('[[brand_links]]\nlable = "Help"\nurl = "https://help.example"\n')
     with pytest.raises(ValueError, match="brand_links"):
         load_settings(path)
+
+
+def test_monitor_profile_is_checked():
+    assert Settings().monitor_profile == "path" and Settings().monitor_video is True
+    with pytest.raises(ValueError, match="monitor_profile"):
+        Settings(monitor_profile="ping")
+    with pytest.raises(ValueError, match="monitor_video"):
+        Settings(monitor_profile="video", monitor_video=False)

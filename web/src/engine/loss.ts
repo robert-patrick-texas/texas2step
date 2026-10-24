@@ -44,8 +44,19 @@ export interface UdpAddress {
 
 type ControlReply = Record<string, unknown>;
 
+/** The server's answer to a profile asked for: allowed, or why not, with a traffic limit's
+ * message and link as a refused test gets them. */
+export interface ProfileReply {
+  ok: boolean;
+  reason?: string;
+  message?: string | null;
+  url?: string | null;
+}
+
 export class RtcProbe {
   onEcho: ((seq: number, rtt: number, now: number, stamp: Stamp | null) => void) | null = null;
+  /** A message the server sends unasked, such as {"op": "limit"} at a traffic limit. */
+  onNotice: ((msg: Record<string, unknown>) => void) | null = null;
   private stamping = false;
   private controlWaiters: { op: string; done: (msg: ControlReply) => void }[] = [];
 
@@ -68,6 +79,7 @@ export class RtcProbe {
         // Each reply names its request ("op"), so a late one can't answer another request.
         const at = this.controlWaiters.findIndex((w) => w.op === msg.op);
         if (at >= 0) this.controlWaiters.splice(at, 1)[0]!.done(msg);
+        else this.onNotice?.(msg);
       } catch {
         /* ignore */
       }
@@ -153,6 +165,15 @@ export class RtcProbe {
     return this.stamping;
   }
 
+  /** Asks to run one of Monitor's profiles. A server from before profiles doesn't answer,
+   * and doesn't count or hold any: null. */
+  async profile(name: string, timeoutMs = 2000): Promise<ProfileReply | null> {
+    const msg = await this.ask("profile", timeoutMs, { name });
+    if (!msg) return null;
+    const str = (v: unknown) => (typeof v === "string" ? v : null);
+    return { ok: msg.ok === true, reason: str(msg.reason) ?? undefined, message: str(msg.message), url: str(msg.url) };
+  }
+
   async counters(timeoutMs = 2000): Promise<{ rx: number; tx: number } | null> {
     const msg = await this.ask("stats", timeoutMs);
     return msg ? { rx: Number(msg.rx ?? 0), tx: Number(msg.tx ?? 0) } : null;
@@ -168,7 +189,7 @@ export class RtcProbe {
   }
 
   /** One request on the control channel; replies come back in order. */
-  private ask(op: string, timeoutMs: number): Promise<ControlReply | null> {
+  private ask(op: string, timeoutMs: number, extra: Record<string, unknown> = {}): Promise<ControlReply | null> {
     if (this.control.readyState !== "open") return Promise.resolve(null);
     return new Promise((resolve) => {
       const waiter = {
@@ -184,7 +205,7 @@ export class RtcProbe {
         resolve(null);
       }, timeoutMs);
       this.controlWaiters.push(waiter);
-      this.control.send(JSON.stringify({ op }));
+      this.control.send(JSON.stringify({ op, ...extra }));
     });
   }
 

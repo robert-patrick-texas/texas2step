@@ -88,6 +88,8 @@ async def info(request: Request) -> dict[str, Any]:
             "packets": s.default_packets,
             "one_stream": s.default_one_stream,
         },
+        # Monitor's profile until a visitor picks one, and whether the video one is offered.
+        "monitor": {"profile": s.monitor_profile, "video": s.monitor_video},
     }
     if (meter := request.app.state.traffic) is not None:
         # Whether a traffic limit lets this client test; for the desk, how much is left.

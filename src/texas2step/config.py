@@ -30,6 +30,7 @@ THEMES = ("system", "light", "dark", "america", "energy", "federal", "military",
 LINK_SCHEMES = ("https://", "http://", "mailto:", "tel:")
 CREDITS = ("link", "text", "none")  # brand_credit
 TRAFFIC_COUNTS = ("sent", "received", "both")
+MONITOR_PROFILES = ("path", "voice", "video")  # monitor_profile
 
 
 @dataclass(frozen=True)
@@ -105,6 +106,11 @@ class Settings:
     # chooses: up to half again a test's traffic, so a server whose traffic is billed may
     # want it off.
     default_one_stream: bool = True
+    # Monitor's profile until a visitor picks one: path (small probes, as a ping tracker),
+    # voice (a voice call's packets) or video (a video call's, with its voice). Voice and
+    # video count toward a traffic limit; monitor_video = false withholds the video one.
+    monitor_profile: str = "path"
+    monitor_video: bool = True
 
     # HTTP plumbing.
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
@@ -188,6 +194,10 @@ class Settings:
             )
         if self.default_theme not in THEMES:
             raise ValueError(f"default_theme: expected one of {', '.join(THEMES)}")
+        if self.monitor_profile not in MONITOR_PROFILES:
+            raise ValueError(f"monitor_profile: expected one of {', '.join(MONITOR_PROFILES)}")
+        if self.monitor_profile == "video" and not self.monitor_video:
+            raise ValueError("monitor_profile: video, but monitor_video = false withholds it")
         if self.brand_credit not in CREDITS:
             raise ValueError(f"brand_credit: expected one of {', '.join(CREDITS)}")
         if not self.update_url.startswith(("https://", "http://", "file:///")):

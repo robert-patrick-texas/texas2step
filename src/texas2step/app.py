@@ -356,7 +356,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.rtc_session_timeout,
         enabled=settings.webrtc_enabled,
         port_range=settings.rtc_ports,
+        video=settings.monitor_video,
     )
+    app.state.rtc.meter = app.state.traffic
 
     @app.exception_handler(traffic.Closed)
     async def closed(request: Request, exc: traffic.Closed) -> JSONResponse:

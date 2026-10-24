@@ -127,13 +127,32 @@ For scripts, `/api/v1/info` gives `traffic`: whether the caller may start a test
 callers in `internal_networks`, the day's and month's figures and when tests start again.
 See [the API](api.md#discovery).
 
+## Monitor's call profiles
+
+Monitor's [Voice call and Video call profiles](methodology.md#live-monitor) send a call's
+packets for as long as the page runs, so they count toward the limit too. They are
+counted as the network carries them: each packet with its headers, and the
+acknowledgements the server sends back, as measured over IPv6. A tab left running:
+
+| Profile | Server sends | Server receives | Both, a day |
+|---|---|---|---|
+| Voice call | 171 kb/s, 1.85 GB a day | 133 kb/s, 1.43 GB a day | 3.3 GB |
+| Video call, 1 Mb/s of video | 1.46 Mb/s, 15.7 GB a day | 1.37 Mb/s, 14.7 GB a day | 30.5 GB |
+
+When the limit is reached, the server holds those sessions to the small probes of the
+Path profile, which aren't counted, and Monitor says so with the site's message and link.
+Until the limit opens again, a call profile is refused at its start.
+`monitor_video = false` in the settings withholds the Video call profile altogether.
+
 ## What isn't counted
 
-The limit counts the bytes of the download and upload tests. The bill also has:
+The limit counts the bytes of the download and upload tests, and of Monitor's call
+profiles. The bill also has:
 
 * **Packet headers**: TCP, IP and TLS add 3% to 5% to what the tests move.
 * **Page loads**: about 150 KB a visit, less once the browser has cached the page.
-* **Monitor, Diag, the UDP probe and the latency checks**: a few hundred bytes a second.
+* **Monitor's Path profile, Diag, the UDP probe and the latency checks**: a few hundred
+  bytes a second.
   A page left open adds up, though. Over 24 hours, measured at the IP layer over IPv6
   (IPv4's headers are smaller, so about 10% less):
 

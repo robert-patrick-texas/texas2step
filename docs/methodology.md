@@ -254,9 +254,46 @@ far more for these than bandwidth does.
 
 ## Live monitor
 
-The monitor sends probes continuously over the UDP channel (or the WebSocket fallback)
-at 5–50 per second. A probe that has not returned within one second is counted as lost.
-Statistics cover the visible window (1, 5 or 15 minutes).
+The monitor sends packets continuously over the UDP channel (or the WebSocket fallback)
+and draws each one's round trip. A packet that has not returned within one second is
+counted as lost. Statistics cover the visible window (1, 5 or 15 minutes).
+
+A **profile** sets what is sent. Anyone can switch it beside the Start button. Options
+holds the exact sizes and rates, and the page's address carries them, so the service
+desk can send a caller a link such as `/monitor?profile=voice`. The site picks the
+profile a visitor starts with (`monitor_profile`).
+
+| Profile | Sends | Each way, as the network carries it |
+|---|---|---|
+| **Path** | Small probes, 64 bytes, 5 to 50 a second (10 by default): a running record of the path's round trip, jitter and loss | about 25 kb/s at 10 a second |
+| **Voice call** | A voice call's packets: 200 bytes every 20 ms | about 150 kb/s |
+| **Video call** | The voice packets, and 30 video frames a second, each a burst of 1,100-byte packets (4 for 1 Mb/s of video) | about 1.4 Mb/s |
+
+Video packets are 1,100 bytes so that each travels as a single UDP packet: a browser
+splits a data-channel message much larger than that, and one lost piece would lose the
+whole. A frame goes out as a burst because a video call sends it that way, and bursts are
+what shallow buffers and policers drop.
+
+With a call profile, the server [stamps](#packet-loss-udp) each echo, and every
+10 seconds of the call is scored as the Test page scores its packet-loss test, each
+direction on its own ([Call quality](#call-quality)):
+
+* **A strip of 10-second cells** under the chart, coloured by rating, with the score
+  written in where it fits. It takes the place of the loss-per-second strip; lost
+  packets still show as red ticks along the top.
+* **Call quality**, the median 10-second score in the window; **Worst 10 s**, and how
+  long ago; **Below good**, the share of 10-second cells rated below good (4.0).
+* **Frames hit** (Video call): video frames with a packet lost or more than 60 ms late,
+  in the worse direction. Each is a freeze or a smear on the screen.
+
+Over hours the two computers' clocks drift apart, by tens of milliseconds an hour, so each
+cell measures delays against its own fastest packet, where the drift is a fraction of a
+millisecond. A server without stamps scores each cell on round trips, and over the TCP
+fallback only the voice packets are sent.
+
+Voice and Video calls count toward a [traffic limit](traffic.md#monitors-call-profiles).
+When one is reached, the server holds the session to path probes and says so, and the
+monitor carries on with the Path profile and shows the site's message.
 
 When the site lists two or more servers, the monitor can probe two of them at once. The
 browser opens a separate session to each server directly, over UDP where it can and

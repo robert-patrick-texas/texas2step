@@ -169,7 +169,11 @@ function judge(seqs: readonly number[], lost: readonly boolean[], late: readonly
  * and the figures at the top are the worse one's. Without them, a probe is late when its
  * round trip was more than the buffer behind the fastest.
  */
-export function callQuality(loss: LossResult | undefined): CallQuality | null {
+/** What a call's quality is worked out from: a packet-loss result, or Monitor's slice of a
+ * call's packets. */
+export type CallInput = Pick<LossResult, "packets" | "interval_ms" | "up_ms" | "down_ms" | "lost_upstream" | "error"> & { rtt: { median: number | null } };
+
+export function callQuality(loss: CallInput | undefined): CallQuality | null {
   if (!loss || loss.error) return null;
   const rtts = loss.packets ?? [];
   if (!rtts.some((t) => t !== null)) return null;

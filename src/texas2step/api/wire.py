@@ -189,7 +189,10 @@ async def rtc_offer(offer: Offer, request: Request) -> dict[str, str]:
     if "m=application" not in offer.sdp:
         raise HTTPException(400, "offer has no data channel (m=application)")
     try:
-        return await request.app.state.rtc.answer(offer.sdp)
+        # Whose traffic a voice or video profile is, should a traffic limit count it.
+        meter = request.app.state.traffic
+        whose = meter.kind(client_address(request)[0]) if meter is not None else None
+        return await request.app.state.rtc.answer(offer.sdp, whose=whose)
     except RtcUnavailable as exc:
         raise HTTPException(501, str(exc)) from exc
     except RtcBusy as exc:
