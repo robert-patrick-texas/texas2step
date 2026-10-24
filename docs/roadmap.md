@@ -102,6 +102,15 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.2.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.0) (2026-10-24)
+
+- [x] Each page keeps what it shows across tabs; only the page on screen measures.
+- [x] The screen stays on while Monitor or Diag is open and while a test runs, with a
+  Keep screen on switch.
+- [x] An organization's own footer: `brand_footer` and `[[brand_footer_links]]`.
+- [x] Monitor's call tiles put their rating and "ago" under the score on narrow screens.
+- [x] Releases publish to PyPI from GitHub, by trusted publishing.
+
 ### [2.1.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.1.1) (2026-10-24)
 
 - [x] Monitor holds still at Stop, to show or take a screenshot of.
