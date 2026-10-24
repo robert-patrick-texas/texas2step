@@ -210,5 +210,7 @@ texas2step can't do these for you:
 ## Reporting a vulnerability
 
 Please don't put the details of a security problem in a public issue.
-[Open an issue](https://github.com/robert-patrick-texas/texas2step/issues/new) that asks
-for a private way to send them, and one will be arranged.
+[Report it privately](https://github.com/robert-patrick-texas/texas2step/security/advisories/new)
+on GitHub instead, from the repository's Security tab ("Report a vulnerability"). Only
+the maintainers see the report, and the fix and its advisory are prepared with you
+there before anything is made public.
