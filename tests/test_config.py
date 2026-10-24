@@ -94,11 +94,16 @@ url = "https://help.acme.example"
 [[brand_links]]
 label = "Email the NOC"
 url = "mailto:noc@acme.example"
+
+[[brand_footer_links]]
+label = "Privacy"
+url = "https://www.acme.example/privacy"
 """
     )
     s = load_settings(path)
     assert (s.brand_name, s.default_theme) == ("Network Check", "federal")
     assert [link.label for link in s.brand_links] == ["Service desk", "Email the NOC"]
+    assert [link.label for link in s.brand_footer_links] == ["Privacy"]
 
 
 def test_branding_rejects_unsafe_or_unknown_values(tmp_path):
@@ -106,6 +111,11 @@ def test_branding_rejects_unsafe_or_unknown_values(tmp_path):
         Settings(brand_url="javascript:alert(1)")
     with pytest.raises(ValueError, match="brand_links"):
         Settings(brand_links=[Link("Help", "javascript:alert(1)")])
+    with pytest.raises(ValueError, match="brand_footer_links: every link needs a label"):
+        Settings(brand_footer_links=[Link(" ", "https://acme.example")])
+    with pytest.raises(ValueError, match=r"brand_footer \(Help\): URL must start with"):
+        Settings(brand_footer="Ask for [Help](javascript:alert(1)) here.")
+    assert Settings(brand_footer="[not a link] (here) and [x](y z)").brand_footer
     with pytest.raises(ValueError, match="default_theme"):
         Settings(default_theme="neon")
     with pytest.raises(ValueError, match="brand_credit"):

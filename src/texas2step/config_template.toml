@@ -96,9 +96,11 @@ results_path = "/var/lib/texas2step/results.db"
 # brand_url = ""                        # the organization's website
 # brand_logo = ""                       # e.g. "/etc/texas2step/logo.svg" (SVG, PNG, JPEG, WebP)
 # brand_notice = ""                     # a line across the top of every page
+# brand_footer = ""                     # your footer's text: "\n" starts a line, [label](url) is a link
 # default_theme = "system"              # system, light, dark, america, energy, federal, military or texas
 # brand_credit = "link"                 # footer's "texas2step <version>": link, text or none
-# Header and footer links: see [[brand_links]] at the end of this file.
+# Header and footer links: see [[brand_links]] at the end of this file, and your footer's
+# own links, beside its text, in [[brand_footer_links]].
 
 # --- Other texas2step servers in the location picker ---------------------------------------
 # [[locations]]
@@ -111,3 +113,8 @@ results_path = "/var/lib/texas2step/results.db"
 # [[brand_links]]
 # label = "Service desk"
 # url = "https://help.example.net"      # https://, http://, mailto: or tel:
+
+# --- Your footer's links, beside brand_footer's text (TOML only) -----------------------------
+# [[brand_footer_links]]
+# label = "Privacy"
+# url = "https://www.example.net/privacy"

@@ -70,6 +70,8 @@ file up to date with the new version's template and keeps your values; see
 | `brand_logo` | `""` | Path to an SVG, PNG, JPEG or WebP file shown in place of the star |
 | `brand_notice` | `""` | A line of text across the top of every page |
 | `brand_links` | `[]` | Links in the header and footer, as `[[brand_links]]` tables (TOML only) |
+| `brand_footer` | `""` | Your own footer's text, near the bottom of every page: each line a line, a blank line a new paragraph, and `[label](url)` a link. See [Branding and themes](#branding-and-themes). |
+| `brand_footer_links` | `[]` | Your own footer's links, beside its text, as `[[brand_footer_links]]` tables (TOML only) |
 | `brand_credit` | `link` | The footer's "texas2step &lt;version&gt;": `link` to the project's site, plain `text`, or `none` to leave the project's name and version out of the footer |
 | `default_theme` | `system` | `system`, `light`, `dark`, `america`, `energy`, `federal`, `military` or `texas` |
 
@@ -91,8 +93,8 @@ sudo systemctl restart texas2step
   setting commented out, the line is filled in where it stands; otherwise it is added
   above the first `[[table]]`. A value is read as TOML when it is valid TOML (`61000`,
   `true`, `["a", "b"]`), and as text otherwise. Unknown settings, and values the server
-  would refuse, are rejected before anything is written. Edit `[[locations]]` and
-  `[[brand_links]]` in the file, or use `add-location`.
+  would refuse, are rejected before anything is written. Edit `[[locations]]`,
+  `[[brand_links]]` and `[[brand_footer_links]]` in the file, or use `add-location`.
 * **`config add-location URL`** lists another texas2step server in the location picker.
   It asks that server for its id, name and location (`/api/v1/info`), and for its
   IPv4-only and IPv6-only URLs (its own entry in `/api/v1/locations`), using the
@@ -119,6 +121,10 @@ brand_url = "https://www.acme.example"        # "Acme IT" links here
 brand_logo = "/etc/texas2step/logo.svg"       # replaces the star mark
 brand_notice = "Authorized use only. Activity on this system may be monitored."
 default_theme = "federal"
+# Your own footer, near the bottom of every page (before any [[table]], as TOML needs).
+brand_footer = """
+© 2026 Acme IT. For official use only.
+Questions? Ask the [service desk](https://help.acme.example) or call [555-0100](tel:5550100)."""
 
 [[brand_links]]
 label = "Service desk"
@@ -127,6 +133,14 @@ url = "https://help.acme.example"
 [[brand_links]]
 label = "Email the NOC"
 url = "mailto:noc@acme.example"
+
+[[brand_footer_links]]
+label = "Privacy"
+url = "https://www.acme.example/privacy"
+
+[[brand_footer_links]]
+label = "Accessibility"
+url = "https://www.acme.example/accessibility"
 ```
 
 * **Where it shows.** The name and logo lead the header. The organization sits beside them
@@ -137,13 +151,25 @@ url = "mailto:noc@acme.example"
   words without the link, and `brand_credit = "none"` leaves the project's name, version
   and "Powered by" out of the footer, for sites that carry only their own branding. The
   version is still at `/api/v1/health`.
+* **Your own footer.** `brand_footer` and `[[brand_footer_links]]` add a footer of your
+  own near the bottom of every page, the access-code screen included, above the line with
+  the organization and the credit. texas2step lays it out the same way on every site and
+  in every theme. On wide screens your text is on the left and your links are stacked
+  on the right. On phones the links follow the text, and with only one of the two it is
+  centered. Each line of `brand_footer` starts a new line, and a blank line starts a
+  paragraph. The text is plain, but `[label](url)` makes a link of the label, by the same
+  rules as the other links below. A URL ends at the first `)`. HTML isn't allowed, so it
+  shows as typed. In TOML, `"""` lets the text run over several lines. The API explorer
+  (`/api/docs`) is a separate page and has no footer of yours.
 * **Logo.** SVG, PNG, JPEG, WebP or GIF, about 30 px tall on screen; wide logos keep their
   shape, up to 180 px wide. The `texas2step` service user must be able to read the file
   (`/etc/texas2step/` is a good place). If the file is missing or unreadable, the server
   logs a warning and keeps the star.
-* **Links** must start with `https://`, `http://`, `mailto:` or `tel:`. Anything else stops
-  the server at startup with an error naming the setting. `[[brand_links]]` can only be
-  set in the TOML file, not through environment variables.
+* **Links** must start with `https://`, `http://`, `mailto:` or `tel:`, in
+  `[[brand_links]]`, `[[brand_footer_links]]` and `brand_footer` alike. Anything else
+  stops the server at startup with an error naming the setting. `[[brand_links]]` and
+  `[[brand_footer_links]]` can only be set in the TOML file, not through environment
+  variables.
 * **Themes.** Visitors choose from the palette button in the header. Their choice is
   remembered in their browser. `default_theme` sets what a first-time visitor sees;
   `system` follows their light or dark OS setting.

@@ -565,6 +565,54 @@ button {
   color: var(--ink-2);
 }
 
+/* The organization's own footer (brand_footer and brand_footer_links): a row of its own
+   above the credit line, as wide as the page, its text on the left and links on the right. */
+.own-footer {
+  flex: 0 0 100%;
+}
+
+.own-footer-body {
+  max-width: 1208px;
+  margin: 0 auto 12px;
+  padding: 20px 0 22px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px 56px;
+  text-align: left;
+  line-height: 1.6;
+}
+
+.own-footer-body.solo {
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  text-align: center;
+}
+
+.own-footer-text p {
+  max-width: 80ch;
+  margin: 0 0 8px;
+}
+
+.own-footer-text p:last-child {
+  margin-bottom: 0;
+}
+
+.own-footer-links ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (max-width: 640px) {
+  .own-footer-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ---- Branding: logo, organization, links, notice ---------------------------- */
 
 .bm-1 {

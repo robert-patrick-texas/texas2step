@@ -6,7 +6,8 @@ fills in what only it knows:
 - the path prefix it is published under (``<base href>``),
 - the version (read by the UI from a meta tag),
 - the site's default theme, and which pages it shows,
-- the branding: name, logo, organization, links, notice and the footer's credit.
+- the branding: name, logo, organization, links, notice, the organization's own footer
+  and the footer's credit.
 
 Branding is written into the page itself rather than added by script, so a renamed site
 never flashes the default name. Every value is HTML-escaped. Nothing from the request
@@ -21,7 +22,7 @@ import re
 from html import escape
 from pathlib import Path
 
-from .config import PAGES, Settings
+from .config import FOOTER_LINK, PAGES, Settings
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +119,32 @@ class Shell:
         if footer:
             dot = '<span class="dot" aria-hidden="true">·</span>'
             page = _fill(page, "footer", dot.join(footer) + dot)
+        if own := self._own_footer():
+            page = _fill(page, "ownfooter", own)
         return page
+
+    def _own_footer(self) -> str:
+        """The organization's footer: its text on the left, its links on the right."""
+        s = self.settings
+        # A blank line starts a paragraph; each other line starts a line.
+        paragraphs = [p.strip() for p in re.split(r"\n\s*\n", s.brand_footer.strip()) if p.strip()]
+        text = "".join(
+            "<p>" + "<br />".join(_inline(line.strip()) for line in p.splitlines()) + "</p>"
+            for p in paragraphs
+        )
+        links = "".join(f"<li>{_link(link.label, link.url)}</li>" for link in s.brand_footer_links)
+        parts = []
+        if text:
+            parts.append(f'<div class="own-footer-text">{text}</div>')
+        if links:
+            parts.append(
+                f'<nav class="own-footer-links" aria-label="Footer links"><ul>{links}</ul></nav>'
+            )
+        if not parts:
+            return ""
+        body = f'<div class="own-footer-body{" solo" if len(parts) == 1 else ""}">'
+        # The outer div is a row of its own, above the credit line.
+        return f'<div class="own-footer">{body}{"".join(parts)}</div></div>'
 
     def _organization(self, cls: str = "") -> str:
         s = self.settings
@@ -137,6 +163,15 @@ def _class(cls: str) -> str:
 def _link(label: str, url: str, cls: str = "") -> str:
     new_tab = ' target="_blank" rel="noopener"' if url.lower().startswith("http") else ""
     return f'<a{_class(cls)} href="{escape(url)}"{new_tab}>{escape(label)}</a>'
+
+
+def _inline(text: str) -> str:
+    """Plain text, with each [label](url) in it made a link."""
+    out, last = [], 0
+    for m in FOOTER_LINK.finditer(text):
+        out += [escape(text[last : m.start()]), _link(m.group(1), m.group(2))]
+        last = m.end()
+    return "".join([*out, escape(text[last:])])
 
 
 def _fill(page: str, slot: str, html: str) -> str:

@@ -403,6 +403,40 @@ def test_branding_is_written_into_the_page(tmp_path):
         assert "default-src 'none'" in r.headers["content-security-policy"]
 
 
+def test_own_footer_is_written_into_the_page(tmp_path):
+    settings = Settings(
+        results_path=str(tmp_path / "r.db"),
+        brand_footer=(
+            "© 2026 Acme <IT>.\nFor official use only.\n\n"
+            "Report outages to the [NOC](tel:5550100) or the [desk](https://help.acme.example)."
+        ),
+        brand_footer_links=[
+            Link("Privacy", "https://acme.example/privacy"),
+            Link("Write to us", "mailto:it@acme.example"),
+        ],
+    )
+    with TestClient(create_app(settings)) as c:
+        page = c.get("/").text
+    footer = re.search(r'<div class="own-footer">.*?</nav></div></div>', page, re.S).group(0)
+    assert "<p>© 2026 Acme &lt;IT&gt;.<br />For official use only.</p>" in footer
+    assert '<p>Report outages to the <a href="tel:5550100">NOC</a> or the ' in footer
+    assert (
+        '<a href="https://help.acme.example" target="_blank" rel="noopener">desk</a>.</p>' in footer
+    )
+    links = '<nav class="own-footer-links" aria-label="Footer links"><ul><li><a href="https://acme.example/privacy"'
+    assert links in footer and '<li><a href="mailto:it@acme.example">Write to us</a></li>' in footer
+    # Only links, or only text: one column.
+    with TestClient(
+        create_app(Settings(results_path=str(tmp_path / "r.db"), brand_footer="Hi"))
+    ) as c:
+        assert (
+            '<div class="own-footer-body solo"><div class="own-footer-text"><p>Hi</p></div></div>'
+            in c.get("/").text
+        )
+    with TestClient(create_app(Settings(results_path=str(tmp_path / "r.db")))) as c:
+        assert "own-footer" not in c.get("/").text
+
+
 def test_missing_logo_falls_back_to_the_star(tmp_path, caplog):
     settings = Settings(results_path=str(tmp_path / "r.db"), brand_logo=str(tmp_path / "x.svg"))
     with TestClient(create_app(settings)) as c:

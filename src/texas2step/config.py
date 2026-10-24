@@ -13,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 import ipaddress
 import os
+import re
 import tomllib
 import types
 import typing
@@ -28,6 +29,8 @@ PAGES = ("test", "monitor", "diag", "history", "api")  # the web UI's tabs, in o
 THEMES = ("system", "light", "dark", "america", "energy", "federal", "military", "texas")
 # Branding URLs end up in href attributes, so only these schemes are accepted.
 LINK_SCHEMES = ("https://", "http://", "mailto:", "tel:")
+# A link inside brand_footer's text, written as in Markdown: [label](url).
+FOOTER_LINK = re.compile(r"\[([^\]\n]+)\]\(([^)\s]+)\)")
 CREDITS = ("link", "text", "none")  # brand_credit
 TRAFFIC_COUNTS = ("sent", "received", "both")
 MONITOR_PROFILES = ("path", "voice", "video")  # monitor_profile
@@ -178,6 +181,10 @@ class Settings:
     brand_logo: str = ""  # an SVG, PNG, JPEG or WebP file shown in place of the star mark
     brand_notice: str = ""  # a line across the top of every page, e.g. an acceptable-use notice
     brand_links: list[Link] = field(default_factory=list)
+    # The organization's own footer: its text, line by line, with [label](url) links in it,
+    # and its links beside the text.
+    brand_footer: str = ""
+    brand_footer_links: list[Link] = field(default_factory=list)
     default_theme: str = "system"  # one of THEMES; visitors can still pick another
     # The footer's "texas2step <version>": linked to the project's site, plain text, or none.
     brand_credit: str = "link"
@@ -259,10 +266,16 @@ class Settings:
         urls = [("brand_url", self.brand_url)] if self.brand_url else []
         if self.traffic_url:
             urls.append(("traffic_url", self.traffic_url))
-        for link in self.brand_links:
-            if not link.label.strip():
-                raise ValueError("brand_links: every link needs a label")
-            urls.append((f"brand_links ({link.label})", link.url))
+        for name, links in (
+            ("brand_links", self.brand_links),
+            ("brand_footer_links", self.brand_footer_links),
+        ):
+            for link in links:
+                if not link.label.strip():
+                    raise ValueError(f"{name}: every link needs a label")
+                urls.append((f"{name} ({link.label})", link.url))
+        for label, url in FOOTER_LINK.findall(self.brand_footer):
+            urls.append((f"brand_footer ({label})", url))
         for name, url in urls:
             if not url.lower().startswith(LINK_SCHEMES):
                 raise ValueError(f"{name}: URL must start with {', '.join(LINK_SCHEMES)}")
@@ -356,7 +369,7 @@ def load_settings(config_path: str | os.PathLike[str] | None = None) -> Settings
 
     for name, hint in hints.items():
         env = os.environ.get(ENV_PREFIX + name.upper())
-        if env is not None and name not in {"locations", "brand_links"}:
+        if env is not None and name not in {"locations", "brand_links", "brand_footer_links"}:
             values[name] = _coerce(env, hint, name)
 
     return Settings(**values)
