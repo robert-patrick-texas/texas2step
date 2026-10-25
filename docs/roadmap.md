@@ -116,6 +116,11 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.2.2](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.2) (2026-10-24)
+
+- [x] UDP works in Firefox: Monitor, Diag and the Test page's packet loss no longer fall
+  back to TCP there.
+
 ### [2.2.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.1) (2026-10-24)
 
 - [x] Monitor gets a server back after an outage: HTTPS checks, then a new session, or
