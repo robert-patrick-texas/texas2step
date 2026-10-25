@@ -64,6 +64,20 @@ links and footer credit. Three places still say texas2step:
 - [ ] **The API explorer** (`/api/docs`) is titled "texas2step - Swagger UI".
 - [ ] **The API tab's command-line examples** name the `texas2step` CLI.
 
+### Security
+
+- [ ] **DTLS 1.3 for the UDP probe.** The probe's data channel uses DTLS 1.2
+  ([On the wire](security.md#on-the-wire)): the server offers nothing newer, though Chrome
+  and Firefox now prefer DTLS 1.3. OpenSSL added DTLS 1.3 in 4.1.0 (October 2026). The
+  server's WebRTC library, aiortc, uses the OpenSSL bundled in the `cryptography`
+  package, 4.0 for now. Once `cryptography` ships OpenSSL 4.1, a release's `make upgrade`
+  brings it in. Then check what a browser negotiates (`tlsVersion` `FEFC` in the
+  connection's statistics, not `FEFD`). aiortc may need its DTLS context set to allow
+  1.3, and its 1.3 cipher suites set apart from its 1.2 cipher list. DTLS 1.3 would hide
+  the throwaway certificates, drop the CBC cipher suites and save a round trip, and later
+  allow post-quantum key exchange. The probe carries nothing secret, so this can wait for
+  the libraries.
+
 ### Updates
 
 [`texas2step update`](install.md#with-texas2step-update) could also:
