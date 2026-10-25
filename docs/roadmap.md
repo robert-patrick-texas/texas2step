@@ -116,6 +116,16 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.2.4](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.4) (2026-10-25)
+
+- [x] The desk's functions refuse requests made for pages on other sites; with
+  `internal_networks` set, only those networks see the version.
+- [x] API answers are kept in no browser cache.
+- [x] A block set by hand ends the passes used from its network, sessions already open
+  included.
+- [x] No cookie: the pass stays in local storage and goes to the page's own server in a
+  header; a Content-Security-Policy on the page and the API explorer.
+
 ### [2.2.3](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.3) (2026-10-24)
 
 - [x] Spaces around any setting or typed value are ignored; a stray one in
