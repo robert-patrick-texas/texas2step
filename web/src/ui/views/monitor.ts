@@ -106,6 +106,11 @@ const PROFILES: [ProfileName, string][] = [
   ["voice", "Voice call"],
   ["video", "Video call"],
 ];
+const ABOUT: Record<ProfileName, string> = {
+  path: "Path: small probes, to follow the path.",
+  voice: "Voice call: a voice call's packets, scored as a call every 10 seconds.",
+  video: "Video call: a video call's, with its voice.",
+};
 const RATING_WORD: Record<CallRating, string> = { excellent: "Excellent", good: "Good", fair: "Fair", poor: "Poor", bad: "Bad" };
 
 type Key = keyof Figures | "probes";
@@ -223,7 +228,8 @@ export class MonitorView implements View {
     this.off = this.app.onServer(() => {
       if (this.running) return;
       if (!this.chosen && this.app.info?.monitor) this.choice.profile = this.app.info.monitor.profile;
-      if (this.choice.profile === "video" && !this.videoOffered) this.choice.profile = "voice";
+      // A saved or bookmarked profile this server withholds: the nearest it offers.
+      if (!this.offers(this.choice.profile)) this.choice.profile = this.choice.profile === "video" && this.offers("voice") ? "voice" : "path";
       this.layout();
     });
     this.layout();
@@ -260,9 +266,10 @@ export class MonitorView implements View {
     return this.two && this.app.locations.length >= 2;
   }
 
-  /** The Video call profile, unless the server withholds it (monitor_video). */
-  private get videoOffered(): boolean {
-    return this.app.info?.monitor?.video !== false;
+  /** Whether the server offers a profile: Path always, the calls unless it withholds them
+   * (monitor_voice, monitor_video). */
+  private offers(profile: ProfileName): boolean {
+    return profile === "path" || this.app.info?.monitor?.[profile] !== false;
   }
 
   /** Servers A and B: the saved or bookmarked ones if still listed, else sensible picks. */
@@ -338,16 +345,19 @@ export class MonitorView implements View {
   private renderProfile(): void {
     const c = this.choice;
     clear(this.profileBox);
-    const offered = PROFILES.filter(([p]) => p !== "video" || this.videoOffered);
-    // The one switch everyone needs, beside Start: its name is for screen readers.
-    const pick = seg("Profile", offered, c.profile, (v) => {
-      c.profile = v;
-      this.chosen = true;
-      this.layout();
-    });
-    pick.querySelector(".opt-label")?.remove();
-    pick.title = "Path: small probes, to follow the path. Voice call: a voice call's packets, scored as a call every 10 seconds. Video call: a video call's, with its voice.";
-    this.profileBox.append(pick);
+    const offered = PROFILES.filter(([p]) => this.offers(p));
+    // The one switch everyone needs, beside Start: its name is for screen readers. With
+    // only Path offered there is nothing to choose, so no switch.
+    if (offered.length > 1) {
+      const pick = seg("Profile", offered, c.profile, (v) => {
+        c.profile = v;
+        this.chosen = true;
+        this.layout();
+      });
+      pick.querySelector(".opt-label")?.remove();
+      pick.title = offered.map(([p]) => ABOUT[p]).join(" ");
+      this.profileBox.append(pick);
+    }
     const live = (v: number, set: () => void) => {
       set();
       this.remember(this.comparing);

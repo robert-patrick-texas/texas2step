@@ -88,8 +88,12 @@ async def info(request: Request) -> dict[str, Any]:
             "packets": s.default_packets,
             "one_stream": s.default_one_stream,
         },
-        # Monitor's profile until a visitor picks one, and whether the video one is offered.
-        "monitor": {"profile": s.monitor_profile, "video": s.monitor_video},
+        # Monitor's profile until a visitor picks one, and whether the call ones are offered.
+        "monitor": {
+            "profile": s.monitor_profile,
+            "voice": s.monitor_voice,
+            "video": s.monitor_video,
+        },
     }
     # With internal_networks set, the version is theirs only. Without them, anyone who
     # reaches this has entered the code or needs none (AccessGate).

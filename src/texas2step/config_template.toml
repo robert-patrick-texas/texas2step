@@ -47,6 +47,8 @@ results_path = "/var/lib/texas2step/results.db"
 # default_one_stream = true             # one stream's download after the download; up to
 #                                       # half again a test's traffic, so false where billed
 # monitor_profile = "path"              # Monitor until a visitor picks: path, voice or video
+# monitor_voice = true                  # offer Monitor's Voice call profile (about 150 kb/s
+#                                       # each way while a tab runs it)
 # monitor_video = true                  # offer Monitor's Video call profile (about 1.4 Mb/s
 #                                       # each way, counted toward a traffic limit)
 

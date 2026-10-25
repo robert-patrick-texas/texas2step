@@ -217,6 +217,25 @@ async def test_profiles_count_toward_a_traffic_limit(peers):
         await echo.stop()
 
 
+async def test_profiles_a_server_withholds():
+    from texas2step.rtc import Session
+
+    # monitor_voice = false and monitor_video = false: path only.
+    echo = RtcEcho([], max_sessions=1, timeout=60, voice=False, video=False)
+    session = Session(id="x", pc=object())
+    for name in ("voice", "video"):
+        assert await echo.choose(session, name) == {
+            "op": "profile",
+            "ok": False,
+            "reason": f"this server doesn't offer {name}",
+        }
+    assert await echo.choose(session, "path") == {"op": "profile", "ok": True, "name": "path"}
+    # Voice without video.
+    echo = RtcEcho([], max_sessions=1, timeout=60, video=False)
+    assert (await echo.choose(session, "voice"))["ok"] is True
+    assert (await echo.choose(session, "video"))["ok"] is False
+
+
 def test_addresses_are_null_before_a_path_exists():
     from texas2step.rtc import Session
 

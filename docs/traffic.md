@@ -142,7 +142,9 @@ acknowledgements the server sends back, as measured over IPv6. A tab left runnin
 When the limit is reached, the server holds those sessions to the small probes of the
 Path profile, which aren't counted, and Monitor says so with the site's message and link.
 Until the limit opens again, a call profile is refused at its start.
-`monitor_video = false` in the settings withholds the Video call profile altogether.
+`monitor_video = false` in the settings withholds the Video call profile altogether, and
+`monitor_voice = false` the Voice call one: the page doesn't offer them, and the server
+refuses them. With both, Monitor runs only the uncounted Path profile.
 
 ## What isn't counted
 

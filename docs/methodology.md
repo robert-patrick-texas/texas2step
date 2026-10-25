@@ -272,7 +272,10 @@ counted as lost. Statistics cover the visible window (1, 5 or 15 minutes).
 A **profile** sets what is sent. Anyone can switch it beside the Start button. Options
 holds the exact sizes and rates, and the page's address carries them, so the service
 desk can send a caller a link such as `/monitor?profile=voice`. The site picks the
-profile a visitor starts with (`monitor_profile`).
+profile a visitor starts with (`monitor_profile`), and can withhold the call profiles
+(`monitor_voice`, `monitor_video`): the switch then shows only the ones offered, and none
+at all when only Path is. A link or a saved choice for a withheld profile starts with
+the nearest one offered.
 
 | Profile | Sends | Each way, as the network carries it |
 |---|---|---|

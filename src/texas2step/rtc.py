@@ -247,10 +247,11 @@ class RtcEcho:
         timeout: float,
         enabled: bool = True,
         port_range: tuple[int, int] | None = None,
+        voice: bool = True,
         video: bool = True,
     ) -> None:
         self.enabled = enabled and AVAILABLE
-        self.video = video
+        self.offered = {"path": True, "voice": voice, "video": video}  # monitor_voice, _video
         self.meter: Any = None  # a traffic.TrafficMeter, when the server has a traffic limit
         self.blocks: Any = None  # lockouts.HandBlocks: a block set by hand ends a session
         self._replies: set[asyncio.Future[None]] = set()
@@ -299,8 +300,8 @@ class RtcEcho:
                 "ok": False,
                 "reason": f"expected one of {', '.join(PROFILES)}",
             }
-        if name == "video" and not self.video:
-            return {"op": "profile", "ok": False, "reason": "this server doesn't offer video"}
+        if not self.offered[name]:
+            return {"op": "profile", "ok": False, "reason": f"this server doesn't offer {name}"}
         counted = name != "path" and self.counted(session)
         if counted and (notice := await asyncio.to_thread(self.past_limit)):
             return {"op": "profile", "ok": False, "reason": "traffic limit", **notice}

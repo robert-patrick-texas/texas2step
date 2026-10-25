@@ -111,8 +111,11 @@ class Settings:
     default_one_stream: bool = True
     # Monitor's profile until a visitor picks one: path (small probes, as a ping tracker),
     # voice (a voice call's packets) or video (a video call's, with its voice). Voice and
-    # video count toward a traffic limit; monitor_video = false withholds the video one.
+    # video count toward a traffic limit. monitor_voice = false and monitor_video = false
+    # withhold those profiles: the page doesn't offer them, and the server refuses them.
+    # Path is always offered.
     monitor_profile: str = "path"
+    monitor_voice: bool = True
     monitor_video: bool = True
 
     # HTTP plumbing.
@@ -212,8 +215,11 @@ class Settings:
             raise ValueError(f"default_theme: expected one of {', '.join(THEMES)}")
         if self.monitor_profile not in MONITOR_PROFILES:
             raise ValueError(f"monitor_profile: expected one of {', '.join(MONITOR_PROFILES)}")
-        if self.monitor_profile == "video" and not self.monitor_video:
-            raise ValueError("monitor_profile: video, but monitor_video = false withholds it")
+        for name, offered in (("voice", self.monitor_voice), ("video", self.monitor_video)):
+            if self.monitor_profile == name and not offered:
+                raise ValueError(
+                    f"monitor_profile: {name}, but monitor_{name} = false withholds it"
+                )
         if self.brand_credit not in CREDITS:
             raise ValueError(f"brand_credit: expected one of {', '.join(CREDITS)}")
         if not self.update_url.startswith(("https://", "http://", "file:///")):

@@ -183,7 +183,7 @@ export interface ServerInfo {
   traffic?: { open: boolean; message: string | null; url: string | null };
   /** Monitor's profile until a visitor picks one, and whether the video one is offered;
    * older servers leave it out. */
-  monitor?: { profile: "path" | "voice" | "video"; video: boolean };
+  monitor?: { profile: "path" | "voice" | "video"; voice?: boolean; video: boolean };
 }
 
 /** /api/v1/diag/http: what the server saw of one HTTPS request, and its clock. */

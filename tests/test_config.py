@@ -137,11 +137,17 @@ def test_branding_rejects_unsafe_or_unknown_values(tmp_path):
 
 
 def test_monitor_profile_is_checked():
-    assert Settings().monitor_profile == "path" and Settings().monitor_video is True
+    s = Settings()
+    assert s.monitor_profile == "path" and s.monitor_voice is True and s.monitor_video is True
     with pytest.raises(ValueError, match="monitor_profile"):
         Settings(monitor_profile="ping")
     with pytest.raises(ValueError, match="monitor_video"):
         Settings(monitor_profile="video", monitor_video=False)
+    with pytest.raises(ValueError, match="monitor_voice = false withholds it"):
+        Settings(monitor_profile="voice", monitor_voice=False)
+    # Path only, or path and voice: path is always offered.
+    assert Settings(monitor_voice=False, monitor_video=False).monitor_profile == "path"
+    assert Settings(monitor_profile="voice", monitor_video=False).monitor_voice
 
 
 def test_settings_lose_the_spaces_around_their_text(tmp_path, monkeypatch):

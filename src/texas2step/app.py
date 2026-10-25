@@ -441,6 +441,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.rtc_session_timeout,
         enabled=settings.webrtc_enabled,
         port_range=settings.rtc_ports,
+        voice=settings.monitor_voice,
         video=settings.monitor_video,
     )
     app.state.rtc.meter = app.state.traffic
