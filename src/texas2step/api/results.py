@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.concurrency import run_in_threadpool
 
+from .. import __version__
 from .meta import client_address
 
 router = APIRouter(prefix="/api/v1/results", tags=["results"])
@@ -34,6 +35,15 @@ async def save(request: Request) -> dict[str, Any]:
         raise HTTPException(400, "body must be JSON") from exc
     if not isinstance(result, dict) or result.get("version") != 1:
         raise HTTPException(422, "expected a texas2step result object (version 1)")
+    # A visitor outside internal_networks isn't told the version, so its page leaves it out.
+    # This server served that page, and fills in its own; and its own as the tested
+    # server's, when the test was of this server.
+    if result.get("tool") == "texas2step-web/dev":
+        result["tool"] = f"texas2step-web/{__version__}"
+    server = result.get("server")
+    own = request.app.state.settings.server_id
+    if isinstance(server, dict) and not server.get("version") and server.get("id") == own:
+        server["version"] = __version__
     ip, _ = client_address(request)
     return await run_in_threadpool(store.add, result, ip)
 

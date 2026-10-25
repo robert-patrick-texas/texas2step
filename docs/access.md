@@ -242,10 +242,16 @@ The pass goes with every request the page makes, as `?pass=`. A page load can't 
 that, so a right code also sets the pass as a cookie for the server's own pages:
 `HttpOnly`, `Secure` over HTTPS, `SameSite=Strict`, gone when the pass expires.
 
-Until a visitor enters a code, nothing tells them the version: the page leaves it out and
-`/api/v1/health` answers only `{"status":"ok"}`. Inside `internal_networks`, and once in,
-it is there as before. This slows an attacker down rather than stopping one: the page's
-scripts are those of a published release.
+With `internal_networks` set, only those networks see the version. The page,
+`/api/v1/info` and `/api/v1/health` leave it out for everyone else, even after they enter
+a code, and a result they save gets it from the server. Without `internal_networks`, a
+visitor sees it once they have entered a code; until then the page leaves it out and
+`/api/v1/health` answers only `{"status":"ok"}`. This slows an attacker down rather than
+stopping one: the page's scripts are those of a published release.
+
+The desk's functions also refuse, with `403`, a browser's request made for a page on
+another site, so that a website an employee opens can't use them through the employee's
+browser ([Security](security.md#the-desks-tools)).
 
 Loopback addresses are always inside, so commands on the server itself need no code. The
 service sees each visitor's address through nginx (`trusted_proxies`), which the packaged

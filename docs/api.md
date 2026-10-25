@@ -91,11 +91,11 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/v1/info` | name, version, server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes), limits, ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `monitor` (`profile`: Monitor's until a visitor picks; `video`: whether the Video call profile is offered); with a [traffic limit](traffic.md), `traffic` (below) |
+| GET | `/api/v1/info` | name, version (left out for clients outside `internal_networks`), server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes), limits, ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `monitor` (`profile`: Monitor's until a visitor picks; `video`: whether the Video call profile is offered); with a [traffic limit](traffic.md), `traffic` (below) |
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |
-| GET | `/api/v1/health` | `{"status": "ok", "version": …}`; without the version for clients that need an [access code](#access-codes) |
+| GET | `/api/v1/health` | `{"status": "ok", "version": …}`; without the version for clients outside `internal_networks`, or that need an [access code](#access-codes) |
 
 With a traffic limit, `traffic` says whether this client may start a test, and if not,
 what it is told:
@@ -179,7 +179,10 @@ On a server with `access_code` on ([Access codes](access.md)), a client from out
 (except `/health` and `/access`); without a valid one it gets `401`. The WebSocket takes
 it the same way. With `internal_networks` set, clients from outside them get `404` for
 reading results, `/api/v1/measure/*`, `/api/docs`, `/api/openapi.json`, the current code and
-the lockouts. `/api/v1/health` leaves out the version for clients that would need a pass.
+the lockouts, and the browser's requests to these made for a page on another site get
+`403`. With `internal_networks` set, `/api/v1/info` and `/api/v1/health` leave out the
+version for clients outside them; without them, `/api/v1/health` leaves it out for
+clients that would need a pass.
 
 | Method | Path | Purpose |
 |---|---|---|

@@ -546,17 +546,78 @@ def test_pages_need_a_pass_from_outside(tmp_path, key_file):
 
 
 def test_the_version_stays_inside(tmp_path, key_file):
-    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+    meta = f'<meta name="texas2step-version" content="{__version__}" />'
+    # With internal_networks, only they see it: not even a visitor who entered the code,
+    # and not when codes are off.
+    for code in ("daily", "off"):
+        with gated(tmp_path, key_file, access_code=code, internal_networks=["10.0.0.0/8"]) as c:
+            assert c.get("/api/v1/health", headers=OUTSIDE).json() == {"status": "ok"}
+            assert c.get("/api/v1/health", headers=INSIDE).json()["version"] == __version__
+            assert meta not in c.get("/", headers=OUTSIDE).text
+            assert meta in c.get("/", headers=INSIDE).text
+            params = {"pass": unlock(c)} if code == "daily" else {}
+            assert meta not in c.get("/", headers=OUTSIDE).text  # the pass cookie or none
+            assert "version" not in c.get("/api/v1/info", params=params, headers=OUTSIDE).json()
+            assert c.get("/api/v1/info", headers=INSIDE).json()["version"] == __version__
+    # Without them, a visitor who entered the code sees it.
+    with gated(tmp_path, key_file) as c:
         assert c.get("/api/v1/health", headers=OUTSIDE).json() == {"status": "ok"}
-        assert c.get("/api/v1/health", headers=INSIDE).json()["version"] == __version__
-        meta = f'<meta name="texas2step-version" content="{__version__}" />'
         assert meta not in c.get("/", headers=OUTSIDE).text
-        assert meta in c.get("/", headers=INSIDE).text
-        unlock(c)  # with the pass cookie, the page has it
+        token = unlock(c)  # with the pass cookie, the page has it
         assert meta in c.get("/", headers=OUTSIDE).text
-    # Without codes, nothing asks visitors who they are: the version is everyone's.
+        info = c.get("/api/v1/info", params={"pass": token}, headers=OUTSIDE).json()
+        assert info["version"] == __version__
+    # Without codes either, nothing asks visitors who they are: the version is everyone's.
     with gated(tmp_path, key_file, access_code="off") as c:
         assert c.get("/api/v1/health", headers=OUTSIDE).json()["version"] == __version__
+        assert c.get("/api/v1/info", headers=OUTSIDE).json()["version"] == __version__
+
+
+def test_a_saved_result_gets_the_version_its_page_was_not_told(tmp_path, key_file):
+    with gated(tmp_path, key_file, access_code="off", internal_networks=["10.0.0.0/8"]) as c:
+        own = c.app.state.settings.server_id
+        mine = {"version": 1, "tool": "texas2step-web/dev", "server": {"id": own, "url": "x"}}
+        other = {"version": 1, "tool": "texas2step-web/dev", "server": {"id": "elsewhere"}}
+        ids = [
+            c.post("/api/v1/results", json=r, headers=OUTSIDE).json()["id"] for r in (mine, other)
+        ]
+        saved = [c.get(f"/api/v1/results/{i}", headers=INSIDE).json() for i in ids]
+    assert saved[0]["tool"] == saved[1]["tool"] == f"texas2step-web/{__version__}"
+    assert saved[0]["server"]["version"] == __version__
+    assert "version" not in saved[1]["server"]  # another server's: not this one's to say
+
+
+def test_the_desks_functions_refuse_requests_from_other_sites(tmp_path, key_file):
+    def status(c: TestClient, path: str, **headers: str) -> int:
+        return c.get(path, headers={**INSIDE, **headers}).status_code
+
+    other = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors"}
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        saved = c.post("/api/v1/results", json={"version": 1}, headers=INSIDE).json()["id"]
+        # A page on another site, through an employee's browser inside: refused.
+        for path in ("/api/v1/results", f"/api/v1/results/{saved}", "/api/v1/access/blocks"):
+            r = c.get(path, headers={**INSIDE, **other})
+            assert r.status_code == 403 and "cross-site" in r.json()["detail"], path
+        block = {"network": "198.51.100.7"}
+        r = c.post("/api/v1/access/blocks", json=block, headers={**INSIDE, **other})
+        assert r.status_code == 403
+        assert c.get("/api/v1/access/blocks", headers=INSIDE).json()["lockouts"] == []
+        assert status(c, "/api/v1/results", **{**other, "Sec-Fetch-Site": "same-site"}) == 403
+        # Browsers without Fetch Metadata: by their Origin; "null" is a sandboxed page.
+        assert status(c, "/api/v1/results", Origin="https://evil.example") == 403
+        assert status(c, "/api/v1/results", Origin="null") == 403
+        # The desk's own pages, scripts and monitoring, and links from elsewhere: as before.
+        assert status(c, "/api/v1/results", **{"Sec-Fetch-Site": "same-origin"}) == 200
+        assert status(c, "/api/v1/results", Origin="http://testserver") == 200
+        assert status(c, "/api/v1/results") == 200
+        link = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}
+        assert status(c, f"/r/{saved}", **link) == 200
+        assert status(c, "/history", **link) == 200
+        # The rest of the API stays open to other sites, as the other servers' pages need.
+        assert status(c, "/api/v1/info", **other) == 200
+        # Outside, as before: not found, whoever asks.
+        same = {"Sec-Fetch-Site": "same-origin", **OUTSIDE}
+        assert c.get("/api/v1/results", headers=same).status_code == 404
 
 
 def test_a_proxy_without_the_visitors_address_counts_as_outside(tmp_path, key_file):

@@ -168,7 +168,8 @@ export interface TestResult {
 
 export interface ServerInfo {
   name: string;
-  version: string;
+  /** Left out for visitors outside internal_networks (docs/access.md). */
+  version?: string;
   server: { id: string; name: string; location: string };
   /** `stamps`: the UDP probe's echoes can carry the server's stamps; older servers leave it out. */
   capabilities: { websocket: boolean; webrtc: boolean; results: boolean; measure: boolean; stamps?: boolean };

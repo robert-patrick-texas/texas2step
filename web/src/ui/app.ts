@@ -92,7 +92,7 @@ export class App {
     const version = document.querySelector<HTMLMetaElement>('meta[name="texas2step-version"]');
     if (version && !version.content) {
       try {
-        version.content = (await this.origin.json<ServerInfo>("/info")).version;
+        version.content = (await this.origin.json<ServerInfo>("/info")).version ?? "";
       } catch {
         /* the results then say "dev" */
       }
@@ -244,7 +244,7 @@ export class App {
       console.warn("server unreachable", err);
     }
     // A site with brand_credit = "none" has no credit in its footer.
-    setText(document.querySelector("#footer-version"), this.info ? `texas2step ${this.info.version}` : "texas2step");
+    setText(document.querySelector("#footer-version"), this.info?.version ? `texas2step ${this.info.version}` : "texas2step");
     const picker = document.querySelector("#server-picker .picker-status");
     picker?.classList.toggle("down", !this.info);
     for (const fn of this.listeners) fn();

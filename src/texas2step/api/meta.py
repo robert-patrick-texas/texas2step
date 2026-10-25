@@ -91,6 +91,10 @@ async def info(request: Request) -> dict[str, Any]:
         # Monitor's profile until a visitor picks one, and whether the video one is offered.
         "monitor": {"profile": s.monitor_profile, "video": s.monitor_video},
     }
+    # With internal_networks set, the version is theirs only. Without them, anyone who
+    # reaches this has entered the code or needs none (AccessGate).
+    if s.internal_networks and not shows_version(request):
+        del out["version"]
     if (meter := request.app.state.traffic) is not None:
         # Whether a traffic limit lets this client test; for the desk, how much is left.
         kind = meter.kind(client_address(request)[0])
@@ -204,9 +208,11 @@ async def health(request: Request) -> dict[str, str]:
 
 
 def shows_version(request: HTTPConnection) -> bool:
-    """Whether this client may see the version: not one that needs an access code first.
-    Knowing it would tell an attacker which flaws to try."""
-    if request.app.state.codes is None:
+    """Whether this client may see the version: knowing it would tell an attacker which
+    flaws to try. With internal_networks set, only they do; without them, not a visitor
+    who needs an access code; on a server open to all, everyone."""
+    networks = request.app.state.settings.internal_networks
+    if request.app.state.codes is None and not networks:
         return True
     ip, _ = client_address(request)
-    return is_internal(ip, request.app.state.settings.internal_networks)
+    return is_internal(ip, networks)

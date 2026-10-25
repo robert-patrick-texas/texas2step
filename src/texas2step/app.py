@@ -11,6 +11,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import ClassVar
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -152,8 +153,12 @@ class AccessGate:
             path = path[len(root) :] or "/"
         ip, _ = client_address(conn)
         inside = is_internal(ip, networks)
-        if networks and not inside and self.desk_only(scope.get("method", "GET"), path):
+        method = scope.get("method", "GET")
+        if networks and not inside and self.desk_only(method, path):
             await self._refuse(scope, receive, send, 404, "Not Found")
+            return
+        if networks and self.desk_only(method, path) and self.cross_site(conn, method):
+            await self._refuse(scope, receive, send, 403, "cross-site request refused")
             return
         page = path in self.PAGES or path.startswith("/r/")
         if codes and not inside and page and not held(codes, conn):
@@ -166,6 +171,27 @@ class AccessGate:
             await self._refuse(scope, receive, send, 401, "access code required")
             return
         await self.app(scope, receive, send)
+
+    @staticmethod
+    def cross_site(conn: HTTPConnection, method: str) -> bool:
+        """Whether a browser sent this for a page on another site. The desk's functions go
+        by the address a request comes from, and CORS lets any page read the answer, so a
+        site an employee opens inside could otherwise read History through their browser.
+        Requests without these headers are a script's, the CLI's or monitoring's. A link
+        from elsewhere (a navigation) still opens the desk's pages: the other site can't
+        read them."""
+        headers = conn.headers
+        if method == "GET" and headers.get("sec-fetch-mode") == "navigate":
+            return False
+        site = headers.get("sec-fetch-site")
+        if site is not None:
+            return site not in ("same-origin", "none")
+        # Browsers without Fetch Metadata still name the page's origin.
+        origin = headers.get("origin")
+        if origin is None:
+            return False
+        host = urlsplit("//" + headers.get("host", "")).hostname
+        return urlsplit(origin).hostname != host
 
     @staticmethod
     async def _home(scope: Scope, receive: Receive, send: Send, root: str) -> None:
@@ -394,9 +420,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         hide = page.DESK_PAGES if outside else frozenset()
         root = request.scope.get("root_path", "")
         codes = request.app.state.codes
-        # Not the version for a visitor who hasn't entered the code: it would tell an
-        # attacker which flaws to try. The page gets it from /api/v1/info once in.
-        known = shows_version(request) or held(codes, request)
+        # Not the version for a visitor outside internal_networks, nor, without them, for
+        # one who hasn't entered the code: it would tell an attacker which flaws to try.
+        # Without internal_networks the page gets it from /api/v1/info once in.
+        known = shows_version(request) or (not settings.internal_networks and held(codes, request))
         body = shell.render(index.read_text(), root, __version__ if known else "", hide)
         return HTMLResponse(body, headers={"Cache-Control": "no-cache"})
 

@@ -97,9 +97,21 @@ server itself), and `404` to everyone else, as if they weren't there:
 * the API explorer (`/api/docs`, `/api/openapi.json`);
 * the server-side measurements (`/api/v1/measure/*`).
 
+They also refuse, with `403`, a browser's request made for a page on another site. They
+trust the address a request comes from, and CORS lets any page read the answer, so a
+website an employee opens inside could otherwise read History, the current code and the
+blocks through that employee's browser, or set blocks. The browser says where a request
+came from in its `Sec-Fetch-Site` header, or, without one, in its `Origin`. A link from
+elsewhere still opens the desk's pages, because the other site can't read them. Scripts,
+the CLI and monitoring send neither header and work as before.
+
 Server-side measurements only reach the servers in `[[locations]]`, unless
 `allow_any_target` is set, so the server can't be used to make requests to other hosts.
 At most two run at once on each worker.
+
+**The version** would tell an attacker which flaws to try. With `internal_networks` set,
+only those networks see it: the page, `/api/v1/info` and `/api/v1/health` leave it out for
+everyone else, even after they enter a code. A result they save gets it from the server.
 
 ## Abuse of the service
 
