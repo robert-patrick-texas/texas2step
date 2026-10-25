@@ -116,6 +116,19 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.3.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.3.0) (2026-10-25)
+
+- [x] Passes carry when they were issued: `access_pass_hours` applies to passes already
+  given, and `texas2step access passes --end` ends every pass, on every server with
+  lockouts shared.
+- [x] `texas2step access shuffle` changes the codes at once, without a new key.
+- [x] A visitor inside on one address family and outside on the other is asked for the
+  code in a box over the page; Diag says which address is restricted.
+- [x] The code screen's words are the organization's, with `access_note` under the box.
+- [x] `texas2step-setup --port` for servers where another program needs 8080.
+- [x] `monitor_voice` withholds Monitor's Voice call profile, as `monitor_video` does
+  the Video call one.
+
 ### [2.2.4](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.4) (2026-10-25)
 
 - [x] The desk's functions refuse requests made for pages on other sites; with
