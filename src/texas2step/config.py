@@ -59,6 +59,21 @@ class Link:
     url: str
 
 
+def proxy_problem(url: str) -> str:
+    """Why ``url`` isn't a proxy to download through, or "": http:// or https://, a host,
+    and a port if it isn't the scheme's own."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+        parts.port  # noqa: B018 - raises for a port that isn't a number
+    except ValueError as exc:
+        return f"{url!r} isn't a URL: {exc}"
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        return f"expected http://host:port or https://host:port, not {url!r}"
+    return ""
+
+
 @dataclass
 class Settings:
     # Identity of this server, shown in the UI and returned by /api/v1/info.
@@ -130,6 +145,9 @@ class Settings:
     # or a mirror that answers <update_url>/releases/latest the same way, on a web
     # server or in a directory (file:///opt/texas2step/mirror).
     update_url: str = "https://api.github.com/repos/robert-patrick-texas/texas2step"
+    # A proxy for its downloads, the update timer's too, such as
+    # "http://proxy.example.net:3128"; empty: https_proxy from the environment, if set.
+    update_proxy: str = ""
 
     # Internet-facing servers (docs/access.md). access_code asks visitors from outside
     # internal_networks for the service desk's code before they can test: "off", or how
@@ -224,6 +242,8 @@ class Settings:
             raise ValueError(f"brand_credit: expected one of {', '.join(CREDITS)}")
         if not self.update_url.startswith(("https://", "http://", "file:///")):
             raise ValueError("update_url: expected an https:// URL, or file:/// and a directory")
+        if self.update_proxy and (why := proxy_problem(self.update_proxy)):
+            raise ValueError(f"update_proxy: {why}")
         if self.access_code not in INTERVALS:
             raise ValueError(f"access_code: expected one of {', '.join(INTERVALS)}")
         try:

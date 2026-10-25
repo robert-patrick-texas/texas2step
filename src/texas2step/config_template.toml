@@ -62,6 +62,7 @@ results_path = "/var/lib/texas2step/results.db"
 # --- Updates (sudo texas2step update) ------------------------------------------------------
 # Where releases are found: GitHub's API for the project, or an internal mirror of it.
 # update_url = "https://api.github.com/repos/robert-patrick-texas/texas2step"
+# update_proxy = ""                     # a proxy for its downloads, e.g. "http://proxy.example.net:3128"
 # Unattended updates are off until you turn on their timer: docs/install.md (Upgrade).
 
 # --- Access codes, for servers open to the Internet (docs/access.md) -----------------------

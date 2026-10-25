@@ -4,9 +4,14 @@ import hashlib
 import io
 import json
 import shutil
+import ssl
 import sys
 import threading
+import urllib.error
+import urllib.request
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from ipaddress import IPv4Address
 from pathlib import Path
 
 import pytest
@@ -41,9 +46,9 @@ def digest(data: bytes) -> str:
 
 
 class Mirror:
-    """A releases API in GitHub's shape, with the files behind it."""
+    """A releases API in GitHub's shape, with the files behind it; over HTTPS with ``tls``."""
 
-    def __init__(self) -> None:
+    def __init__(self, tls: ssl.SSLContext | None = None) -> None:
         self.routes: dict[str, bytes] = {}
         self.hits: list[str] = []
         mirror = self
@@ -61,7 +66,12 @@ class Mirror:
                 pass
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.base = f"http://127.0.0.1:{self.server.server_address[1]}/repos/x/texas2step"
+        scheme = "http"
+        if tls is not None:
+            self.server.socket = tls.wrap_socket(self.server.socket, server_side=True)
+            scheme = "https"
+        port = self.server.server_address[1]
+        self.base = f"{scheme}://127.0.0.1:{port}/repos/x/texas2step"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def release(self, version: str, date: str, *, latest=False, deb=DEB, setup=FAKE_SETUP):
@@ -443,7 +453,149 @@ def test_command_line_checks():
         (["update", "--auto", "--from", "/srv/t2s"], "--auto takes no other options"),
         (["update", "--from", "/srv/t2s", "--version", "1.2.0"], "leave out --version"),
         (["update", "--allow-downgrade"], "--allow-downgrade goes with --version"),
+        (["update", "--auto", "--insecure"], "--auto takes no other options"),
+        (["update", "--auto", "--proxy", "http://p.example.net:3128"], "its proxy: update_proxy"),
+        (["update", "--from", "/srv/t2s", "--insecure"], "--from downloads nothing"),
     ):
         with pytest.raises(SystemExit) as exc:
             cli.main(argv)
         assert said in str(exc.value)
+
+
+# ---- Through a proxy, and through a firewall that inspects TLS -------------------------
+
+
+class Proxy:
+    """A forward proxy for plain HTTP, as httpx uses one: each request names its whole URL."""
+
+    def __init__(self) -> None:
+        self.seen: list[tuple[str, str | None]] = []
+        proxy = self
+        direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                proxy.seen.append((self.path, self.headers.get("Proxy-Authorization")))
+                try:
+                    with direct.open(self.path, timeout=5) as r:
+                        status, body = r.status, r.read()
+                except urllib.error.HTTPError as exc:
+                    status, body = exc.code, exc.read()
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args: object) -> None:
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+
+def test_downloads_through_a_proxy(mirror, host, monkeypatch, capsys):
+    monkeypatch.delenv("https_proxy", raising=False)
+    monkeypatch.delenv("http_proxy", raising=False)
+    proxy = Proxy()
+    try:
+        # The command line's, with a user and password, which aren't shown.
+        login = proxy.url.replace("http://", "http://desk:s3cret@")
+        assert run(mirror, "--yes", "--proxy", login) == 0
+        out = capsys.readouterr().out
+        assert f"Through the proxy {proxy.url}." in out and "s3cret" not in out
+        urls = [url for url, _ in proxy.seen]
+        root = mirror.base.split("/repos/")[0]
+        assert urls == [
+            f"{mirror.base}/releases/latest",
+            f"{root}/download/v1.3.0/texas2step-1.3.0-1-amd64.deb",
+            f"{root}/download/v1.3.0/texas2step-setup",
+        ]
+        assert all(auth and auth.startswith("Basic ") for _, auth in proxy.seen)
+        # The setting's, for the timer too.
+        proxy.seen.clear()
+        args = cli.build_parser().parse_args(["update", "--check"])
+        settings = Settings(update_url=mirror.base, update_proxy=proxy.url)
+        assert update.main(args, settings) == update.AVAILABLE
+        assert [url for url, _ in proxy.seen] == [f"{mirror.base}/releases/latest"]
+    finally:
+        proxy.server.shutdown()
+
+
+def test_proxy_urls_are_checked():
+    assert update.shown_proxy("http://u:p@proxy.example.net:2055/") == (
+        "http://proxy.example.net:2055"
+    )
+    assert update.shown_proxy("https://[2001:db8::1]:3128") == "https://[2001:db8::1]:3128"
+    assert Settings(update_proxy="http://proxy.example.net:2055/").update_proxy
+    for bad in (
+        "proxy.example.net:3128",
+        "socks5://proxy.example.net",
+        "http://:3128",
+        "http://proxy.example.net:port",
+    ):
+        with pytest.raises(ValueError, match="update_proxy"):
+            Settings(update_proxy=bad)
+        with pytest.raises(SystemExit):
+            cli.main(["update", "--check", "--proxy", bad])
+
+
+def self_signed(tmp_path: Path) -> tuple[ssl.SSLContext, Path]:
+    """A server context for 127.0.0.1 with a certificate nobody trusts, as a firewall that
+    inspects TLS presents its own; and the certificate, to trust it."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "inspecting firewall")])
+    now = datetime.now(UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName([x509.IPAddress(IPv4Address("127.0.0.1"))]), False
+        )
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), True)
+        .sign(key, hashes.SHA256())
+    )
+    pem = tmp_path / "firewall.pem"
+    pem.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    keyfile = tmp_path / "firewall.key"
+    keyfile.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(pem, keyfile)
+    return ctx, pem
+
+
+def test_a_certificate_nobody_trusts(tmp_path, host, monkeypatch, capsys):
+    tls, pem = self_signed(tmp_path)
+    m = Mirror(tls)
+    m.release("1.3.0", "2026-11-02", latest=True)
+    try:
+        with pytest.raises(update.UpdateError, match="CERTIFICATE_VERIFY_FAILED") as refused:
+            run(m, "--check")
+        assert "update-ca-certificates), or add --insecure" in str(refused.value)
+        # --insecure, as curl -k: it works, and says what that gives up.
+        assert run(m, "--yes", "--insecure") == 0
+        out = capsys.readouterr().out
+        assert "warning: --insecure: no certificate is checked" in out
+        assert "Nothing shows the release is genuine" in out and "update-ca-certificates" in out
+        # Better: trust the firewall's CA, as update-ca-certificates does for the system.
+        monkeypatch.setenv("SSL_CERT_FILE", str(pem))
+        assert run(m, "--check") == update.AVAILABLE
+        assert "--insecure" not in capsys.readouterr().out
+    finally:
+        m.server.shutdown()

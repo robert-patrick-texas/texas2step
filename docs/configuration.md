@@ -45,6 +45,7 @@ file up to date with the new version's template and keeps your values; see
 | `trusted_proxies` | `["127.0.0.1", "::1"]` | Peers whose `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Prefix` and `X-Client-Protocol` are believed |
 | `debug` | `false` | Also log every request and the UDP probe's WebRTC detail; see [Logging](#logging) |
 | `update_url` | GitHub's API for the project | Where `texas2step update` looks for releases: GitHub, GitHub Enterprise, or a mirror on a web server or in a directory (`file:///opt/texas2step/mirror`); see [Without access to GitHub](install.md#without-access-to-github) |
+| `update_proxy` | `""` | A proxy for `texas2step update`'s downloads and the update timer's, such as `http://proxy.example.net:3128`; empty uses `https_proxy` from the environment, if set. `--proxy` overrides it for one run. |
 | `access_code` | `off` | Ask visitors from outside `internal_networks` for the service desk's code before they test: how often it changes, `daily`, `weekly`, `monthly` or `fixed`; see [Access codes](access.md) |
 | `access_timezone` | `America/New_York` | The time zone whose midnight starts a new code |
 | `access_words` | `""` | A file of your own words for codes, one entry per line; empty uses the built-in words |

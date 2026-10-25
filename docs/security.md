@@ -250,6 +250,11 @@ in the middle of the DTLS session too.
   records each file's SHA-256; `texas2step update` downloads both, checks them against
   it, and stops on any difference. The setup tool carries its package's SHA-256 and
   refuses any other. On a closed network, `--from` and mirrors are checked the same way.
+  Certificates are checked against the system's trust store. `--insecure`, for a
+  firewall that inspects TLS with a CA the server doesn't trust, checks none, and then
+  nothing shows the release is genuine; it is a command-line option only, never a setting,
+  so the update timer always checks. Trusting the firewall's CA is the better fix
+  ([A firewall that inspects TLS](install.md#a-firewall-that-inspects-tls)).
 * **Nothing installs by surprise.** The update timer is off until turned on, and even then
   installs a release by itself only if it changes nothing but the package and the
   settings, never nginx or the firewall. Settings are merged into the new template with

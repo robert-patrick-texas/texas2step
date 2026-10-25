@@ -13,7 +13,11 @@ It takes the steps the install guide's Upgrade section has an operator take by h
 4. run the install script: after asking, at once with ``--yes``, or from the update
    timer (``--auto``) only when the plan changes nothing but the package and settings.
 
-Downloads use the system's trust store and honor ``https_proxy``. On a server without
+Downloads check certificates against the system's trust store, so a firewall that
+inspects TLS with the organization's own CA works once that CA is installed there.
+They go through ``update_proxy`` or ``--proxy`` if set, else ``https_proxy``. ``--insecure``
+checks no certificate, for one run by an operator: then nothing shows the release is
+genuine, since its SHA-256 digests come over the same unchecked connection. On a server without
 internet access, ``--from DIR`` takes the place of steps 1 and 2: the release is the
 package and setup tool an operator put in DIR, checked as a pair (the setup tool holds
 its package's SHA-256) and copied to CACHE/<version>/, where they are checked again.
@@ -192,14 +196,45 @@ def architecture() -> str:
     ).stdout.strip()
 
 
-def client() -> httpx.Client:
+def client(proxy: str = "", insecure: bool = False) -> httpx.Client:
     return httpx.Client(
         timeout=httpx.Timeout(30, read=60),
         follow_redirects=True,
-        # The system's trust store, so a mirror with a certificate from an internal CA works.
-        verify=ssl.create_default_context(),
+        # The system's trust store, so a mirror with a certificate from an internal CA works,
+        # and a firewall that inspects TLS with one. --insecure: no certificate is checked.
+        verify=False if insecure else ssl.create_default_context(),
+        proxy=proxy or None,  # without one, https_proxy and the like from the environment
         headers={"User-Agent": f"texas2step/{__version__} (update)"},
     )
+
+
+def shown_proxy(url: str) -> str:
+    """A proxy's URL without the user name and password it may carry, to print."""
+    parts = urllib.parse.urlsplit(url)
+    host = parts.hostname or ""
+    host = f"[{host}]" if ":" in host else host
+    return f"{parts.scheme}://{host}" + (f":{parts.port}" if parts.port else "")
+
+
+UNTRUSTED = (
+    "; if a firewall inspects TLS with its own CA, install that CA (copy it as a .crt file to "
+    "/usr/local/share/ca-certificates/, then sudo update-ca-certificates), or add --insecure"
+)
+
+
+def _why(exc: httpx.HTTPError) -> str:
+    """An HTTP error, for the operator: with what to do about a certificate not trusted."""
+    said = f"{type(exc).__name__}: {exc}"
+    return said + UNTRUSTED if "CERTIFICATE_VERIFY_FAILED" in said else said
+
+
+INSECURE = (
+    "warning: --insecure: no certificate is checked, so anything between this server and "
+    "{where} can change what it answers, the SHA-256 digests the downloads are checked "
+    "against included. Nothing shows the release is genuine. To check them instead, "
+    "install the CA that signs the firewall's certificates: copy it as a .crt file to "
+    "/usr/local/share/ca-certificates/ and run sudo update-ca-certificates."
+)
 
 
 def fetch_release(http: httpx.Client, base: str, version: str | None, arch: str) -> Release:
@@ -217,7 +252,7 @@ def fetch_release(http: httpx.Client, base: str, version: str | None, arch: str)
         try:
             r = http.get(url, headers={"Accept": "application/vnd.github+json"})
         except httpx.HTTPError as exc:
-            raise UpdateError(f"can't reach {url}: {type(exc).__name__}: {exc}") from exc
+            raise UpdateError(f"can't reach {url}: {_why(exc)}") from exc
         if r.status_code == 404:
             raise UpdateError(f"{missing} at {url}")
         if r.status_code != 200:
@@ -267,7 +302,7 @@ def download(http: httpx.Client, asset: Asset, folder: Path, mode: int) -> Path:
                     digest.update(chunk)
         except httpx.HTTPError as exc:
             part.unlink(missing_ok=True)
-            raise UpdateError(f"downloading {asset.name}: {type(exc).__name__}: {exc}") from exc
+            raise UpdateError(f"downloading {asset.name}: {_why(exc)}") from exc
         except OSError as exc:  # a mirror's file, or the cache
             part.unlink(missing_ok=True)
             raise UpdateError(f"{asset.name}: {exc.strerror} ({exc.filename})") from exc
@@ -363,7 +398,14 @@ def main(args: argparse.Namespace, settings: Settings) -> int:
             offered = found = f"in {source}/"
             at = f" --from {source}"
         else:
-            http = stack.enter_context(client())
+            proxy = getattr(args, "proxy", None) or settings.update_proxy
+            insecure = getattr(args, "insecure", False)
+            if proxy:
+                say(f"Through the proxy {shown_proxy(proxy)}.")
+            if insecure and not settings.update_url.startswith("file://"):
+                where = urllib.parse.urlsplit(settings.update_url).hostname
+                say(INSECURE.format(where=where), warning=True)
+            http = stack.enter_context(client(proxy, insecure))
             release = fetch_release(http, settings.update_url, args.release, architecture())
             offered, found, at = f"available ({release.date})", f"({release.date})", ""
         old, new = _shown(installed, release.version), _shown(release.version, installed)

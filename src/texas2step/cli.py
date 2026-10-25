@@ -405,12 +405,30 @@ def cmd_config_add_location(args: argparse.Namespace) -> None:
     _apply_edit(args, lambda text: config_edit.add_location(text, location), again)
 
 
+def _proxy(value: str) -> str:
+    from .config import proxy_problem
+
+    value = value.strip()
+    if why := proxy_problem(value):
+        raise argparse.ArgumentTypeError(why)
+    return value
+
+
 def cmd_update(args: argparse.Namespace) -> None:
     from . import update
     from .config import load_settings
 
-    if args.auto and (args.check or args.release or args.allow_downgrade or args.source):
-        sys.exit("texas2step update: --auto takes no other options")
+    if args.auto and (
+        args.check
+        or args.release
+        or args.allow_downgrade
+        or args.source
+        or args.proxy
+        or args.insecure
+    ):
+        sys.exit("texas2step update: --auto takes no other options (its proxy: update_proxy)")
+    if args.source and (args.proxy or args.insecure):
+        sys.exit("texas2step update: --from downloads nothing; leave out --proxy and --insecure")
     if args.release and args.source:
         sys.exit("texas2step update: --from installs the release in DIR; leave out --version")
     if args.allow_downgrade and not (args.release or args.source):
@@ -1272,6 +1290,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="with --version or --from: install an older release",
     )
     upd.add_argument("-y", "--yes", action="store_true", help="install without asking")
+    upd.add_argument(
+        "--proxy",
+        type=_proxy,
+        metavar="URL",
+        help="download through this proxy, e.g. http://proxy.example.net:3128 "
+        "(default: update_proxy, else https_proxy)",
+    )
+    upd.add_argument(
+        "-k",
+        "--insecure",
+        action="store_true",
+        help="check no certificate, as curl -k: for a firewall that inspects TLS with a CA "
+        "this server doesn't trust. Nothing then shows the release is genuine; trusting "
+        "that CA is better (docs/install.md)",
+    )
     upd.add_argument(
         "--auto",
         action="store_true",

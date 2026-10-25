@@ -453,7 +453,38 @@ The options:
   `--allow-downgrade` for an older one, to go back to it.
 * `--from <directory>` installs a release whose two files are already on the server,
   without downloading anything.
-* Behind a proxy: `sudo https_proxy=http://proxy.example.net:3128 texas2step update`.
+* `--proxy <url>` downloads through a proxy:
+  `sudo texas2step update --proxy=http://proxy.example.net:3128`. A user name and
+  password can go in the URL (`http://user:password@proxy.example.net:3128`); they are
+  never printed. To use the proxy every time, and for the update timer too, set
+  `update_proxy` in the settings. Without either, `https_proxy` from the environment
+  is used, if set.
+* `-k` or `--insecure` checks no certificate, as `curl -k` does: see
+  [A firewall that inspects TLS](#a-firewall-that-inspects-tls).
+
+#### A firewall that inspects TLS
+
+A firewall that inspects outbound HTTPS (break-and-inspect) ends each connection itself
+and presents a certificate of its own, signed by the organization's CA. A server that
+doesn't trust that CA refuses it, and `texas2step update` says so:
+
+```text
+texas2step update: can't reach https://api.github.com/...: ConnectError: [SSL: CERTIFICATE_VERIFY_FAILED] ...
+```
+
+The better fix is to trust the CA on the server, once. Downloads then stay checked, and
+the update timer works too:
+
+```bash
+sudo cp organization-ca.crt /usr/local/share/ca-certificates/   # PEM, ending in .crt
+sudo update-ca-certificates
+```
+
+Where that can't be done, `sudo texas2step update --insecure` downloads without checking
+any certificate, and says so each time. Use it knowingly: the SHA-256 digests the
+downloads are checked against come over the same unchecked connection, so anything on
+the path could hand the server another release with matching digests, and it would run
+as root. The setting has no such option, so the update timer never installs this way.
 
 Where the server can't reach GitHub, put a release's files on it, or point it at a
 mirror: see [Without access to GitHub](#without-access-to-github). On a server whose texas2step
@@ -508,12 +539,16 @@ OnCalendar=
 OnCalendar=Sun 03:00
 ```
 
-Behind a proxy, `sudo systemctl edit texas2step-update.service` and add:
+Behind a proxy, set it in the settings, and restart nothing: the timer reads them on each
+run.
 
-```ini
-[Service]
-Environment=https_proxy=http://proxy.example.net:3128
+```bash
+sudo texas2step config set 'update_proxy="http://proxy.example.net:3128"' --write
 ```
+
+Behind a firewall that inspects TLS, install its CA as in
+[A firewall that inspects TLS](#a-firewall-that-inspects-tls); the timer never skips the
+certificate check.
 
 To turn unattended updates off again: `sudo systemctl disable --now texas2step-update.timer`.
 
