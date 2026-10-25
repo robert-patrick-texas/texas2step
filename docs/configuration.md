@@ -49,6 +49,7 @@ file up to date with the new version's template and keeps your values; see
 | `access_words` | `""` | A file of your own words for codes, one entry per line; empty uses the built-in words |
 | `access_digits` | 2 | The digits that end a code: 2, 3 or 4 |
 | `access_pass_hours` | 12 | How long an entered code lets a browser keep testing |
+| `access_note` | `Contact the service desk for assistance.` | The line under the code box, such as how to reach the desk; `""` for none |
 | `access_key_file` | `/etc/texas2step/access.key` | The key codes come from; the same on every server of an organization |
 | `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | Standing phrases that work as codes, if the file exists; see [Standing phrases](access.md#standing-phrases) |
 | `access_lockout_after` | 3 | Wrong codes in a row from one /24 or /48 that lock it out of entering codes; see [Lockouts and blocks](access.md#lockouts-and-blocks) |

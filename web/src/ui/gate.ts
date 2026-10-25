@@ -15,6 +15,7 @@ const KEY = "t2s.pass";
 let expires = 0; // when the pass held runs out, in seconds since the epoch; 0 for none
 let declined = false; // "Not now" in the dialog: asked again only when the visitor chooses to
 let asking: Promise<boolean> | null = null;
+let note = ""; // the site's line under the code box (access_note)
 
 export function forgetPass(): void {
   save(KEY, { pass: "", expires: 0 });
@@ -40,6 +41,7 @@ export async function admit(origin: Endpoint): Promise<AccessStatus | null> {
   } catch {
     return null;
   }
+  note = status.note ?? "";
   if (!status.required || status.pass?.valid) return status;
   setPass("");
   expires = 0;
@@ -53,8 +55,8 @@ function ask(origin: Endpoint, again: boolean): Promise<void> {
   clear(view);
   return new Promise((resolve) => {
     const help = again
-      ? "Your access has run out. Enter the current code from the service desk."
-      : "The service desk gives you a code of words and digits, such as maple.river.42.";
+      ? "Access expired. Contact the service desk."
+      : "Use of this system is limited to authorized users with an assigned access code.";
     const { card, input } = codeCard(origin, "h1", help, () => {
       document.body.classList.remove("gated");
       resolve();
@@ -66,16 +68,20 @@ function ask(origin: Endpoint, again: boolean): Promise<void> {
 
 /**
  * The code asked for over the page, which stays as it is underneath: true once a right code
- * has bought a pass, false for "Not now". `what` says who asks, as "Over IPv4, this
- * server". Asked on its own only until the visitor says "Not now"; `chosen` asks anyway.
+ * has bought a pass, false for "Not now". `over` begins its sentence with where the code
+ * is asked for, as "Over IPv4, ". Asked on its own only until the visitor says "Not now";
+ * `chosen` asks anyway.
  */
-export function askOver(origin: Endpoint, what: string, chosen = false): Promise<boolean> {
+export function askOver(origin: Endpoint, over: string, chosen = false): Promise<boolean> {
   if (asking) return asking;
   if (declined && !chosen) return Promise.resolve(false);
   const again = expires > 0 && !passHeld();
-  const help = again
-    ? `${what} asks for the code again: your access has run out. Enter the current code from the service desk.`
-    : `${what} asks for the access code. The service desk gives you a code of words and digits, such as maple.river.42.`;
+  const help = sentence(
+    over,
+    again
+      ? "access expired. Contact the service desk."
+      : "this function requires organization approval. Access is limited to authorized users.",
+  );
   asking = new Promise<boolean>((resolve) => {
     const later = h("button", { class: "btn small", type: "button" }, "Not now");
     const dialog = h("dialog", { class: "code-dialog", "aria-labelledby": "access-title" });
@@ -155,8 +161,13 @@ function codeCard(origin: Endpoint, heading: "h1" | "h2", help: string, done: ()
     h("p", { class: "lede", id: "access-help" }, help),
     form,
     error,
-    h("p", { class: "gate-note" }, "Type it here, not in the browser's address bar. Capitals, spaces and dots don't matter."),
+    note ? h("p", { class: "gate-note" }, note) : null,
     ...more,
   );
   return { card, input };
+}
+
+/** A sentence that begins with `over`, as "Over IPv4, ", or with `rest` when that's empty. */
+export function sentence(over: string, rest: string): string {
+  return over ? over + rest : rest.charAt(0).toUpperCase() + rest.slice(1);
 }

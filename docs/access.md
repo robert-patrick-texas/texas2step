@@ -89,6 +89,7 @@ To turn codes off again: `sudo texas2step config set access_code=off --write`, t
 | `access_words` | `""` | Your own word list; empty uses the built-in words |
 | `access_digits` | `2` | The digits that end a code: 2, 3 or 4 |
 | `access_pass_hours` | `12` | How long an entered code lets a browser keep testing |
+| `access_note` | `Contact the service desk for assistance.` | The line under the code box, such as how to reach the desk; `""` for none |
 | `access_key_file` | `/etc/texas2step/access.key` | The key |
 | `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | [Standing phrases](#standing-phrases), if the file exists |
 | `internal_networks` | `[]` | Your own networks: no code, and the desk's tools. A list of IPv4 and IPv6 addresses and networks in CIDR form, mixed freely: `["192.168.0.0/16", "2001:db8::/32", "203.0.113.7"]`. An address alone is a single host. Bits past the prefix are ignored, so `10.2.1.30/24` means all of `10.2.1.0/24`. Give the addresses as the server sees them: staff who come in through your firewall's NAT arrive from its public address. |
@@ -286,8 +287,9 @@ server in the picker. The pass the code buys works over both families and on eve
 server with the same key.
 
 The box comes up by itself until the visitor puts it aside, which holds until the page
-is loaded again. Meanwhile Test and Monitor say that address asks for the code, with a
-button to enter it, and Diag's rows for it say **Needs the code**, with the same button.
+is loaded again. Meanwhile Test and Monitor say the function is restricted over that
+address, with a button to enter the code, and Diag's rows for it say **Restricted**, with
+the same button.
 Diag then tries that address every 10 seconds instead of every second, and opens no
 WebSocket there until the code is in. A server with `access_code = "off"` has no pass to
 give, so its page doesn't ask: it only says which address wants a code.

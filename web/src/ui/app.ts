@@ -3,7 +3,7 @@ import { appPath, Endpoint, type Family, routeOf, whenDenied, whenRefused } from
 import type { AccessStatus, Location, ServerInfo, WhoAmI } from "../types";
 import { Awake } from "./awake";
 import { $, clear, h, save, setText, store } from "./dom";
-import { admit, askOver, forgetPass, passHeld } from "./gate";
+import { admit, askOver, forgetPass, passHeld, sentence } from "./gate";
 import { mountSizePicker } from "./size";
 import { mountThemeMenu } from "./theme";
 
@@ -253,7 +253,7 @@ export class App {
       window.location.reload();
       return false;
     }
-    return askOver(this.origin, this.asker(ep));
+    return askOver(this.origin, this.over(ep));
   }
 
   /** Whether the code can be entered here, for an address that asks for it. */
@@ -263,23 +263,26 @@ export class App {
 
   /** The code asked for over the page, when the visitor chooses: true once it's in. */
   async enterCode(ep: Endpoint): Promise<boolean> {
-    const got = await askOver(this.origin, this.asker(ep), true);
+    const got = await askOver(this.origin, this.over(ep), true);
     if (got && !this.info) await this.refreshFamily(); // the header's server, refused until now
     return got;
   }
 
-  /** Who asks for the code, for the dialog: "Over IPv4, this server", or "Dallas". */
-  private asker(ep: Endpoint): string {
+  /**
+   * Where an address asks for the code, to begin a sentence: "Over IPv4, " for this
+   * server's IPv4-only name, "On Dallas, " or "On Dallas over IPv6, " for another server.
+   */
+  private over(ep: Endpoint): string {
     const at = (url: string) => url !== "" && new Endpoint(url).base === ep.base;
     const loc = this.locations.find((l) => at(l.url) || at(l.url_v4) || at(l.url_v6));
-    const name = loc?.url ? loc.name : "this server";
-    if (ep.family) return `Over ${ep.family === "ipv4" ? "IPv4" : "IPv6"}, ${name}`;
-    return name.charAt(0).toUpperCase() + name.slice(1);
+    const family = ep.family ? `over ${ep.family === "ipv4" ? "IPv4" : "IPv6"}` : "";
+    const where = [loc?.url ? `on ${loc.name}` : "", family].filter(Boolean).join(" ");
+    return where ? `${where.charAt(0).toUpperCase()}${where.slice(1)}, ` : "";
   }
 
   /** What an address that refused the page says, for a page's status line. */
   needsCodeText(ep: Endpoint): string {
-    return `${this.asker(ep)} asks for the access code.`;
+    return sentence(this.over(ep), "this function is restricted.");
   }
 
   async select(loc: Location | null): Promise<void> {

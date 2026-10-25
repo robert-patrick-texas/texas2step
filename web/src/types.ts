@@ -238,6 +238,7 @@ export interface AccessStatus {
   required: boolean;
   desk: boolean;
   codes: boolean; // this server gives passes, even to a visitor who needs none
+  note: string; // the site's line under the code box (access_note); empty for none
   pass?: { valid: boolean; expires: number | null };
 }
 

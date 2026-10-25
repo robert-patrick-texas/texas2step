@@ -42,7 +42,7 @@ abstract class Method {
   downSince = 0;
   stopped = false;
   private timer = 0;
-  private codeLogged = false; // the log says this address needs the access code
+  private codeLogged = false; // the log says this address requires the access code
   readonly lane = new Lane();
   readonly row: {
     root: HTMLElement;
@@ -103,7 +103,7 @@ abstract class Method {
    */
   protected needsCode(): void {
     if (this.tone === "off") return;
-    if (!this.codeLogged) this.view.log(this, "this address needs the access code");
+    if (!this.codeLogged) this.view.log(this, "access code required");
     this.codeLogged = true;
     this.tone = "trying";
     this.lostRun = 0;
@@ -190,9 +190,9 @@ abstract class Method {
     const lost = recent.filter((s) => !s.ok && s.up).length;
     const latest = this.samples[this.samples.length - 1];
     if (this.refused) {
-      setText(r.badge, "Needs the code");
+      setText(r.badge, "Restricted");
       setText(r.figs, this.kind === "https" ? `checking every ${seconds(CODE_RETRY_MS)}` : "");
-      setText(r.detail, "this address needs the access code");
+      setText(r.detail, "access code required");
     } else if (this.tone === "off") {
       setText(r.badge, "Not offered");
       setText(r.figs, "");
@@ -446,7 +446,7 @@ export class DiagView implements View {
       h("section", { class: "card diag-card diag-addresses" }, this.els.you, this.els.server, this.els.clock),
       card(
         "Connection methods",
-        "Each ping leaves on the left and its pong comes back from the server on the right. Green: answering. Red: answered before, not now. Grey: no answer yet, or not offered. Amber: the address asks for the access code.",
+        "Each ping leaves on the left and its pong comes back from the server on the right. Green: answering. Red: answered before, not now. Grey: no answer yet, or not offered. Amber: restricted, access code required.",
         this.els.rows,
         h(
           "p",

@@ -136,6 +136,8 @@ class Settings:
     access_words: str = ""  # the site's own list, one entry per line; empty: built-in words
     access_digits: int = 2  # the digits that end a code
     access_pass_hours: float = 12.0  # how long an entered code lets a browser keep testing
+    # The line under the code box, such as how to reach the desk; "" for none.
+    access_note: str = "Contact the service desk for assistance."
     access_key_file: str = "/etc/texas2step/access.key"  # the same key on every server
     # Standing phrases that always work as codes (texas2step access phrase); none without it.
     access_phrases_file: str = "/etc/texas2step/access-phrases.toml"

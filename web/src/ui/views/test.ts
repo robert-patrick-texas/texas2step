@@ -332,7 +332,7 @@ export class TestView implements View {
     const server = saved?.server ?? info?.server;
     const version = saved?.server.version ?? info?.version;
     setText(this.link.server.title, server?.name ?? "Server");
-    line(this.link.server.detail, server?.location || (info || saved ? "" : this.app.ep.needsCode ? "asks for the access code" : "unreachable"));
+    line(this.link.server.detail, server?.location || (info || saved ? "" : this.app.ep.needsCode ? "restricted" : "unreachable"));
     line(this.link.server.sub, version ? `v${version}` : "");
   }
 
