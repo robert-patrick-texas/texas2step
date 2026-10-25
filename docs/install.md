@@ -51,7 +51,8 @@ To do the same by hand, follow steps 1 to 5 below instead.
    ```
 
    It logs to `texas2step-install.log` beside itself. When it finishes, the service
-   answers both on `127.0.0.1:8080` and through nginx, and it prints the address to open.
+   answers both on `127.0.0.1:8080` (or the `--port` you gave) and through nginx, and it
+   prints the address to open.
    You can run it again safely: it skips each step that is already done.
 
 What the check looks at, and what the script then does:
@@ -66,7 +67,7 @@ What the check looks at, and what the script then does:
 | Peers | Each `--peer URL` is asked who it is (`/api/v1/info`). A peer that can't be reached is left out, with the command to add it later. | `texas2step config add-location ... --write` |
 | nginx | nginx is installed and running, its configuration passes `nginx -t`, and it loads `conf.d/*.conf`. It finds your HTTPS site, and checks that nothing else on that site uses `/texas2step/`. If texas2step is already published, nginx is left alone. | Adds `include snippets/texas2step.conf;` after the site's `server_name` line, runs `nginx -t` and reloads. The file is backed up to `/var/backups/texas2step/` first, and put back if the test fails. |
 | UDP | The probe's port range: the one you set, or 61000–61999. It checks this range against the firewall and the kernel's ephemeral ports. | Pins the range in the settings. Opens it in ufw or firewalld if one of them is active. |
-| Port 8080 | Nothing else listens there | |
+| Port | Nothing else listens on texas2step's TCP port: 8080, `LISTEN_PORT` in `/etc/default/texas2step`, or `--port`. nginx's `upstream` in `/etc/nginx/conf.d/texas2step.conf` points at that port. | With `--port`, sets `LISTEN_PORT` and the `upstream` before the package is installed, so the service never starts on 8080. An `upstream` that points elsewhere is pointed at the port. |
 
 Options:
 
@@ -79,6 +80,7 @@ Options:
 | `--path PATH` | Publish texas2step at `PATH` instead of `/texas2step/`, e.g. `/speedtest`. The check moves the package's snippet to that path and shows it in the install script, which writes it as `snippets/texas2step-at-speedtest.conf` and includes that. Each later run writes it again from the new package. Use the same path in `--url-v4` and `--url-v6`. |
 | `--no-nginx` | Install the service only, and publish it yourself |
 | `--udp-ports MIN-MAX` | The probe's UDP range, e.g. `61000-61999` |
+| `--port PORT` | The TCP port texas2step listens on, on `127.0.0.1` behind nginx, when another program needs 8080. Choose one from 1024 to 32767. Later runs and `texas2step update` keep it. See [Another port](#another-port). |
 | `--url-v4 URL`, `--url-v6 URL` | This server's IPv4-only and IPv6-only base URLs, for the header's IP drop-down; see [IPv4 and IPv6](configuration.md#ipv4-and-ipv6). The check looks up each name: it should have only an A record (or only AAAA), pointing at this server. After the install, the script checks that nginx answers for each name. |
 | `--no-firewall` | Leave the firewall alone; the report lists the rule to add |
 | `--allow-downgrade` | Allow installing an older version than the one installed |
@@ -127,6 +129,32 @@ yourself.
 
 To make the second server by cloning the first's virtual machine instead, see
 [Clone a server](#clone-a-server).
+
+### Another port
+
+texas2step listens on `127.0.0.1:8080`, and nginx reaches it there through the
+`upstream` in `/etc/nginx/conf.d/texas2step.conf`. When another program needs 8080,
+give the setup tool another port, the same way for a new install or an installed server:
+
+```bash
+sudo ./texas2step-setup --port 8081
+sudo ./texas2step-install.sh
+```
+
+The install script sets `LISTEN_PORT=8081` in `/etc/default/texas2step` and points the
+`upstream` at `127.0.0.1:8081`, keeping a dated copy of each file it changes in
+`/var/backups/texas2step/`. It does this before installing the package, so the service
+never starts on 8080, even on a new install. Then it restarts texas2step, reloads nginx
+and checks both.
+
+Choose a port from 1024 to 32767. texas2step runs as its own user, which can't listen
+below 1024, and Linux takes the ports of outgoing connections from 32768 up. If the port
+is in use, the check says by what. Both files are kept on upgrades, and the setup tool
+and `texas2step update` read the port from `LISTEN_PORT`. When a new version changes the
+`upstream` file, the update installs the new one with your port in it.
+
+If you changed `LISTEN_PORT` by hand and not the `upstream`, the next run of the setup
+tool points the `upstream` at it.
 
 ## 1. Install the package
 
@@ -264,12 +292,11 @@ choose the default theme (Light, Dark, America, Energy, Federal, Military or Tex
 that site directly. Sites can also measure each other with `POST /api/v1/measure/full`,
 but only toward listed locations.
 
-**Listen address and workers.** These are set in `/etc/default/texas2step`. If you move
-the service off `127.0.0.1:8080`, change the `upstream` in
-`/etc/nginx/conf.d/texas2step.conf` to match. More workers help on multi-gigabit links,
-where Python's per-connection CPU cost is the limit. Each worker keeps its own UDP
-sessions, which is fine, because a session lives entirely in the worker that answered
-it.
+**Listen address and workers.** These are set in `/etc/default/texas2step`. To move the
+service to another port, see [Another port](#another-port). More workers help on
+multi-gigabit links, where Python's per-connection CPU cost is the limit. Each worker
+keeps its own UDP sessions, which is fine, because a session lives entirely in the
+worker that answered it.
 
 ## 4. Firewall and UDP
 

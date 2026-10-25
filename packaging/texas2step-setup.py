@@ -324,6 +324,46 @@ def loads_upstream(files: dict[str, str]) -> bool:
     return False
 
 
+def upstream_server(text: str) -> str | None:
+    """The address in conf.d/texas2step.conf's upstream, when it has just one server."""
+    m = re.search(r"^\s*upstream\s+texas2step\s*\{(.*?)\}", text, re.M | re.S)
+    found = re.findall(r"^\s*server\s+([^\s;]+)", m.group(1), re.M) if m else []
+    return found[0] if len(found) == 1 else None
+
+
+def with_upstream(text: str, addr: str) -> str:
+    """conf.d/texas2step.conf with its upstream's server at ``addr``."""
+    m = re.search(r"^\s*upstream\s+texas2step\s*\{(.*?)\}", text, re.M | re.S)
+    if not m:
+        return text
+    server = re.compile(r"^(\s*server\s+)[^\s;]+", re.M)
+    body = server.sub(lambda s: s.group(1) + addr, m.group(1), count=1)
+    return text[: m.start(1)] + body + text[m.end(1) :]
+
+
+def with_listen_port(text: str, port: int) -> str:
+    """/etc/default/texas2step with LISTEN_PORT set: in its own line, or in place of the
+    commented default, or in a line of its own at the end."""
+    line = f"LISTEN_PORT={port}"
+    if re.search(r"^\s*LISTEN_PORT=", text, re.M):
+        return re.sub(r"^\s*LISTEN_PORT=.*$", line, text, flags=re.M)
+    if re.search(r"^\s*#\s*LISTEN_PORT=", text, re.M):
+        return re.sub(r"^\s*#\s*LISTEN_PORT=.*$", line, text, count=1, flags=re.M)
+    return text + ("\n" if text and not text.endswith("\n") else "") + line + "\n"
+
+
+def upstream_addr(listen_host: str, port: str) -> str:
+    """Where nginx and the install script reach texas2step: LISTEN_HOST and the port, a
+    wildcard as loopback."""
+    h = listen_host.strip("[]")
+    h = {"": "127.0.0.1", "0.0.0.0": "127.0.0.1", "::": "::1"}.get(h, h)
+    return f"[{h}]:{port}" if ":" in h else f"{h}:{port}"
+
+
+def _md5(text: str) -> str:
+    return hashlib.md5(text.encode()).hexdigest()
+
+
 # ---- Firewalls ----------------------------------------------------------------------
 
 
@@ -435,6 +475,8 @@ class Host:
     service_active: bool = False
     config: str | None = None  # /etc/texas2step/config.toml
     defaults: dict[str, str] = field(default_factory=dict)  # /etc/default/texas2step
+    defaults_text: str | None = None  # that file as it is, if it exists
+    upstream_on_disk: str | None = None  # /etc/nginx/conf.d/texas2step.conf, if it exists
     # md5 of the settings file now, of the template the installed version shipped (as dpkg
     # recorded it), and of the new package's template. dpkg leaves config.toml.dpkg-dist,
     # and a merge is due, only when the operator edited the file and the template changed.
@@ -452,6 +494,8 @@ class Host:
     docker: bool = False
     ephemeral: tuple[int, int] = (32768, 60999)
     packaged_snippet: str = ""  # the new package's snippets/texas2step.conf
+    packaged_upstream: str = ""  # ...its conf.d/texas2step.conf
+    packaged_defaults: str = ""  # ...and its /etc/default/texas2step
     # The package's nginx files that nginx loads: path -> (md5 on disk, md5 dpkg recorded
     # for the installed version, md5 in the new package).
     nginx_files: dict[str, tuple[str, str, str]] = field(default_factory=dict)
@@ -520,6 +564,7 @@ class Options:
     location: str = ""
     peers: list[str] = field(default_factory=list)
     udp_ports: tuple[int, int] | None = None
+    port: int | None = None  # the TCP port texas2step listens on, behind nginx
     url_v4: str = ""
     url_v6: str = ""
     no_firewall: bool = False
@@ -556,6 +601,9 @@ class Plan:
     merge: bool = False  # the upgrade brings the settings file up to date
     nginx_watch: list[str] = field(default_factory=list)  # package files nginx loads
     nginx_reload: list[str] = field(default_factory=list)  # ...that the upgrade changes
+    defaults_text: str | None = None  # /etc/default/texas2step to write, for --port
+    upstream_text: str | None = None  # conf.d/texas2step.conf to write: nginx's way to it
+    drop_dist: list[str] = field(default_factory=list)  # their .dpkg-dist, already taken in
 
     def add(self, level: str, text: str) -> None:
         self.findings.append(Finding(level, text))
@@ -569,6 +617,7 @@ def plan(host: Host, opts: Options) -> Plan:
     p = Plan()
     _check_system(host, opts, p)
     _check_package(host, opts, p)
+    _check_listen(host, opts, p)
     if opts.no_nginx:
         p.add(
             NOTE, "nginx left alone (--no-nginx): publish texas2step yourself, see docs/install.md"
@@ -667,13 +716,73 @@ def _check_package(host: Host, opts: Options, p: Plan) -> None:
 
     p.listen = (
         host.defaults.get("LISTEN_HOST", "127.0.0.1"),
-        host.defaults.get("LISTEN_PORT", "8080"),
+        str(opts.port) if opts.port else host.defaults.get("LISTEN_PORT", "8080"),
     )
     if host.port_users:
         p.add(
             FIX,
             f"port {p.listen[1]} is in use by {', '.join(host.port_users)}; texas2step "
-            f"listens there (LISTEN_PORT in {DEFAULTS})",
+            f"listens there (LISTEN_PORT in {DEFAULTS}); choose another with --port",
+        )
+
+
+def _check_listen(host: Host, opts: Options, p: Plan) -> None:
+    """The port texas2step listens on, and nginx's upstream to it. --port sets both; an
+    upstream that points somewhere else is pointed at it."""
+    now = host.defaults.get("LISTEN_PORT", "8080")
+    if opts.port and str(opts.port) != now:
+        base = host.defaults_text if host.defaults_text is not None else host.packaged_defaults
+        p.defaults_text = with_listen_port(base, opts.port)
+        if host.defaults_text is None:
+            p.drop_dist.append(DEFAULTS)
+        p.add(CHANGE, f"listen on port {opts.port} instead of {now} (LISTEN_PORT in {DEFAULTS})")
+    lo, hi = host.ephemeral
+    if opts.port and lo <= opts.port <= hi:
+        p.add(
+            NOTE,
+            f"port {opts.port} is in the range Linux takes outgoing connections' ports from "
+            f"({lo}-{hi}), so one could hold it when texas2step starts; one below {lo} can't",
+        )
+
+    want = upstream_addr(*p.listen)
+    disk, new = host.upstream_on_disk, host.packaged_upstream
+    shipped = host.nginx_files.get(UPSTREAM_CONF, ("", "", ""))[1]
+    packaged_addr = upstream_server(new) or ""
+    # Changed here at most in its address: an upgrade's new version, with the address kept.
+    only_addr = bool(disk and shipped and packaged_addr) and (
+        _md5(with_upstream(disk or "", packaged_addr)) == shipped
+    )
+    if disk is None or (new and new != disk and only_addr):
+        base, from_package = new, True
+    else:
+        base, from_package = disk, False
+    if not base:
+        return
+    addr = upstream_server(base)
+    if addr is None:
+        if want != packaged_addr:
+            p.add(
+                NOTE,
+                f"{UPSTREAM_CONF} has no single server line in upstream texas2step, so it "
+                f"can't be pointed at {want}; check it",
+            )
+        return
+    text = with_upstream(base, want)
+    # What dpkg leaves there on its own: the package's file, unless it was edited here.
+    left = new if disk is None or _md5(disk) == shipped else disk
+    if text == left:
+        return
+    p.upstream_text = text
+    if from_package:
+        p.drop_dist.append(UPSTREAM_CONF)
+    was = upstream_server(left) or addr
+    if was == want:
+        p.add(CHANGE, f"bring {UPSTREAM_CONF} up to date from the package, keeping {want}")
+    else:
+        p.add(
+            CHANGE,
+            f"point nginx's upstream in {UPSTREAM_CONF} at {want}, where texas2step listens "
+            f"(was {was})",
         )
 
 
@@ -795,7 +904,7 @@ def _check_nginx_files(host: Host, p: Plan) -> None:
     """The package's nginx files that nginx loads, which an upgrade may change."""
     for path, (disk, shipped, new) in host.nginx_files.items():
         p.nginx_watch.append(path)
-        if not new or new == disk:
+        if not new or new == disk or (path == UPSTREAM_CONF and p.upstream_text):
             continue
         if disk == shipped or not shipped:  # never edited: dpkg puts the new one in place
             p.nginx_reload.append(path)
@@ -1163,8 +1272,8 @@ def plan_json(p: Plan) -> str:
     change nothing but the package and the settings."""
     changes = {
         "package": True,
-        "settings": bool(p.settings or p.peers or p.merge),
-        "nginx": bool(p.nginx or p.snippet or p.nginx_reload),
+        "settings": bool(p.settings or p.peers or p.merge or p.defaults_text),
+        "nginx": bool(p.nginx or p.snippet or p.nginx_reload or p.upstream_text),
         "firewall": bool(p.firewall),
     }
     data = {"version": p.version, "mode": p.mode, "blocked": p.blocked, "changes": changes}
@@ -1206,6 +1315,44 @@ def nginx_watch(files: list[str]) -> tuple[list[str], list[str]]:
         'rm -rf "$nginx_old"',
     ]
     return before, after
+
+
+def write_file(
+    path: str, text: str, disk: str | None, tag: str, backups: str = "/var/backups/texas2step"
+) -> list[str]:
+    """Script lines that put ``text`` in ``path``, unless it's there already. ``disk`` is
+    what the check read there (None: no file); a file changed since then stops the script.
+    A file that is replaced is copied to ``backups`` first."""
+    q = shlex.quote
+    if disk is None:
+        unchanged = f"[ ! -e {q(path)} ]"
+    else:
+        sha = hashlib.sha256(disk.encode()).hexdigest()
+        unchanged = f"echo {q(sha + '  ' + path)} | sha256sum --check --status"
+    changed = f"{path} changed since texas2step-setup checked it; run texas2step-setup again."
+    backup = f"{backups}/{os.path.basename(path)}.$(date +%Y%m%d-%H%M%S)"
+    return [
+        "new=$(mktemp)",
+        f"cat > \"$new\" <<'{tag}'",
+        *text.rstrip("\n").split("\n"),
+        tag,
+        f'if [ -e {q(path)} ] && cmp -s "$new" {q(path)}; then',
+        f"    echo {q(path + ' is up to date')}",
+        f"elif ! {unchanged}; then",
+        f"    echo {q(changed)} >&2",
+        '    rm -f "$new"',
+        "    exit 1",
+        f"elif [ -e {q(path)} ]; then",
+        f"    mkdir -p {q(backups)}",
+        f'    cp -a {q(path)} "{backup}"',
+        f'    cat "$new" > {q(path)}',
+        f"    echo {q('wrote ' + path + '; the previous one is in ' + backups)}",
+        "else",
+        f'    install -D -m 644 "$new" {q(path)}',
+        f"    echo {q('wrote ' + path)}",
+        "fi",
+        'rm -f "$new"',
+    ]
 
 
 def install_script(host: Host, p: Plan, opts: Options) -> str:
@@ -1252,6 +1399,15 @@ def install_script(host: Host, p: Plan, opts: Options) -> str:
     ]
     before_install, after_install = nginx_watch(p.nginx_watch)
     out += before_install
+    if p.defaults_text is not None or p.upstream_text is not None:
+        # Before the package, so the service starts on its port and nginx goes there.
+        out += ["", f'step "texas2step\'s port: {p.listen[1]}"']
+        if p.defaults_text is not None:
+            out += write_file(DEFAULTS, p.defaults_text, host.defaults_text, "TEXAS2STEP_DEFAULTS")
+        if p.upstream_text is not None:
+            disk = host.upstream_on_disk
+            out += write_file(UPSTREAM_CONF, p.upstream_text, disk, "TEXAS2STEP_UPSTREAM")
+        out.append("")
     out += [
         'step "Installing texas2step $version${installed:+ (was $installed)}"',
         "DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confold "
@@ -1265,6 +1421,15 @@ def install_script(host: Host, p: Plan, opts: Options) -> str:
         f'    echo "removed {CONFIG}.dpkg-dist: the new template is merged in"',
         "fi",
     ]
+    for path in p.drop_dist:
+        # dpkg kept the file written above and saved the package's beside it, which the
+        # file already holds, with the port.
+        out += [
+            f"if [ -e {path}.dpkg-dist ]; then",
+            f"    rm -f {path}.dpkg-dist",
+            f'    echo "removed {path}.dpkg-dist: {path} is the package\'s, with the port"',
+            "fi",
+        ]
     if p.settings or p.peers:
         out += ["", 'step "Settings"']
         if p.settings:
@@ -1355,7 +1520,7 @@ def install_script(host: Host, p: Plan, opts: Options) -> str:
     if p.firewall:
         out += ["", 'step "Firewall"'] + [shlex.join(cmd) for cmd in p.firewall]
 
-    health = f"http://{p.listen[0]}:{p.listen[1]}/api/v1/health"
+    health = f"http://{upstream_addr(*p.listen)}/api/v1/health"
     out += [
         "",
         'step "Checking"',
@@ -1500,13 +1665,18 @@ def gather(opts: Options, deb_path: str) -> Host:
         else:
             h.nginx_error = nginx_error(err)
     if h.deb_exists:
-        h.packaged_snippet = packaged_file(deb_path, PACKAGED_SNIPPET).decode(errors="replace")
+        packaged = packaged_files(deb_path, [PACKAGED_SNIPPET, UPSTREAM_CONF, DEFAULTS])
+        h.packaged_snippet = packaged.get(PACKAGED_SNIPPET, b"").decode(errors="replace")
+        h.packaged_upstream = packaged.get(UPSTREAM_CONF, b"").decode(errors="replace")
+        h.packaged_defaults = packaged.get(DEFAULTS, b"").decode(errors="replace")
     if opts.path:
         h.snippet_on_disk = read(f"{NGINX_PREFIX}/{snippet_name('/' + opts.path.strip('/'))}")
 
+    h.defaults_text = read(DEFAULTS)
+    h.upstream_on_disk = read(UPSTREAM_CONF)
     h.defaults = {"LISTEN_HOST": "127.0.0.1", "LISTEN_PORT": "8080", "WORKERS": "2"}
-    h.defaults.update(parse_defaults(read(DEFAULTS) or ""))
-    port = h.defaults["LISTEN_PORT"]
+    h.defaults.update(parse_defaults(h.defaults_text or ""))
+    port = str(opts.port) if opts.port else h.defaults["LISTEN_PORT"]
     out = run("ss", "-Hltnp", f"sport = :{port}")[1]
     for pid in sorted(set(re.findall(r"pid=(\d+)", out))):
         cmdline = (read(f"/proc/{pid}/cmdline") or "").replace("\0", " ")
@@ -1670,6 +1840,14 @@ def fetch_peer(url: str) -> Peer:
     return peer
 
 
+def _port(value: str) -> int:
+    if not value.isdigit() or not 1024 <= int(value) <= 65535:
+        raise argparse.ArgumentTypeError(
+            "expected a port from 1024 to 65535 (texas2step's own user can't listen below 1024)"
+        )
+    return int(value)
+
+
 def _ports(value: str) -> tuple[int, int]:
     m = re.fullmatch(r"(\d+)[-:](\d+)", value)
     if not m or not 1 <= int(m.group(1)) <= int(m.group(2)) <= 65535:
@@ -1709,6 +1887,12 @@ def main(argv: list[str] | None = None) -> int:
         help="UDP range for the probe (default: the configured one, else 61000-61999)",
     )
     ap.add_argument(
+        "--port",
+        type=_port,
+        help="the TCP port texas2step listens on behind nginx, when 8080 is taken (sets "
+        "LISTEN_PORT and nginx's upstream; default: the configured one, else 8080)",
+    )
+    ap.add_argument(
         "--url-v4",
         default="",
         metavar="URL",
@@ -1738,7 +1922,7 @@ def main(argv: list[str] | None = None) -> int:
         elif isinstance(value, list):
             setattr(args, name, [v.strip() if isinstance(v, str) else v for v in value])
     changes = (args.site, args.no_nginx, args.speedtest, args.path, args.id, args.name)
-    changes += (args.location, args.peer, args.udp_ports, args.url_v4, args.url_v6)
+    changes += (args.location, args.peer, args.udp_ports, args.port, args.url_v4, args.url_v6)
     if args.update and any(changes):
         ap.error("--update changes only what is installed; leave out the other options")
 
@@ -1765,6 +1949,7 @@ def main(argv: list[str] | None = None) -> int:
         location=args.location,
         peers=args.peer,
         udp_ports=args.udp_ports,
+        port=args.port,
         url_v4=args.url_v4,
         url_v6=args.url_v6,
         no_firewall=args.no_firewall,

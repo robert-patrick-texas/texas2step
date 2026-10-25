@@ -56,8 +56,11 @@ MSG
 fi
 
 if [ "$1" = "configure" ] && [ -z "$2" ]; then
-    cat <<'MSG'
-texas2step listens on 127.0.0.1:8080 (systemctl status texas2step). To publish
+    # LISTEN_PORT, as texas2step-setup --port may have set it before the install.
+    port=$(sed -n 's/^[[:space:]]*LISTEN_PORT=//p' /etc/default/texas2step 2>/dev/null \
+        | tail -n 1 | tr -d "\"' ")
+    cat <<MSG
+texas2step listens on 127.0.0.1:${port:-8080} (systemctl status texas2step). To publish
 it at /texas2step/ on your site, add
     include snippets/texas2step.conf;
 to your site's server { } block in /etc/nginx/sites-available/, then run

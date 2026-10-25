@@ -110,6 +110,8 @@ To                         Action      From
 
 TEMPLATE = (Path(__file__).parents[1] / "src/texas2step/config_template.toml").read_text()
 SNIPPET = (Path(__file__).parents[1] / "deploy/nginx/texas2step.conf").read_text()
+UPSTREAM = (Path(__file__).parents[1] / "deploy/nginx/texas2step-http.conf").read_text()
+DEFAULTS = (Path(__file__).parents[1] / "deploy/texas2step.default").read_text()
 
 
 @pytest.fixture(autouse=True)
@@ -131,6 +133,8 @@ def host(*parts: str, **kw) -> "setup.Host":
         site_texts=setup.split_dump(dump),
         ufw=UFW_ACTIVE,
         packaged_snippet=SNIPPET,
+        packaged_upstream=UPSTREAM,
+        packaged_defaults=DEFAULTS,
     )
     for key, value in kw.items():
         setattr(h, key, value)
@@ -675,3 +679,149 @@ def test_the_reload_lines_run(tmp_path, changed, nginx_t, status, calls, content
     assert r.returncode == status, r.stderr
     assert (log.read_text().splitlines() if log.exists() else []) == calls
     assert conf.read_text().strip() == content and conf.stat().st_mode & 0o777 == 0o640
+
+
+# ---- The port texas2step listens on ----------------------------------------------------
+
+
+def md5(text):
+    return setup.hashlib.md5(text.encode()).hexdigest()
+
+
+def test_the_upstream_and_listen_port_are_read_and_set():
+    assert setup.upstream_server(UPSTREAM) == "127.0.0.1:8080"
+    moved = setup.with_upstream(UPSTREAM, "127.0.0.1:8181")
+    assert setup.upstream_server(moved) == "127.0.0.1:8181"
+    assert moved == UPSTREAM.replace("server 127.0.0.1:8080;", "server 127.0.0.1:8181;")
+    two = UPSTREAM.replace("keepalive", "server 127.0.0.1:8082;\n    keepalive")
+    assert setup.upstream_server(two) is None and setup.upstream_server("") is None
+
+    port = setup.with_listen_port(DEFAULTS, 8181)
+    assert "\nLISTEN_PORT=8181\n" in port and "#LISTEN_PORT" not in port
+    assert setup.parse_defaults(port)["LISTEN_PORT"] == "8181"
+    assert setup.with_listen_port(port, 8282).count("LISTEN_PORT=8282") == 1
+    assert setup.with_listen_port("WORKERS=4", 8181) == "WORKERS=4\nLISTEN_PORT=8181\n"
+
+    assert setup.upstream_addr("127.0.0.1", "8181") == "127.0.0.1:8181"
+    assert setup.upstream_addr("0.0.0.0", "8181") == "127.0.0.1:8181"
+    assert setup.upstream_addr("::", "8181") == "[::1]:8181"
+    assert setup.upstream_addr("[::1]", "8181") == "[::1]:8181"
+
+
+def test_a_fresh_install_on_another_port():
+    h = host(port_users=[])  # ss looked at 8181, which is free
+    p = setup.plan(h, setup.Options(port=8181))
+    assert not p.blocked and p.listen == ("127.0.0.1", "8181")
+    assert f"listen on port 8181 instead of 8080 (LISTEN_PORT in {setup.DEFAULTS})" in levels(
+        p, setup.CHANGE
+    )
+    assert any("upstream" in t and "at 127.0.0.1:8181" in t for t in levels(p, setup.CHANGE))
+    assert setup.parse_defaults(p.defaults_text)["LISTEN_PORT"] == "8181"
+    assert setup.upstream_server(p.upstream_text) == "127.0.0.1:8181"
+    assert p.drop_dist == [setup.DEFAULTS, setup.UPSTREAM_CONF]
+    script = setup.install_script(h, p, setup.Options(port=8181))
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    # Written before the package, so the service never starts on 8080.
+    assert script.index("TEXAS2STEP_DEFAULTS") < script.index("apt-get install")
+    assert script.index("TEXAS2STEP_UPSTREAM") < script.index("apt-get install")
+    assert f"rm -f {setup.DEFAULTS}.dpkg-dist" in script
+    assert "http://127.0.0.1:8181/api/v1/health" in script
+    assert "http://127.0.0.1:8080" not in script
+    # Below the ephemeral ports there's no note; inside them there is.
+    assert not any("outgoing" in t for t in levels(p, setup.NOTE))
+    p = setup.plan(h, setup.Options(port=40000))
+    assert any("outgoing connections' ports" in t for t in levels(p, setup.NOTE))
+
+
+def test_the_port_in_use_is_the_one_asked_for():
+    p = setup.plan(host(port_users=["python3 (pid 330)"]), setup.Options(port=8181))
+    assert levels(p, setup.FIX) == [
+        "port 8181 is in use by python3 (pid 330); texas2step listens there "
+        f"(LISTEN_PORT in {setup.DEFAULTS}); choose another with --port"
+    ]
+
+
+def test_an_upstream_that_points_elsewhere_is_pointed_at_the_service():
+    # LISTEN_PORT set by hand, the package's upstream still at 8080: nginx would send
+    # visitors to whatever else listens there.
+    h = host(defaults_text="LISTEN_PORT=8181\n", defaults={"LISTEN_PORT": "8181"})
+    p = setup.plan(h, setup.Options())
+    assert p.defaults_text is None and setup.upstream_server(p.upstream_text) == "127.0.0.1:8181"
+    assert any("(was 127.0.0.1:8080)" in t for t in levels(p, setup.CHANGE))
+    # Installed, the upstream never edited: it is edited now, and dpkg keeps that.
+    shipped = md5(UPSTREAM)
+    h = host(
+        **UPGRADE | {"installed": "0.2.0-1", "version_cmp": "eq"},
+        defaults_text="LISTEN_PORT=8181\n",
+        defaults={"LISTEN_PORT": "8181"},
+        upstream_on_disk=UPSTREAM,
+        nginx_files={setup.UPSTREAM_CONF: (shipped, shipped, shipped)},
+    )
+    p = setup.plan(h, setup.Options())
+    assert setup.upstream_server(p.upstream_text) == "127.0.0.1:8181" and not p.drop_dist
+    assert changes(p)["nginx"]
+    # In step already: nothing to do.
+    h.upstream_on_disk = setup.with_upstream(UPSTREAM, "127.0.0.1:8181")
+    p = setup.plan(h, setup.Options())
+    assert p.upstream_text is None and not any("upstream" in t for t in levels(p, setup.CHANGE))
+
+
+def test_an_upgrade_keeps_the_port_and_takes_the_new_upstream_file():
+    newer = UPSTREAM.replace("keepalive 32;", "keepalive 64;")
+    mine = setup.with_upstream(UPSTREAM, "127.0.0.1:8181")
+    old = md5(UPSTREAM)
+    h = host(
+        **UPGRADE,
+        defaults_text="LISTEN_PORT=8181\n",
+        defaults={"LISTEN_PORT": "8181"},
+        upstream_on_disk=mine,
+        packaged_upstream=newer,
+        nginx_files={setup.UPSTREAM_CONF: (md5(mine), old, md5(newer))},
+    )
+    p = setup.plan(h, setup.Options(update=True))
+    assert p.upstream_text == setup.with_upstream(newer, "127.0.0.1:8181")
+    assert p.drop_dist == [setup.UPSTREAM_CONF]
+    assert (
+        f"bring {setup.UPSTREAM_CONF} up to date from the package, keeping 127.0.0.1:8181"
+        in levels(p, setup.CHANGE)
+    )
+    assert not any(".dpkg-dist" in t for t in levels(p, setup.NOTE))
+    # Edited in other ways too: dpkg keeps it, and the report says so.
+    tuned = mine.replace("keepalive 32;", "keepalive 16;")
+    h.upstream_on_disk = tuned
+    h.nginx_files = {setup.UPSTREAM_CONF: (md5(tuned), old, md5(newer))}
+    p = setup.plan(h, setup.Options(update=True))
+    assert p.upstream_text is None
+    assert any(f"{setup.UPSTREAM_CONF}.dpkg-dist" in t for t in levels(p, setup.NOTE))
+
+
+@pytest.mark.parametrize(
+    ("disk", "now", "status", "says", "content"),
+    [
+        (None, None, 0, "wrote", "new\n"),
+        (None, "new\n", 0, "is up to date", "new\n"),
+        ("old\n", "old\n", 0, "the previous one is in", "new\n"),
+        ("old\n", "changed\n", 1, "changed since texas2step-setup checked it", "changed\n"),
+        (None, "appeared\n", 1, "changed since texas2step-setup checked it", "appeared\n"),
+    ],
+)
+def test_the_write_lines_run(tmp_path, disk, now, status, says, content):
+    target = tmp_path / "etc/default/texas2step"
+    if now is not None:
+        target.parent.mkdir(parents=True)
+        target.write_text(now)
+    backups = tmp_path / "backups"
+    lines = setup.write_file(str(target), "new\n", disk, "EOF_TEST", str(backups))
+    script = "\n".join(["set -euo pipefail", *lines])
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert r.returncode == status and says in r.stdout + r.stderr, r.stdout + r.stderr
+    assert target.read_text() == content
+    assert len(list(backups.glob("texas2step.*"))) == (says == "the previous one is in")
+
+
+def test_the_port_option():
+    for bad in ("80", "70000", "http"):
+        with pytest.raises(SystemExit):
+            setup.main(["--port", bad])
+    with pytest.raises(SystemExit):
+        setup.main(["--update", "--port", "8181"])
