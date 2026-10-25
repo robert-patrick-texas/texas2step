@@ -261,6 +261,27 @@ def test_path_prefix_from_trusted_proxy(client, settings):
         assert ws.receive_text() == "hi"
 
 
+def test_api_answers_are_kept_in_no_browser_cache(client, settings):
+    """Saved results hold callers' addresses: a browser that opened one keeps no copy."""
+    saved = client.post("/api/v1/results", json={"version": 1})
+    answers = [
+        saved,
+        client.get("/api/v1/results"),
+        client.get(f"/api/v1/results/{saved.json()['id']}"),
+        client.get("/api/v1/whoami"),
+        client.get("/api/v1/info"),
+    ]
+    assert [r.headers["cache-control"] for r in answers] == ["no-store"] * len(answers)
+    # Answers that say otherwise keep theirs: the probes' and transfers', and the page's.
+    assert client.get("/api/v1/ping").headers["cache-control"].startswith("no-store, no-cache")
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    # Behind nginx at a prefix too, passed through or stripped.
+    settings.trusted_proxies = ["testclient"]
+    prefix = {"x-forwarded-prefix": "/texas2step"}
+    for path in ("/api/v1/results", "/texas2step/api/v1/results"):
+        assert client.get(path, headers=prefix).headers["cache-control"] == "no-store"
+
+
 def test_path_prefix_must_be_a_plain_path(client, settings):
     settings.trusted_proxies = ["testclient"]
     for bad in ('/x"><script>alert(1)</script>', "texas2step", "/a b", "/../etc"):

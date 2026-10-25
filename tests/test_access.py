@@ -573,6 +573,18 @@ def test_the_version_stays_inside(tmp_path, key_file):
         assert c.get("/api/v1/info", headers=OUTSIDE).json()["version"] == __version__
 
 
+def test_the_pass_and_the_desks_answers_are_kept_in_no_browser_cache(tmp_path, key_file):
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        code = c.app.state.codes.current(datetime.now(UTC)).code
+        answers = [
+            c.post("/api/v1/access", json={"code": code}, headers=OUTSIDE),
+            c.get("/api/v1/access/code", headers=INSIDE),
+            c.get("/api/v1/access/blocks", headers=INSIDE),
+        ]
+    assert [r.status_code for r in answers] == [200, 200, 200]
+    assert [r.headers["cache-control"] for r in answers] == ["no-store"] * 3
+
+
 def test_a_saved_result_gets_the_version_its_page_was_not_told(tmp_path, key_file):
     with gated(tmp_path, key_file, access_code="off", internal_networks=["10.0.0.0/8"]) as c:
         own = c.app.state.settings.server_id

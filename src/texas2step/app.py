@@ -70,6 +70,34 @@ class TimingAllowOrigin:
         await self.app(scope, receive, wrapped)
 
 
+class NoStore:
+    """``Cache-Control: no-store`` on every API answer that doesn't say otherwise. They are
+    made for each request, and some hold callers' addresses (saved results), the current
+    code or a pass: a browser that opened one directly, or through the API explorer, would
+    otherwise keep a copy in its disk cache. The page asks for none to be kept either.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        root = scope.get("root_path", "")
+        path = scope.get("path", "")
+        path = path[len(root) :] if root and path.startswith(root) else path
+        if scope["type"] != "http" or not path.startswith("/api/v1/"):
+            await self.app(scope, receive, send)
+            return
+
+        async def wrapped(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                if not any(name.lower() == b"cache-control" for name, _ in headers):
+                    headers.append((b"cache-control", b"no-store"))
+            await send(message)
+
+        await self.app(scope, receive, wrapped)
+
+
 class ForwardedPrefix:
     """Serves the app under the path a trusted reverse proxy names in X-Forwarded-Prefix.
 
@@ -402,6 +430,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         max_age=600,
     )
     app.add_middleware(TimingAllowOrigin)
+    app.add_middleware(NoStore)
     app.add_middleware(ForwardedPrefix, settings=settings)
     app.add_middleware(RequestLog)  # outermost: sees the request as it arrived
 
