@@ -4,7 +4,7 @@
 // small probes to follow the path, or a voice or video call's packets, scored every 10 s.
 import { WsProber } from "../../engine/latency";
 import { RtcProbe } from "../../engine/loss";
-import { type Endpoint, REFUSED } from "../../engine/net";
+import { type Endpoint, NeedsCode, REFUSED } from "../../engine/net";
 import { jitter, percentile } from "../../engine/stats";
 import { CallStream, framePackets, type ProfileName, SETTLE_MS, type Slice, VIDEO_BYTES, VIDEO_FPS } from "../../engine/stream";
 import type { CallRating, Location, ServerInfo } from "../../types";
@@ -45,7 +45,8 @@ interface Down {
   next: number; // the earliest time for the next new session
 }
 
-type Refusal = { message: string; url: string | null };
+/** Why a server refused: its message and link, and `code` where it asks for the access code. */
+type Refusal = { message: string; url: string | null; code?: Endpoint };
 
 /** What each profile sends: a desk can change these, a visitor just picks the profile. */
 interface Choice {
@@ -446,12 +447,24 @@ export class MonitorView implements View {
     for (const el of this.profileBox.querySelectorAll<HTMLButtonElement>("[aria-label=Profile] button")) el.disabled = on;
   }
 
-  private say(message: string | null, url: string | null = null): void {
+  private say(message: string | null, url: string | null = null, code: Endpoint | null = null): void {
     clear(this.notice);
     this.notice.hidden = !message;
     if (!message) return;
     this.notice.append(message);
     if (url) this.notice.append(" ", h("a", { href: url }, "Click here to continue."));
+    if (code && this.app.takesCode) {
+      // Once it's in, Monitor starts, or a running one's next try gets through.
+      const enter = h("button", { class: "btn small", type: "button" }, "Enter access code");
+      enter.addEventListener("click", () => {
+        void this.app.enterCode(code).then((got) => {
+          if (!got) return;
+          this.say(null);
+          if (!this.running && !this.away) void this.start();
+        });
+      });
+      this.notice.append(" ", enter);
+    }
   }
 
   // ---- Probing -------------------------------------------------------------------
@@ -499,7 +512,7 @@ export class MonitorView implements View {
       this.seriesKey = "";
       this.layout();
       setText(this.transport, this.away ? "idle" : refusal ? "refused" : sides ? "servers unreachable" : "server unreachable");
-      if (refusal && !this.away) this.say(refusal.message, refusal.url);
+      if (refusal && !this.away) this.say(refusal.message, refusal.url, refusal.code);
       return;
     }
     this.running = true;
@@ -523,7 +536,12 @@ export class MonitorView implements View {
    */
   private async connect(d: Dest, series: number): Promise<Refusal | null> {
     try {
-      d.info ??= await d.ep.info();
+      try {
+        d.info ??= await d.ep.info();
+      } catch (err) {
+        if (err instanceof NeedsCode) return { message: this.app.needsCodeText(d.ep), url: null, code: d.ep };
+        throw err;
+      }
       if (!d.info.capabilities.webrtc) throw new Error("WebRTC disabled");
       const got = await this.udp(d, series);
       if ("message" in got) return got;
@@ -659,7 +677,8 @@ export class MonitorView implements View {
       down.answered = null;
       down.check = now + SILENT_MS;
     }
-    if (refusal) this.limited(refusal.message, refusal.url);
+    if (refusal?.code) this.say(refusal.message, null, refusal.code);
+    else if (refusal) this.limited(refusal.message, refusal.url);
     this.showTransport();
   }
 

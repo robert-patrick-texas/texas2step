@@ -187,7 +187,7 @@ clients that would need a pass.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v1/access?pass=<pass>` | `{"required", "desk"}`: whether this client needs a pass, and gets the desk's functions; with `pass`, also whether that pass is valid and when it expires |
+| GET | `/api/v1/access?pass=<pass>` | `{"required", "desk", "codes"}`: whether this client needs a pass, gets the desk's functions, and whether this server gives passes at all (`access_code` is on); with `pass`, also whether that pass is valid and when it expires |
 | POST | `/api/v1/access` | `{"code": "maple.river.42"}` (any case and separators, or a standing phrase) returns `{"pass", "expires"}`. A wrong code is `403`. After `access_lockout_after` wrong codes in a row from one /24 or /48, every code from it gets that same `403`, unread, until `access_lockout_minutes` pass without one ([Lockouts and blocks](access.md#lockouts-and-blocks)). A body over 1 KB is `413` |
 | GET | `/api/v1/access/code` | The current code, when it changes, and the previous one while it still works; only from `internal_networks` |
 | GET | `/api/v1/access/blocks` | `{"lockouts": [{"network", "source", "wrong_codes", "since", "until", "by_hand"}], "counting"}` (`by_hand`: a block, which ends the passes used from the network too); only from `internal_networks` and the server itself |

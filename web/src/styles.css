@@ -482,6 +482,11 @@ button {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--critical) 22%, transparent);
 }
 
+.picker-status.code {
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 22%, transparent);
+}
+
 .picker-name {
   font-weight: 600;
   white-space: nowrap;
@@ -2385,10 +2390,36 @@ a.brand-org:hover,
   padding: 26px 28px;
 }
 
-.gate-card h1 {
+.gate-card :is(h1, h2) {
   font-size: clamp(22px, 2.4vw, 26px);
   font-weight: 680;
   letter-spacing: -0.02em;
+}
+
+/* The code asked over the page, by another address it tests (gate.ts askOver). */
+.code-dialog {
+  width: min(100% - 32px, 460px);
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  overflow: visible;
+}
+
+.code-dialog .gate-card {
+  width: 100%;
+}
+
+.code-dialog::backdrop {
+  background: color-mix(in srgb, var(--page) 55%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.gate-later {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .gate-form {
@@ -2605,6 +2636,34 @@ a.brand-org:hover,
 
 .diag-row[data-tone="loss"] .diag-badge {
   color: var(--critical);
+}
+
+/* Its address asks for the access code: not lost, refused until the code is in. */
+.diag-row[data-tone="code"] .diag-badge {
+  color: var(--ink);
+}
+
+.diag-row[data-tone="code"] .diag-badge::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+  vertical-align: 1px;
+}
+
+.diag-code {
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  vertical-align: 0;
+}
+
+.diag-code[hidden] {
+  display: none;
 }
 
 .diag-figs {

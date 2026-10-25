@@ -1,9 +1,9 @@
 // Application shell: routing, theme, server selection and shared settings.
-import { appPath, Endpoint, type Family, routeOf, whenDenied } from "../engine/net";
-import type { Location, ServerInfo, WhoAmI } from "../types";
+import { appPath, Endpoint, type Family, routeOf, whenDenied, whenRefused } from "../engine/net";
+import type { AccessStatus, Location, ServerInfo, WhoAmI } from "../types";
 import { Awake } from "./awake";
 import { $, clear, h, save, setText, store } from "./dom";
-import { admit, forgetPass } from "./gate";
+import { admit, askOver, forgetPass, passHeld } from "./gate";
 import { mountSizePicker } from "./size";
 import { mountThemeMenu } from "./theme";
 
@@ -54,6 +54,8 @@ export class App {
   selected: Location | null = null;
   /** Whether this visitor gets the service desk's functions (saved results, share links). */
   desk = true;
+  /** What this server said about the access code; null where it has none (or didn't say). */
+  access: AccessStatus | null = null;
   settings: Settings;
   readonly awake = new Awake(() => this.settings.keepAwake);
   /** The pages this site shows: all of them unless the server lists fewer. */
@@ -87,7 +89,9 @@ export class App {
       forgetPass();
       window.location.reload();
     });
-    this.desk = (await admit(this.origin))?.desk ?? true;
+    whenRefused((ep) => this.refusedBy(ep));
+    this.access = await admit(this.origin);
+    this.desk = this.access?.desk ?? true;
     // The page leaves out its version until the code is in (it would help an attacker).
     const version = document.querySelector<HTMLMetaElement>('meta[name="texas2step-version"]');
     if (version && !version.content) {
@@ -231,6 +235,53 @@ export class App {
     return new Endpoint(loc.url);
   }
 
+  // ---- The access code, asked by another address -----------------------------------
+
+  /**
+   * Another address the page tests refused it for want of a pass: this server's IPv4-only
+   * or IPv6-only name, to a visitor inside on the other family only, or another server.
+   * A code entered here buys a pass that every server with the same key takes. True once
+   * it's in, to try again.
+   */
+  private async refusedBy(ep: Endpoint): Promise<boolean> {
+    // No codes here, so no pass to buy here; or a pass that holds was refused, as from a
+    // network blocked by hand, which another code wouldn't change. The pages say why.
+    if (!this.takesCode || passHeld()) return false;
+    // Outside here too: the pass ran out, so the page starts over at the code screen.
+    if (this.access?.required) {
+      forgetPass();
+      window.location.reload();
+      return false;
+    }
+    return askOver(this.origin, this.asker(ep));
+  }
+
+  /** Whether the code can be entered here, for an address that asks for it. */
+  get takesCode(): boolean {
+    return this.access?.codes === true;
+  }
+
+  /** The code asked for over the page, when the visitor chooses: true once it's in. */
+  async enterCode(ep: Endpoint): Promise<boolean> {
+    const got = await askOver(this.origin, this.asker(ep), true);
+    if (got && !this.info) await this.refreshFamily(); // the header's server, refused until now
+    return got;
+  }
+
+  /** Who asks for the code, for the dialog: "Over IPv4, this server", or "Dallas". */
+  private asker(ep: Endpoint): string {
+    const at = (url: string) => url !== "" && new Endpoint(url).base === ep.base;
+    const loc = this.locations.find((l) => at(l.url) || at(l.url_v4) || at(l.url_v6));
+    const name = loc?.url ? loc.name : "this server";
+    if (ep.family) return `Over ${ep.family === "ipv4" ? "IPv4" : "IPv6"}, ${name}`;
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  /** What an address that refused the page says, for a page's status line. */
+  needsCodeText(ep: Endpoint): string {
+    return `${this.asker(ep)} asks for the access code.`;
+  }
+
   async select(loc: Location | null): Promise<void> {
     this.selected = loc;
     if (loc) save("t2s.server", { id: loc.id });
@@ -246,7 +297,9 @@ export class App {
     // A site with brand_credit = "none" has no credit in its footer.
     setText(document.querySelector("#footer-version"), this.info?.version ? `texas2step ${this.info.version}` : "texas2step");
     const picker = document.querySelector("#server-picker .picker-status");
-    picker?.classList.toggle("down", !this.info);
+    const code = !this.info && this.ep.needsCode; // up, but asks for the access code
+    picker?.classList.toggle("down", !this.info && !code);
+    picker?.classList.toggle("code", code);
     for (const fn of this.listeners) fn();
   }
 

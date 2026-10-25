@@ -237,6 +237,7 @@ export interface ResultSummary {
 export interface AccessStatus {
   required: boolean;
   desk: boolean;
+  codes: boolean; // this server gives passes, even to a visitor who needs none
   pass?: { valid: boolean; expires: number | null };
 }
 

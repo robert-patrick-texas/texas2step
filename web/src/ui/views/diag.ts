@@ -22,13 +22,14 @@ const RECENT_MS = 60_000; // the figures beside each row
 const LOG_MAX = 300;
 const UDP_RETRY_MS = 10_000; // a WebRTC session takes seconds to open and holds a server port
 const WS_RETRY_MS = 2_000;
+const CODE_RETRY_MS = 10_000; // an address that asks for the access code, until it's in
 const KINDS: Record<Kind, string> = { https: "HTTPS", ws: "WebSocket", udp: "UDP" };
 
 const httpName = (p: string | null | undefined) =>
   ({ h2: "HTTP/2", "http/1.1": "HTTP/1.1", h3: "HTTP/3", "HTTP/2.0": "HTTP/2" })[p ?? ""] ?? (p || "");
 // "address : port", spaced so the port can't be read as part of an IPv4 or IPv6 address.
 const hostPort = (ip: string | null | undefined, port: number | null | undefined) => (!ip ? "—" : port ? `${ip} : ${port}` : ip);
-const seconds = (msecs: number) => `${Math.max(1, Math.round(msecs / 1000))} s`;
+const seconds = (msecs: number) => `${Math.max(1, Math.round(msecs / 1000))}\u00a0s`; // never wrapped apart
 
 /** One way of reaching the server, with what its answers have shown. */
 abstract class Method {
@@ -41,13 +42,24 @@ abstract class Method {
   downSince = 0;
   stopped = false;
   private timer = 0;
+  private codeLogged = false; // the log says this address needs the access code
   readonly lane = new Lane();
-  readonly row: { root: HTMLElement; badge: HTMLElement; figs: HTMLElement; detail: HTMLElement; port: HTMLElement; timeline: HTMLCanvasElement; width: number };
+  readonly row: {
+    root: HTMLElement;
+    badge: HTMLElement;
+    figs: HTMLElement;
+    detail: HTMLElement;
+    code: HTMLButtonElement;
+    port: HTMLElement;
+    timeline: HTMLCanvasElement;
+    width: number;
+  };
 
   constructor(
     readonly fam: Fam | "Auto",
     readonly kind: Kind,
     protected readonly view: DiagView,
+    readonly ep: Endpoint,
     protected readonly retryMs: number,
   ) {
     const timeline = h("canvas", { class: "diag-timeline", role: "img", "aria-label": `${this.label}: answers over the last five minutes` });
@@ -56,16 +68,18 @@ abstract class Method {
       root: h("div", { class: "diag-row" }),
       badge: h("span", { class: "diag-badge" }),
       figs: h("span", { class: "diag-figs" }),
-      detail: h("div", { class: "diag-detail" }),
+      detail: h("span", {}),
+      code: h("button", { class: "btn small diag-code", type: "button", hidden: true }, "Enter access code"),
       port,
       timeline,
       width: 0,
     };
     const r = this.row;
+    r.code.addEventListener("click", () => void this.view.enterCode(this.ep));
     r.root.append(
       h("div", { class: "diag-what" }, h("strong", {}, this.fam === "Auto" ? "This address" : this.fam), h("span", {}, KINDS[kind]), port),
       this.lane.el,
-      h("div", { class: "diag-state" }, h("div", {}, r.badge, r.figs), r.detail),
+      h("div", { class: "diag-state" }, h("div", {}, r.badge, r.figs), h("div", { class: "diag-detail" }, r.detail, r.code)),
       timeline,
     );
     onResize(timeline, (w) => {
@@ -76,6 +90,24 @@ abstract class Method {
 
   get label(): string {
     return `${this.fam === "Auto" ? "This address" : this.fam} ${KINDS[this.kind]}`;
+  }
+
+  /** Its address refused a request for want of the access code, which isn't in yet. */
+  get refused(): boolean {
+    return this.tone !== "off" && this.ep.needsCode;
+  }
+
+  /**
+   * Its address asks for the access code: until it's in, attempts wait, and the seconds
+   * don't count as loss. Once it answers, it's answering anew.
+   */
+  protected needsCode(): void {
+    if (this.tone === "off") return;
+    if (!this.codeLogged) this.view.log(this, "this address needs the access code");
+    this.codeLogged = true;
+    this.tone = "trying";
+    this.lostRun = 0;
+    this.lane.setTone("trying");
   }
 
   /** One attempt; made about once a second unless the method isn't offered. */
@@ -131,6 +163,7 @@ abstract class Method {
     this.samples.push({ t: now, ok, rtt, up });
     while (this.samples.length && this.samples[0]!.t < now - KEEP_MS) this.samples.shift();
     if (ok) {
+      this.codeLogged = false;
       if (this.tone === "trying") this.view.log(this, `answering${rtt !== null ? `, ${text(ms(rtt))}` : ""}`);
       if (this.tone === "loss") this.view.log(this, `answering again after ${seconds(now - this.downSince)}, ${this.lostRun} lost`);
       this.tone = "up";
@@ -146,15 +179,21 @@ abstract class Method {
     this.lane.setTone(this.tone);
   }
 
-  render(): void {
+  /** `button`: this row offers the code's button (the first row its address refuses). */
+  render(button = false): void {
     const r = this.row;
-    r.root.dataset.tone = this.tone;
+    r.root.dataset.tone = this.refused ? "code" : this.tone;
+    r.code.hidden = !button;
     setText(r.port, this.port);
     const recent = this.samples.filter((s) => s.t >= Date.now() - RECENT_MS);
     const got = recent.filter((s) => s.ok && s.rtt !== null).map((s) => s.rtt!);
     const lost = recent.filter((s) => !s.ok && s.up).length;
     const latest = this.samples[this.samples.length - 1];
-    if (this.tone === "off") {
+    if (this.refused) {
+      setText(r.badge, "Needs the code");
+      setText(r.figs, this.kind === "https" ? `checking every ${seconds(CODE_RETRY_MS)}` : "");
+      setText(r.detail, "this address needs the access code");
+    } else if (this.tone === "off") {
       setText(r.badge, "Not offered");
       setText(r.figs, "");
       setText(r.detail, this.reason);
@@ -166,7 +205,7 @@ abstract class Method {
       setText(r.badge, this.tone === "up" ? "Answering" : `No answer for ${seconds(Date.now() - this.downSince)}`);
       const now = latest?.ok && latest.rtt !== null ? text(ms(latest.rtt)) : "—";
       const median = got.length ? text(ms(percentile(got, 50))) : "—";
-      setText(r.figs, [this.tone === "up" ? now : "", `median ${median}`, `${lost} of ${recent.length} lost in 1 min`].filter(Boolean).join(" · "));
+      setText(r.figs, [this.tone === "up" ? now : "", `median ${median}`, `${lost} of ${recent.length} lost in 1\u00a0min`].filter(Boolean).join(" · "));
       setText(r.detail, this.detail);
     }
     drawTimeline(r.timeline, this.samples, r.width);
@@ -176,27 +215,34 @@ abstract class Method {
 /** A small HTTPS request a second, on the browser's open connection to that address. */
 class HttpsMethod extends Method {
   private seq = 0;
+  private recheck = 0; // while its address asks for the code, the next try
 
-  constructor(
-    fam: Fam | "Auto",
-    view: DiagView,
-    private readonly ep: Endpoint,
-  ) {
-    super(fam, "https", view, 1000);
+  constructor(fam: Fam | "Auto", view: DiagView, ep: Endpoint) {
+    super(fam, "https", view, ep, 1000);
     this.port = `TCP ${new URL(ep.base).port || (ep.base.startsWith("https") ? "443" : "80")}`;
   }
 
   tick(): void {
+    if (this.ep.needsCode && Date.now() < this.recheck) return;
     const url = this.ep.url("/diag/http", { n: this.seq++ });
     const done = this.lane.send();
     const t0 = performance.now();
     const wall = Date.now();
     fetch(url, this.ep.init({ cache: "no-store", signal: AbortSignal.timeout(2000) }))
       .then(async (res) => {
+        if (res.status === 401) {
+          // Not lost: refused for want of a pass, which the page asks for (app.ts).
+          done(false);
+          this.recheck = Date.now() + CODE_RETRY_MS;
+          void this.ep.refused();
+          this.needsCode();
+          return null;
+        }
         if (!res.ok) throw new Error(`${res.status}`);
         return (await res.json()) as DiagHttp;
       })
       .then((d) => {
+        if (!d) return;
         const rtt = performance.now() - t0;
         // The browser's own word on the HTTP version (the server reports nginx's too).
         const timing = performance.getEntriesByName(url).pop() as PerformanceResourceTiming | undefined;
@@ -223,17 +269,16 @@ class WsMethod extends Method {
   private next = 0;
   private opening = false;
 
-  constructor(
-    fam: Fam | "Auto",
-    view: DiagView,
-    private readonly ep: Endpoint,
-  ) {
-    super(fam, "ws", view, 1000);
+  constructor(fam: Fam | "Auto", view: DiagView, ep: Endpoint) {
+    super(fam, "ws", view, ep, 1000);
     this.port = `TCP ${new URL(ep.base).port || (ep.base.startsWith("https") ? "443" : "80")}`;
     this.detail = "its own TCP connection, opened by an HTTP/1.1 upgrade";
   }
 
   tick(): void {
+    // A refused WebSocket looks like any other that didn't open, so it goes by what its
+    // address answers over HTTPS: no new socket until the code is in.
+    if (!this.prober?.ready && this.ep.needsCode) return this.needsCode();
     const done = this.lane.send();
     if (this.prober?.ready) {
       void this.prober.ping(1500).then((rtt) => {
@@ -279,16 +324,18 @@ class UdpMethod extends Method {
   constructor(
     fam: Fam,
     view: DiagView,
-    private readonly ep: Endpoint,
+    ep: Endpoint,
     private readonly ice: RTCIceServer[],
   ) {
-    super(fam, "udp", view, UDP_RETRY_MS);
+    super(fam, "udp", view, ep, UDP_RETRY_MS);
     this.port = "UDP";
   }
 
   tick(): void {
-    const done = this.lane.send();
     const rtc = this.rtc;
+    // Its signalling's address asks for the access code: a try every UDP_RETRY_MS, unseen.
+    if (!rtc?.open && this.ep.needsCode && (this.connecting || Date.now() < this.next)) return this.needsCode();
+    const done = this.lane.send();
     if (rtc?.open) {
       const seq = this.seq++ >>> 0;
       const finish = (rtt: number | null) => {
@@ -307,7 +354,7 @@ class UdpMethod extends Method {
       this.rtc = null;
     }
     done(false);
-    this.record(false, null);
+    if (!this.ep.needsCode) this.record(false, null);
     if (this.connecting || Date.now() < this.next) return;
     this.connecting = true;
     this.next = Date.now() + UDP_RETRY_MS;
@@ -399,7 +446,7 @@ export class DiagView implements View {
       h("section", { class: "card diag-card diag-addresses" }, this.els.you, this.els.server, this.els.clock),
       card(
         "Connection methods",
-        "Each ping leaves on the left and its pong comes back from the server on the right. Green: answering. Red: answered before, not now. Grey: no answer yet, or not offered.",
+        "Each ping leaves on the left and its pong comes back from the server on the right. Green: answering. Red: answered before, not now. Grey: no answer yet, or not offered. Amber: the address asks for the access code.",
         this.els.rows,
         h(
           "p",
@@ -540,8 +587,19 @@ export class DiagView implements View {
 
   // ---- Rendering -----------------------------------------------------------------
 
+  /** The code asked for over the page, from a row's button. */
+  enterCode(ep: Endpoint): Promise<boolean> {
+    return this.app.enterCode(ep);
+  }
+
   private render(): void {
-    for (const m of this.methods) m.render();
+    // One button for each address that asks for the code, on the first of its rows.
+    const offered = new Set<string>();
+    for (const m of this.methods) {
+      const button = m.refused && this.app.takesCode && !offered.has(m.ep.base);
+      if (button) offered.add(m.ep.base);
+      m.render(button);
+    }
     this.renderAddresses();
     this.renderEgress();
     this.renderLog();

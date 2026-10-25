@@ -345,7 +345,8 @@ def unlock(c: TestClient, headers=OUTSIDE) -> str:
 
 def test_visitors_need_a_pass_for_tests(tmp_path, key_file, caplog):
     with gated(tmp_path, key_file) as c:
-        assert c.get("/api/v1/access", headers=OUTSIDE).json() == {"required": True, "desk": True}
+        status = c.get("/api/v1/access", headers=OUTSIDE).json()
+        assert status == {"required": True, "desk": True, "codes": True}
         for open_path in ("/", "/api/v1/health", "/favicon.svg"):
             assert c.get(open_path, headers=OUTSIDE).status_code == 200, open_path
         for path in ("/api/v1/info", "/api/v1/locations", "/api/v1/ping", "/api/v1/whoami"):
@@ -377,7 +378,8 @@ def test_visitors_need_a_pass_for_tests(tmp_path, key_file, caplog):
 
 def test_loopback_and_internal_networks_need_no_code(tmp_path, key_file):
     with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
-        assert c.get("/api/v1/access", headers=INSIDE).json() == {"required": False, "desk": True}
+        status = c.get("/api/v1/access", headers=INSIDE).json()
+        assert status == {"required": False, "desk": True, "codes": True}
         assert c.get("/api/v1/info", headers=INSIDE).status_code == 200
         assert c.get("/api/v1/info", headers={"X-Forwarded-For": "127.0.0.1"}).status_code == 200
         assert c.get("/api/v1/info", headers=OUTSIDE).status_code == 401
@@ -801,7 +803,8 @@ def test_desk_functions_stay_on_internal_networks(tmp_path, key_file):
             assert c.get(path, headers=INSIDE).status_code == 200, path
         r = c.post("/api/v1/measure/latency", json={"target": "x"}, headers=OUTSIDE)
         assert r.status_code == 404
-        assert c.get("/api/v1/access", headers=OUTSIDE).json() == {"required": False, "desk": False}
+        status = c.get("/api/v1/access", headers=OUTSIDE).json()
+        assert status == {"required": False, "desk": False, "codes": False}
 
         page = c.get("/", headers=OUTSIDE).text
         assert 'data-pages="test monitor diag"' in page

@@ -30,15 +30,34 @@ let accessPass = "";
 const WS_PROTOCOL = "texas2step";
 const WS_PASS = `${WS_PROTOCOL}.pass.`;
 let denied: (() => void) | null = null;
+let refused: ((ep: Endpoint) => Promise<boolean>) | null = null;
+/**
+ * The servers that refused a request for want of a pass, by base URL, since the pass last
+ * changed. A visitor inside one address family can be outside the other: the page's own
+ * server then asks no code at its own address, while its IPv4-only name refuses.
+ */
+const refusals = new Set<string>();
 
 export function setPass(pass: string): void {
   accessPass = pass;
+  refusals.clear();
 }
 
 /** Called when this app's own server stops taking the pass (it expired). */
 export function whenDenied(fn: () => void): void {
   denied = fn;
 }
+
+/**
+ * Called when any other address the page tests refuses it for want of a pass (401): this
+ * server's single-family names, or another server's. Resolves true once a new pass is in.
+ */
+export function whenRefused(fn: (ep: Endpoint) => Promise<boolean>): void {
+  refused = fn;
+}
+
+/** A server refused a request for want of a pass: the access code (docs/access.md). */
+export class NeedsCode extends Error {}
 
 /** An address family the visitor can hold a server to, through its single-family hostname. */
 export type Family = "ipv4" | "ipv6";
@@ -93,9 +112,29 @@ export class Endpoint {
     return { ...init, headers };
   }
 
+  /** Whether this server has refused a request for want of a pass, since the pass changed. */
+  get needsCode(): boolean {
+    return refusals.has(this.base);
+  }
+
+  /**
+   * This server answered 401. This app's own starts over at the code screen; any other
+   * address gets the code asked for over the page. True once a new pass is in, to try again.
+   */
+  async refused(): Promise<boolean> {
+    if (this.own) {
+      denied?.();
+      return false;
+    }
+    refusals.add(this.base);
+    return (await refused?.(this)) ?? false;
+  }
+
   async json<T>(path: string, init: RequestInit = {}): Promise<T> {
     const res = await fetch(this.url(path), this.init({ cache: "no-store", ...init }));
-    if (res.status === 401 && this.own) denied?.();
+    // Once more with the pass just bought; a second refusal comes with a pass held, which
+    // isn't asked for again.
+    if (res.status === 401 && (await this.refused())) return this.json<T>(path, init);
     if (!res.ok) {
       let detail = res.statusText;
       try {
@@ -103,7 +142,7 @@ export class Endpoint {
       } catch {
         /* not JSON */
       }
-      throw new Error(`${res.status} ${detail}`);
+      throw new (res.status === 401 ? NeedsCode : Error)(`${res.status} ${detail}`);
     }
     return (await res.json()) as T;
   }

@@ -273,6 +273,29 @@ inside.
 Without `internal_networks`, every visitor needs a code, and anyone with one can read the
 saved results. `texas2step access show` warns about that.
 
+### Inside on one address family
+
+A visitor with both IPv4 and IPv6 comes from two addresses, and `internal_networks` may
+list only one of them: an office's IPv6 network, say, but not the NAT address its IPv4
+leaves by. The page asks its own server, at the address it was opened at, whether the
+code is needed, and the browser reaches that over either family. When the answer is no
+but another address the page tests refuses it, the page asks for the code over itself,
+in a box the visitor can put aside with **Not now**. That other address is this server's
+IPv4-only or IPv6-only name ([IPv4 and IPv6](configuration.md#ipv4-and-ipv6)), or another
+server in the picker. The pass the code buys works over both families and on every
+server with the same key.
+
+The box comes up by itself until the visitor puts it aside, which holds until the page
+is loaded again. Meanwhile Test and Monitor say that address asks for the code, with a
+button to enter it, and Diag's rows for it say **Needs the code**, with the same button.
+Diag then tries that address every 10 seconds instead of every second, and opens no
+WebSocket there until the code is in. A server with `access_code = "off"` has no pass to
+give, so its page doesn't ask: it only says which address wants a code.
+
+A pass that hasn't run out but is refused anyway, as from a network blocked by hand
+([lockouts and blocks](#lockouts-and-blocks)), isn't asked for again by itself. To have
+neither family asked, list both of a site's addresses in `internal_networks`.
+
 ## Lockouts and blocks
 
 Wrong codes count against the visitor's network, its IPv4 /24 or IPv6 /48, not its

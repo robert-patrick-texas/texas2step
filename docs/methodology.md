@@ -365,6 +365,10 @@ and closes its connections. Its rows and events stay, and the timelines show the
 An attempt not answered within 2 s (1.5 s for WebSocket and UDP) counts as missed. A
 method that has answered before shows a miss as loss (red). One that hasn't answered
 yet stays grey and keeps trying. One the server doesn't offer is grey and isn't tried.
+One whose address asks for the access code, as a server's IPv4-only name can for a
+visitor inside on IPv6 only, says **Needs the code** (amber) and doesn't count as loss:
+its HTTPS is tried every 10 s until the code is in, and no WebSocket is opened there
+meanwhile ([Inside on one address family](access.md#inside-on-one-address-family)).
 The clock offset is the server's time minus the browser's at the middle of the round
 trip, ± half the round trip.
 

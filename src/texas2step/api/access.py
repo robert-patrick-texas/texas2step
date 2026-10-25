@@ -94,11 +94,14 @@ async def status(
     pass_: str = Query("", alias="pass", description="A pass to check, from POST /access"),
 ) -> dict[str, Any]:
     """``required``: tests need a pass from this client. ``desk``: this client gets the
-    service desk's functions (saved results, the API explorer, measurements)."""
+    service desk's functions (saved results, the API explorer, measurements). ``codes``:
+    this server gives passes, even to a client that needs none, for another address that
+    asks for one (such as this server's IPv4-only name, to a client inside on IPv6 only)."""
     codes = request.app.state.codes
     body: dict[str, Any] = {
         "required": codes is not None and not internal(request),
         "desk": desk(request),
+        "codes": codes is not None,
     }
     pass_ = pass_ or given_pass(request)  # the page sends its own server's in a header
     if codes is not None and pass_:

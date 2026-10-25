@@ -126,7 +126,7 @@ export class TestView implements View {
   private result: TestResult | null = null;
   /** Whether the page shows a saved result (/r/<id>) rather than a test from this visit. */
   private showingSaved = false;
-  private trafficNoted = false; // the status line says the server's traffic limit is reached
+  private noted = false; // the status line says the server's traffic limit is reached, or it asks for the code
   private away = false; // another page is shown
   private left = false; // the test running was stopped by going to another page
   private off: (() => void) | null = null;
@@ -197,11 +197,11 @@ export class TestView implements View {
 
     this.off = this.app.onServer(() => {
       this.describeEndpoints();
-      this.noteTraffic();
+      this.noteServer();
       for (const refresh of this.refreshOptions) refresh();
     });
     this.describeEndpoints();
-    this.noteTraffic();
+    this.noteServer();
     this.renderResult(null);
     if (params.rid) void this.load(params.rid);
   }
@@ -277,15 +277,34 @@ export class TestView implements View {
     return this.app.settings.oneStream ?? this.app.info?.defaults.one_stream ?? true;
   }
 
-  /** A server whose traffic limit is reached says so before a test is tried. */
-  private noteTraffic(): void {
+  /**
+   * A server whose traffic limit is reached says so before a test is tried, and one that
+   * asks for the access code, as this server's IPv4-only name may, says that.
+   */
+  private noteServer(): void {
     if (this.run || this.showingSaved) return;
-    const traffic = this.app.info?.traffic;
+    const { info, ep } = this.app;
+    const traffic = info?.traffic;
     if (traffic?.open === false) this.refused(traffic.message, traffic.url);
-    else if (this.trafficNoted) {
+    else if (!info && ep.needsCode) this.askingCode();
+    else if (this.noted) {
       setText(this.status, "Ready when you are.");
-      this.trafficNoted = false;
+      this.noted = false;
     }
+  }
+
+  /** The server asks for the access code: a button to enter it, where it can be. */
+  private askingCode(): void {
+    const { app } = this;
+    const ep = app.ep;
+    clear(this.status);
+    this.status.append(app.needsCodeText(ep));
+    if (app.takesCode) {
+      const enter = h("button", { class: "btn small", type: "button" }, "Enter access code");
+      enter.addEventListener("click", () => void app.enterCode(ep));
+      this.status.append(" ", enter);
+    }
+    this.noted = true;
   }
 
   /** The site's message for a reached traffic limit, and its link to continue elsewhere. */
@@ -293,7 +312,7 @@ export class TestView implements View {
     clear(this.status);
     this.status.append(message ?? REFUSED);
     if (url) this.status.append(" ", h("a", { href: url }, "Click here to continue."));
-    this.trafficNoted = true;
+    this.noted = true;
   }
 
   private describeEndpoints(): void {
@@ -313,7 +332,7 @@ export class TestView implements View {
     const server = saved?.server ?? info?.server;
     const version = saved?.server.version ?? info?.version;
     setText(this.link.server.title, server?.name ?? "Server");
-    line(this.link.server.detail, server?.location || (info || saved ? "" : "unreachable"));
+    line(this.link.server.detail, server?.location || (info || saved ? "" : this.app.ep.needsCode ? "asks for the access code" : "unreachable"));
     line(this.link.server.sub, version ? `v${version}` : "");
   }
 
@@ -327,7 +346,8 @@ export class TestView implements View {
     const app = this.app;
     if (!app.info) await app.refreshFamily();
     if (!app.info) {
-      setText(this.status, "That server isn't answering. Check the address or pick another server.");
+      if (app.ep.needsCode) this.askingCode();
+      else setText(this.status, "That server isn't answering. Check the address or pick another server.");
       return;
     }
     // Its traffic limit may have been reached since the page loaded.
@@ -337,7 +357,7 @@ export class TestView implements View {
       return;
     }
     if (this.away) return; // another page was chosen meanwhile
-    this.trafficNoted = false;
+    this.noted = false;
     this.left = false;
     // Leave a saved-result URL without re-routing (that would build this page anew).
     app.setAddress("/");
