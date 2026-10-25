@@ -50,7 +50,7 @@ async def recent(
 
 @router.get("/{rid}", summary="A saved result, in full")
 async def one(rid: str, request: Request) -> dict[str, Any]:
-    result = await run_in_threadpool(_store(request).get, rid)
+    result = await run_in_threadpool(_store(request).get, rid.strip())
     if result is None:
         raise HTTPException(404, "no such result")
     return result

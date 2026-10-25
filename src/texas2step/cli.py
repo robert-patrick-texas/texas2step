@@ -1361,6 +1361,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def trimmed(args: argparse.Namespace) -> argparse.Namespace:
+    """The arguments without spaces around their text: pasted values often bring them, with
+    an address, a URL or a network."""
+    for name, value in vars(args).items():
+        if isinstance(value, str):
+            setattr(args, name, value.strip())
+        elif isinstance(value, list):
+            setattr(args, name, [v.strip() if isinstance(v, str) else v for v in value])
+    return args
+
+
 def main(argv: list[str] | None = None) -> None:
-    args = build_parser().parse_args(argv)
+    args = trimmed(build_parser().parse_args(argv))
     args.func(args)

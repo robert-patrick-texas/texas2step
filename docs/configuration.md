@@ -7,8 +7,9 @@ Settings come from, in increasing priority:
 3. environment variables `TEXAS2STEP_<SETTING>` (upper case).
 
 Lists in environment variables are comma separated. Booleans accept `1/0`,
-`true/false`, `yes/no` and `on/off`. Unknown keys in the TOML file are an error, so
-typos don't fail silently. The package installs a fully commented file listing every
+`true/false`, `yes/no` and `on/off`. Spaces around any value, or around each item of a
+list, are ignored, wherever the setting comes from. Unknown keys in the TOML file are an
+error, so typos don't fail silently. The package installs a fully commented file listing every
 setting and its default as `/etc/texas2step/config.toml` (source:
 [`src/texas2step/config_template.toml`](../src/texas2step/config_template.toml)); restart
 the service after editing it. After an upgrade, `texas2step config merge` brings your

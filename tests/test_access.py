@@ -917,3 +917,13 @@ def test_the_cli_trades_its_code_for_a_pass(gated_server, monkeypatch, capsys):
         assert engine.PASS.get()  # every request after the code carried the pass
     finally:
         engine.PASS.reset(token)
+
+
+def test_networks_with_spaces_around_them_are_read_as_written(tmp_path, key_file):
+    with gated(tmp_path, key_file, internal_networks=[" 10.0.0.0/8 "]) as c:
+        r = c.post("/api/v1/access/blocks", json={"network": " 198.51.100.7 "}, headers=INSIDE)
+        assert r.status_code == 200 and r.json()["network"] == "198.51.100.7/32"
+        r = c.delete(
+            "/api/v1/access/blocks", params={"network": " 198.51.100.0/24 "}, headers=INSIDE
+        )
+        assert r.json() == {"cleared": ["198.51.100.7/32"]}

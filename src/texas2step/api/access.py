@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from .. import cluster
 from ..access import Codes, is_internal
@@ -24,10 +24,12 @@ PASS_COOKIE = "texas2step_pass"  # the pass again, for loading this server's own
 
 
 class CodeIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)  # as typed or pasted
     code: str = Field(max_length=200, description="The code, with any case and separators")
 
 
 class BlockIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     network: str = Field(
         max_length=64,
         description="An address or network outside internal_networks, e.g. 203.0.113.0/24",
@@ -261,6 +263,7 @@ async def unblock(
     ),
 ) -> dict[str, Any]:
     ip = _desk_client(request)
+    network = network.strip()
     try:
         target = None if network == "all" else str(parse_network(network))
     except ValueError as exc:

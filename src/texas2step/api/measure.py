@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .. import engine
 from ..store import TRANSFERS
@@ -27,6 +27,7 @@ _slots = asyncio.Semaphore(2)
 
 
 class Target(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     target: str = Field(description="Base URL of a texas2step server, e.g. https://peer.example")
 
 

@@ -49,9 +49,13 @@ networks, as addresses or CIDR blocks. Include the corporate addresses the desk'
 browsers reach the servers from.
 
 ```bash
-sudo texas2step config set access_code=daily internal_networks=10.0.0.0/8,198.51.100.0/24 --write
+sudo texas2step config set access_code=daily internal_networks=10.0.0.0/8,2001:db8::/32,198.51.100.0/24 --write
 sudo systemctl restart texas2step
 ```
+
+On the command line, separate the networks with commas. In `config.toml` they are a list
+of quoted strings: `internal_networks = ["10.0.0.0/8", "2001:db8::/32", "198.51.100.0/24"]`.
+One string of networks separated by spaces is refused.
 
 **3. Check** that the servers agree. On each:
 
@@ -87,7 +91,7 @@ To turn codes off again: `sudo texas2step config set access_code=off --write`, t
 | `access_pass_hours` | `12` | How long an entered code lets a browser keep testing |
 | `access_key_file` | `/etc/texas2step/access.key` | The key |
 | `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | [Standing phrases](#standing-phrases), if the file exists |
-| `internal_networks` | `[]` | Your own networks: no code, and the desk's tools |
+| `internal_networks` | `[]` | Your own networks: no code, and the desk's tools. A list of IPv4 and IPv6 addresses and networks in CIDR form, mixed freely: `["192.168.0.0/16", "2001:db8::/32", "203.0.113.7"]`. An address alone is a single host. Bits past the prefix are ignored, so `10.2.1.30/24` means all of `10.2.1.0/24`. Give the addresses as the server sees them: staff who come in through your firewall's NAT arrive from its public address. |
 
 **Built-in words.** A code is two words and the digits: `maple.river.42`. The words come
 from the EFF's short word list of easily spelled words (credited in the package's

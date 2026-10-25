@@ -1,5 +1,6 @@
 import pytest
 
+from texas2step.access import is_internal
 from texas2step.config import Link, Location, Settings, load_settings
 
 
@@ -141,3 +142,53 @@ def test_monitor_profile_is_checked():
         Settings(monitor_profile="ping")
     with pytest.raises(ValueError, match="monitor_video"):
         Settings(monitor_profile="video", monitor_video=False)
+
+
+def test_settings_lose_the_spaces_around_their_text(tmp_path, monkeypatch):
+    monkeypatch.delenv("TEXAS2STEP_CONFIG", raising=False)
+    path = tmp_path / "spaces.toml"
+    path.write_text(
+        """
+server_id = " houston "
+internal_networks = [" 10.0.0.0/8", "2001:db8::/32 ", " 203.0.113.7 "]
+access_peer_networks = [" 198.51.100.0/24 "]
+ice_servers = [" stun:stun.example.net:3478 "]
+brand_footer = \"\"\"
+
+  Line one.
+Line two.\t
+\"\"\"
+
+[[brand_footer_links]]
+label = " Privacy "
+url = " https://example.net/privacy "
+
+[[locations]]
+id = " dallas "
+name = " dallas.example.net "
+url = " https://dallas.example.net/texas2step "
+"""
+    )
+    s = load_settings(path)
+    assert s.server_id == "houston"
+    assert s.internal_networks == ["10.0.0.0/8", "2001:db8::/32", "203.0.113.7"]
+    assert s.access_peer_networks == ["198.51.100.0/24"]
+    assert s.ice_servers == ["stun:stun.example.net:3478"]
+    assert s.brand_footer == "Line one.\nLine two."
+    assert s.brand_footer_links == [Link("Privacy", "https://example.net/privacy")]
+    assert s.locations[0] == Location(
+        "dallas", "dallas.example.net", "https://dallas.example.net/texas2step"
+    )
+    assert s.is_allowed_target("https://dallas.example.net/texas2step/")
+    # Every request is checked against these: a stray space used to fail each one.
+    assert is_internal("10.1.2.3", s.internal_networks)
+    assert is_internal("2001:db8::5", s.internal_networks)
+    assert not is_internal("192.0.2.1", s.internal_networks)
+
+    monkeypatch.setenv("TEXAS2STEP_INTERNAL_NETWORKS", " 10.0.0.0/8 , 2001:db8::/32 ")
+    monkeypatch.setenv("TEXAS2STEP_SERVER_NAME", "  houston.example.net ")
+    s = load_settings()
+    assert s.internal_networks == ["10.0.0.0/8", "2001:db8::/32"]
+    assert s.server_name == "houston.example.net"
+    # However they are made: here, directly.
+    assert Settings(internal_networks=[" 10.0.0.0/8 "]).internal_networks == ["10.0.0.0/8"]

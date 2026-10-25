@@ -227,3 +227,16 @@ def test_cli_add_location_needs_a_name_when_the_server_cannot_be_reached(
         main(args)
     main([*args, "--id", "down1", "--name", "Down", "--write"])
     assert tomllib.loads(settings_file.read_text())["locations"][0]["id"] == "down1"
+
+
+def test_config_set_writes_values_without_the_spaces_around_them():
+    assert parse_value("server_name", "  houston.example.net ") == "houston.example.net"
+    assert parse_value("server_name", '" houston.example.net "') == "houston.example.net"
+    assert parse_value("internal_networks", " 10.0.0.0/8 , 2001:db8::/32 ") == [
+        "10.0.0.0/8",
+        "2001:db8::/32",
+    ]
+    assert parse_value("internal_networks", '[" 10.0.0.0/8 ", "2001:db8::/32 "]') == [
+        "10.0.0.0/8",
+        "2001:db8::/32",
+    ]

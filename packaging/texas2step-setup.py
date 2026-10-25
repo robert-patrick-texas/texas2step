@@ -1731,6 +1731,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--out", default=".", help="where to write the report and script")
     args = ap.parse_args(argv)
+    # Pasted values often bring spaces with them: a URL, a name or a path.
+    for name, value in vars(args).items():
+        if isinstance(value, str):
+            setattr(args, name, value.strip())
+        elif isinstance(value, list):
+            setattr(args, name, [v.strip() if isinstance(v, str) else v for v in value])
     changes = (args.site, args.no_nginx, args.speedtest, args.path, args.id, args.name)
     changes += (args.location, args.peer, args.udp_ports, args.url_v4, args.url_v6)
     if args.update and any(changes):

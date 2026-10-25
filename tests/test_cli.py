@@ -129,3 +129,14 @@ def test_results_clear(tmp_path, monkeypatch, capsys):
     cli.main(clear)
     assert capsys.readouterr().out == f"{db} holds no saved results.\n"
     store.close()
+
+
+def test_arguments_lose_the_spaces_around_them():
+    args = cli.trimmed(
+        cli.build_parser().parse_args(
+            ["run", " https://dallas.example.net/texas2step ", "--code", " maple.river.42 "]
+        )
+    )
+    assert (args.url, args.code) == ("https://dallas.example.net/texas2step", "maple.river.42")
+    args = cli.trimmed(cli.build_parser().parse_args(["config", "set", " server_id=houston "]))
+    assert args.pairs == ["server_id=houston"]

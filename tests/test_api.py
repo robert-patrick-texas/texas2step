@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from texas2step import __version__
 from texas2step.app import create_app
-from texas2step.config import Link, Settings
+from texas2step.config import Link, Location, Settings
 
 
 def test_ping_headers(client):
@@ -220,6 +220,14 @@ def test_results_disabled(settings):
 def test_measure_rejects_unlisted_target(client):
     r = client.post("/api/v1/measure/latency", json={"target": "http://169.254.169.254"})
     assert r.status_code == 403
+
+
+def test_measure_takes_a_listed_target_with_spaces_around_it(tmp_path):
+    peer = Location("peer", "peer.example.net", "http://127.0.0.1:9")  # nothing listens there
+    settings = Settings(results_path=str(tmp_path / "r.db"), locations=[peer])
+    with TestClient(create_app(settings)) as c:
+        r = c.post("/api/v1/measure/latency", json={"target": " http://127.0.0.1:9 ", "count": 1})
+    assert r.status_code == 502  # allowed, then unreachable; not 403
 
 
 def test_rtc_offer_rejects_garbage(client):

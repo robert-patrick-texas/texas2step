@@ -190,6 +190,11 @@ class Settings:
     brand_credit: str = "link"
 
     def __post_init__(self) -> None:
+        # However a setting was given (file, environment, `config set`), spaces around its
+        # text are no part of it: a stray space inside quotes would otherwise pass here and
+        # fail later, as in an address network that every request is checked against.
+        for f in dataclasses.fields(self):
+            setattr(self, f.name, _trimmed(getattr(self, f.name)))
         ports = (self.rtc_port_min, self.rtc_port_max)
         if ports != (0, 0) and not 1 <= ports[0] <= ports[1] <= 65535:
             raise ValueError(
@@ -317,6 +322,19 @@ class Settings:
         )
 
 
+def _trimmed(value: Any) -> Any:
+    """A setting with the whitespace around each piece of its text taken off: in lists, and
+    in the fields of [[locations]] and links too."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return [_trimmed(v) for v in value]
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        fields = {f.name: _trimmed(getattr(value, f.name)) for f in dataclasses.fields(value)}
+        return dataclasses.replace(value, **fields)
+    return value
+
+
 def _coerce(raw: Any, hint: Any, name: str) -> Any:
     origin = typing.get_origin(hint)
     if origin in (typing.Union, types.UnionType):
@@ -336,7 +354,7 @@ def _coerce(raw: Any, hint: Any, name: str) -> Any:
     if hint is float:
         return float(raw)
     if hint is str:
-        return str(raw)
+        return str(raw).strip()
     if origin is list:
         (item,) = typing.get_args(hint)
         if isinstance(raw, str):
