@@ -269,15 +269,11 @@ export class App {
   }
 
   /**
-   * Where an address asks for the code, to begin a sentence: "Over IPv4, " for this
-   * server's IPv4-only name, "On Dallas, " or "On Dallas over IPv6, " for another server.
+   * How an address that asks for the code is reached, to begin a sentence: "Over IPv4, "
+   * for an IPv4-only name, of this server or another; nothing for one over both families.
    */
   private over(ep: Endpoint): string {
-    const at = (url: string) => url !== "" && new Endpoint(url).base === ep.base;
-    const loc = this.locations.find((l) => at(l.url) || at(l.url_v4) || at(l.url_v6));
-    const family = ep.family ? `over ${ep.family === "ipv4" ? "IPv4" : "IPv6"}` : "";
-    const where = [loc?.url ? `on ${loc.name}` : "", family].filter(Boolean).join(" ");
-    return where ? `${where.charAt(0).toUpperCase()}${where.slice(1)}, ` : "";
+    return ep.family ? `Over ${ep.family === "ipv4" ? "IPv4" : "IPv6"}, ` : "";
   }
 
   /** What an address that refused the page says, for a page's status line. */
