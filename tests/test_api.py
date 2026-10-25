@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import re
 import time
 
@@ -280,6 +282,40 @@ def test_api_answers_are_kept_in_no_browser_cache(client, settings):
     prefix = {"x-forwarded-prefix": "/texas2step"}
     for path in ("/api/v1/results", "/texas2step/api/v1/results"):
         assert client.get(path, headers=prefix).headers["cache-control"] == "no-store"
+
+
+def test_pages_say_which_scripts_and_servers_they_may_use(tmp_path):
+    peer = Location(
+        "dallas",
+        "dallas.example.net",
+        "https://dallas.example.net/texas2step",
+        url_v4="https://v4.dallas.example.net:8443/texas2step",
+    )
+    settings = Settings(
+        results_path=str(tmp_path / "r.db"),
+        locations=[peer],
+        server_url_v6="http://v6.houston.example.net/texas2step",
+    )
+    with TestClient(create_app(settings)) as c:
+        r = c.get("/monitor")
+        explorer = c.get("/api/docs")
+    policy = dict(part.split(" ", 1) for part in r.headers["content-security-policy"].split("; "))
+    # The page's one inline script (its theme, before the first paint), by its hash.
+    inline = re.search(r"<script>(.*?)</script>", r.text, re.S).group(1)
+    digest = base64.b64encode(hashlib.sha256(inline.encode()).digest()).decode()
+    assert policy["script-src"] == f"'self' 'sha256-{digest}'"
+    assert policy["connect-src"].split() == [
+        "'self'",
+        "http://v6.houston.example.net",
+        "ws://v6.houston.example.net",
+        "https://dallas.example.net",
+        "wss://dallas.example.net",
+        "https://v4.dallas.example.net:8443",
+        "wss://v4.dallas.example.net:8443",
+    ]
+    assert policy["object-src"] == "'none'" and policy["base-uri"] == "'self'"
+    # The API explorer's own inline script, by its hash too.
+    assert "'sha256-" in explorer.headers["content-security-policy"]
 
 
 def test_path_prefix_must_be_a_plain_path(client, settings):

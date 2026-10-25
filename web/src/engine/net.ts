@@ -20,11 +20,15 @@ export function routeOf(pathname: string): string {
 }
 
 /**
- * The access pass (docs/access.md), sent as ?pass= with every request to every server. A
- * query parameter, not a header: a header would make the browser send a preflight before
- * each timed ping and download to another server, and skew the timings.
+ * The access pass (docs/access.md), with every request. To this app's own server it goes
+ * in an Authorization header, and a WebSocket's in its subprotocol, which keeps it out of
+ * the URLs that proxies log. To another server it goes as ?pass=: a header there would
+ * make the browser send a preflight before each timed ping and download, and skew the
+ * timings, and a server on an earlier version wouldn't answer the subprotocol.
  */
 let accessPass = "";
+const WS_PROTOCOL = "texas2step";
+const WS_PASS = `${WS_PROTOCOL}.pass.`;
 let denied: (() => void) | null = null;
 
 export function setPass(pass: string): void {
@@ -54,10 +58,15 @@ export class Endpoint {
     this.base = (base || window.location.origin + BASE_PATH).replace(/\/+$/, "");
   }
 
+  /** This app's own server, which takes the pass in a header. */
+  get own(): boolean {
+    return this.base === `${window.location.origin}${BASE_PATH}`.replace(/\/+$/, "");
+  }
+
   url(path: string, params: Record<string, string | number> = {}): string {
     const url = new URL(this.base + API + path);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-    if (accessPass) url.searchParams.set("pass", accessPass);
+    if (accessPass && !this.own) url.searchParams.set("pass", accessPass);
     return url.href;
   }
 
@@ -65,9 +74,28 @@ export class Endpoint {
     return this.url(path).replace(/^http/, "ws");
   }
 
+  /** The subprotocols a WebSocket to this server offers: the pass, to this app's own. */
+  wsProtocols(): string[] {
+    return accessPass && this.own ? [WS_PROTOCOL, WS_PASS + accessPass] : [];
+  }
+
+  /** The headers that carry the pass, to this app's own server. */
+  headers(): Record<string, string> {
+    return accessPass && this.own ? { Authorization: `Bearer ${accessPass}` } : {};
+  }
+
+  /** `init` for a request to this server, with the pass where it goes in a header. */
+  init(init: RequestInit = {}): RequestInit {
+    const extra = this.headers();
+    if (!Object.keys(extra).length) return init;
+    const headers = new Headers(init.headers);
+    for (const [k, v] of Object.entries(extra)) headers.set(k, v);
+    return { ...init, headers };
+  }
+
   async json<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const res = await fetch(this.url(path), { cache: "no-store", ...init });
-    if (res.status === 401 && this.base === new Endpoint("").base) denied?.();
+    const res = await fetch(this.url(path), this.init({ cache: "no-store", ...init }));
+    if (res.status === 401 && this.own) denied?.();
     if (!res.ok) {
       let detail = res.statusText;
       try {

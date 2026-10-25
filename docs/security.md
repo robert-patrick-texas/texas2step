@@ -38,9 +38,10 @@ pass.
   is kept out of the world-readable `config.toml`. `texas2step access show` prints a
   fingerprint to compare servers by, which reveals nothing about the key.
 * **Passes.** A right code buys a pass for `access_pass_hours` (12 by default): an expiry
-  time signed with the key, checked by every server that holds it. The browser sends it
-  as `?pass=`; this server's own pages get it as a cookie that is `HttpOnly`,
-  `SameSite=Strict`, and `Secure` over HTTPS. A pass is a bearer token: it isn't tied to
+  time signed with the key, checked by every server that holds it. The page keeps it in
+  local storage, with no cookie, and sends it to its own server in an `Authorization`
+  header (a WebSocket's in its subprotocol), so it stays out of URLs that proxies log;
+  to the other servers, as `?pass=`. A pass is a bearer token: it isn't tied to
   an address or a browser, and works until it expires. A
   [block set by hand](access.md#lockouts-and-blocks) ends it for the network blocked,
   WebSockets and UDP sessions already open included. A new access key ends every pass.
@@ -153,6 +154,13 @@ A speed test exists to move a lot of data, so each part has a cap:
   figures) belong to the service user. The traffic figures hold no addresses.
 * **No third parties.** The web page loads nothing from other sites: no CDN, fonts,
   analytics or telemetry. No public STUN server is used unless listed in `ice_servers`.
+* **A Content-Security-Policy** on the page and the API explorer lets only their own
+  scripts run, and the one written into each page by its hash, and lets them connect
+  only to this server and the others in `[[locations]]`. A script injected some other
+  way can't run, or send what it finds to another site.
+* **Its own hostname.** A browser shares local storage across a whole origin, the scheme,
+  host and port. Where texas2step sits beside other applications on one hostname, any page
+  there could read the pass, so serve it from a hostname of its own where you can.
 
 ## Cryptography
 

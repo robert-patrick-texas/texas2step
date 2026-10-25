@@ -50,7 +50,7 @@ export async function pingOnce(ep: Endpoint, signal?: AbortSignal, timeoutMs = 3
   const ctrl = linked(signal, timeoutMs);
   const t0 = performance.now();
   try {
-    const res = await fetch(url, { cache: "no-store", signal: ctrl.signal });
+    const res = await fetch(url, ep.init({ cache: "no-store", signal: ctrl.signal }));
     await res.arrayBuffer();
     const t1 = performance.now();
     const entry = await timingFor(url);
@@ -70,12 +70,12 @@ export async function pingOnce(ep: Endpoint, signal?: AbortSignal, timeoutMs = 3
  * HTTP upgrade, which browsers always make on a connection of its own. Null if it didn't
  * open within `timeoutMs`.
  */
-export function openTime(url: string, timeoutMs = 5000): Promise<number | null> {
+export function openTime(url: string, timeoutMs = 5000, protocols: string[] = []): Promise<number | null> {
   return new Promise((resolve) => {
     const t0 = performance.now();
     let ws: WebSocket;
     try {
-      ws = new WebSocket(url);
+      ws = new WebSocket(url, protocols);
     } catch {
       resolve(null);
       return;
@@ -119,7 +119,7 @@ export function responsivenessWhile(ep: Endpoint, loaded: boolean, everyMs = 100
     }
   };
   void every(500, everyMs, async () => {
-    const t = await openTime(ep.wsUrl("/ws"));
+    const t = await openTime(ep.wsUrl("/ws"), undefined, ep.wsProtocols());
     if (!running) return;
     if (t === null) probes.lost++;
     else probes.setup.push(t);
@@ -144,11 +144,12 @@ export class WsProber {
   private seq = 0;
   private pending = new Map<number, (rtt: number | null) => void>();
 
-  async open(url: string, timeoutMs = 4000): Promise<boolean> {
+  /** `protocols`: the subprotocols that carry the pass to the page's own server (net.ts). */
+  async open(url: string, timeoutMs = 4000, protocols: string[] = []): Promise<boolean> {
     return new Promise((resolve) => {
       let ws: WebSocket;
       try {
-        ws = new WebSocket(url);
+        ws = new WebSocket(url, protocols);
       } catch {
         resolve(false);
         return;

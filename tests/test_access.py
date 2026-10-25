@@ -502,47 +502,61 @@ def test_the_desk_blocks_networks_through_the_api(tmp_path, key_file, caplog):
         assert r.json() == {"cleared": ["2001:db8:9::/48"]}
 
 
-def test_pages_need_a_pass_from_outside(tmp_path, key_file):
+def test_pages_need_no_pass_and_no_cookie(tmp_path, key_file):
+    """The page asks for the code itself, so pages load without a pass; what they fetch and
+    open needs one, which the page keeps in its local storage, not a cookie."""
     with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
-        for page in ("/monitor", "/diag"):
-            r = c.get(page, headers=OUTSIDE, follow_redirects=False)
-            assert r.status_code == 303 and r.headers["location"] == "/", page
-            assert c.get(page, headers=INSIDE, follow_redirects=False).status_code == 200
-        r = c.post(
-            "/api/v1/access",
-            json={"code": c.app.state.codes.current(datetime.now(UTC)).code},
-            headers=OUTSIDE,
-        )
-        cookie = r.headers["set-cookie"]
-        assert cookie.startswith(f"{access_api.PASS_COOKIE}={r.json()['pass']};")
-        for part in ("HttpOnly", "Max-Age=43200", "Path=/", "SameSite=strict"):
-            assert part in cookie, part
-        assert "Secure" not in cookie  # plain HTTP here; behind nginx's HTTPS it is Secure
-        for page in ("/monitor", "/diag"):  # the cookie now goes with each page load
+        for page in ("/", "/monitor", "/diag"):
             assert c.get(page, headers=OUTSIDE, follow_redirects=False).status_code == 200
-        assert c.get("/history", headers=OUTSIDE, follow_redirects=False).status_code == 404
-        c.cookies.clear()
-        r = c.get("/monitor", headers=OUTSIDE, follow_redirects=False)
-        assert r.status_code == 303
-        # Without internal_networks, the desk's pages are every pass holder's, and only theirs.
+        assert c.get("/history", headers=OUTSIDE).status_code == 404  # the desk's, as before
+        code = c.app.state.codes.current(datetime.now(UTC)).code
+        r = c.post("/api/v1/access", json={"code": code}, headers=OUTSIDE)
+        assert "set-cookie" not in r.headers
+        token = r.json()["pass"]
+        # The pass as ?pass= (other servers, the CLI), as a header (the page's own server),
+        # or in a WebSocket's subprotocol (the page's own sockets).
+        bearer = {"Authorization": f"Bearer {token}", **OUTSIDE}
+        assert c.get("/api/v1/info", params={"pass": token}, headers=OUTSIDE).status_code == 200
+        assert c.get("/api/v1/info", headers=bearer).status_code == 200
+        assert c.get("/api/v1/info", headers=OUTSIDE).status_code == 401
+        wrong = {"Authorization": "Bearer 1.x", **OUTSIDE}
+        assert c.get("/api/v1/info", headers=wrong).status_code == 401
+        r = c.get("/api/v1/access", headers=bearer)
+        assert r.json()["pass"]["valid"] is True
+        protocols = ["texas2step", f"texas2step.pass.{token}"]
+        # (Fresh headers each time: the test client writes into the dict it's given.)
+        with c.websocket_connect("/api/v1/ws", subprotocols=protocols, headers={**OUTSIDE}) as ws:
+            assert ws.accepted_subprotocol == "texas2step"
+            ws.send_text("hi")
+            assert ws.receive_text() == "hi"
+        with (
+            pytest.raises(WebSocketDisconnect),
+            c.websocket_connect("/api/v1/ws", subprotocols=["texas2step"], headers={**OUTSIDE}),
+        ):
+            pass
+    # Without internal_networks, the desk's pages are every pass holder's: the pages load,
+    # and what they fetch needs the pass.
     with gated(tmp_path, key_file) as c:
-        for page in ("/history", "/r/k7q2-m9xd", "/api/docs", "/api/openapi.json"):
-            r = c.get(page, headers=OUTSIDE, follow_redirects=False)
-            assert r.status_code == 303, page
+        for page in ("/history", "/r/k7q2-m9xd", "/api/docs"):
+            assert c.get(page, headers=OUTSIDE, follow_redirects=False).status_code == 200, page
+        assert c.get("/api/v1/results", headers=OUTSIDE).status_code == 401
         token = unlock(c)
-        c.cookies.clear()
-        r = c.get("/history", params={"pass": token}, headers=OUTSIDE, follow_redirects=False)
-        assert r.status_code == 200
+        headers = {"Authorization": f"Bearer {token}", **OUTSIDE}
+        assert c.get("/api/v1/results", headers=headers).status_code == 200
+        # The explorer's description leaves out the version, as the page does.
+        assert c.get("/api/openapi.json", headers=OUTSIDE).json()["info"]["version"] == ""
+        on_the_server = {"X-Forwarded-For": "127.0.0.1"}  # loopback: always inside
+        loopback = c.get("/api/openapi.json", headers=on_the_server).json()["info"]["version"]
+        assert loopback == __version__
+    # A cookie an earlier version set is removed, at the path it was set for.
     with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
         prefix = OUTSIDE | {"X-Forwarded-Prefix": "/texas2step", "X-Forwarded-Proto": "https"}
-        r = c.get("/monitor", headers=prefix, follow_redirects=False)
-        assert r.headers["location"] == "/texas2step/"
-        r = c.post("/api/v1/access", json={"code": "x"}, headers=prefix)
+        c.cookies.set(access_api.PASS_COOKIE, "1.old")
         code = c.app.state.codes.current(datetime.now(UTC)).code
         r = c.post("/api/v1/access", json={"code": code}, headers=prefix)
-        assert (
-            "Path=/texas2step/" in r.headers["set-cookie"] and "Secure" in r.headers["set-cookie"]
-        )
+        cookie = r.headers["set-cookie"]
+        assert cookie.startswith(f'{access_api.PASS_COOKIE}="";') and "Max-Age=0" in cookie
+        assert "Path=/texas2step/" in cookie and "Secure" in cookie
 
 
 def test_the_version_stays_inside(tmp_path, key_file):
@@ -556,15 +570,14 @@ def test_the_version_stays_inside(tmp_path, key_file):
             assert meta not in c.get("/", headers=OUTSIDE).text
             assert meta in c.get("/", headers=INSIDE).text
             params = {"pass": unlock(c)} if code == "daily" else {}
-            assert meta not in c.get("/", headers=OUTSIDE).text  # the pass cookie or none
+            assert meta not in c.get("/", headers=OUTSIDE).text
             assert "version" not in c.get("/api/v1/info", params=params, headers=OUTSIDE).json()
             assert c.get("/api/v1/info", headers=INSIDE).json()["version"] == __version__
-    # Without them, a visitor who entered the code sees it.
+    # Without them, a visitor who entered the code sees it: the page gets it from /info.
     with gated(tmp_path, key_file) as c:
         assert c.get("/api/v1/health", headers=OUTSIDE).json() == {"status": "ok"}
         assert meta not in c.get("/", headers=OUTSIDE).text
-        token = unlock(c)  # with the pass cookie, the page has it
-        assert meta in c.get("/", headers=OUTSIDE).text
+        token = unlock(c)
         info = c.get("/api/v1/info", params={"pass": token}, headers=OUTSIDE).json()
         assert info["version"] == __version__
     # Without codes either, nothing asks visitors who they are: the version is everyone's.
@@ -610,8 +623,6 @@ def test_a_block_set_by_hand_ends_the_passes_used_from_it(tmp_path, key_file, mo
         assert (r.status_code, r.json()["detail"]) == (401, "access code required")
         r = c.get("/api/v1/access", params={"pass": passes["outside"]}, headers=OUTSIDE)
         assert r.json()["pass"]["valid"] is False
-        r = c.get("/monitor", headers=OUTSIDE, follow_redirects=False)  # with the pass cookie
-        assert r.status_code == 303
         # Other networks keep theirs; one locked out by wrong codes does too.
         assert works("there", there)
         for n in range(3):

@@ -20,6 +20,7 @@ from starlette.requests import ClientDisconnect
 from .. import payload
 from ..rtc import RtcBusy, RtcUnavailable
 from ..traffic import Closed, TrafficMeter
+from .access import WS_PROTOCOL
 from .meta import client_address
 
 router = APIRouter(prefix="/api/v1", tags=["wire"])
@@ -155,7 +156,9 @@ async def up(request: Request, test: TestId = None) -> Response:
 @router.websocket("/ws")
 async def ws_echo(ws: WebSocket) -> None:
     """Echoes every message unchanged. Used for latency under load and live monitoring."""
-    await ws.accept()
+    # The page's own sockets carry the pass in a subprotocol (api/access.py): answer it.
+    offered = WS_PROTOCOL in ws.scope.get("subprotocols", [])
+    await ws.accept(subprotocol=WS_PROTOCOL if offered else None)
     # With access codes, a block set by hand on the client's network ends its socket too,
     # as it ends its pass (app.AccessGate); looked at as messages come, every few seconds.
     ip, _ = client_address(ws)

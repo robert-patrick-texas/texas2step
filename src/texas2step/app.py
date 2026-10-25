@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import hashlib
 import logging
@@ -16,7 +17,7 @@ from urllib.parse import urlsplit
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -25,7 +26,7 @@ from starlette.websockets import WebSocketClose
 from . import __version__, page, traffic
 from .access import Codes, is_internal
 from .api import routers
-from .api.access import PASS_COOKIE
+from .api.access import given_pass
 from .api.meta import client_address, http_version, shows_version
 from .api.results import MAX_RESULT_BYTES
 from .config import Settings, load_settings
@@ -68,6 +69,48 @@ class TimingAllowOrigin:
             await send(message)
 
         await self.app(scope, receive, wrapped)
+
+
+# A script written into a page, not loaded from a file: allowed by its hash.
+INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.S | re.I)
+
+
+def server_origins(settings: Settings) -> list[str]:
+    """The other servers the page reaches, for its Content-Security-Policy: each in the
+    picker and this server's own IPv4-only and IPv6-only names, over HTTP and WebSocket."""
+    urls = [settings.server_url_v4, settings.server_url_v6]
+    for loc in settings.locations:
+        urls += [loc.url, loc.url_v4, loc.url_v6]
+    origins: list[str] = []
+    for url in filter(None, urls):
+        parts = urlsplit(url)
+        if parts.scheme in ("http", "https") and parts.netloc:
+            ws = "wss" if parts.scheme == "https" else "ws"
+            origins += [f"{parts.scheme}://{parts.netloc}", f"{ws}://{parts.netloc}"]
+    return list(dict.fromkeys(origins))
+
+
+def content_policy(html: str, origins: list[str]) -> str:
+    """A page's Content-Security-Policy: scripts only its own files and those written into
+    it, by hash, and connections only to texas2step servers, so a script injected some
+    other way can't run, or send what it finds elsewhere. Styles may be inline, as the app
+    sets each chart's colours on its elements; images may be data: URIs, as in the CSS."""
+    hashes = [
+        f"'sha256-{base64.b64encode(hashlib.sha256(s.encode()).digest()).decode()}'"
+        for s in INLINE_SCRIPT.findall(html)
+    ]
+    return "; ".join(
+        [
+            "default-src 'self'",
+            " ".join(["script-src 'self'", *hashes]),
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' data:",
+            " ".join(["connect-src 'self'", *origins]),
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+        ]
+    )
 
 
 class NoStore:
@@ -153,9 +196,6 @@ class AccessGate:
         "/api/v1/access/code",
         "/api/v1/access/blocks",
     )
-    # Pages besides /, which asks for the code: from outside, only with a pass. A page
-    # load can't carry ?pass=, so the pass comes as the cookie POST /access sets too.
-    PAGES = ("/monitor", "/diag", "/history", "/api", "/api/docs", "/api/openapi.json")
 
     def __init__(self, app: ASGIApp, settings: Settings) -> None:
         self.app = app
@@ -188,19 +228,16 @@ class AccessGate:
         if networks and self.desk_only(method, path) and self.cross_site(conn, method):
             await self._refuse(scope, receive, send, 403, "cross-site request refused")
             return
-        page = path in self.PAGES or path.startswith("/r/")
+        # Pages need no pass: each is the same app as /, which asks for the code itself,
+        # and everything it fetches or opens needs one.
         needs_pass = (
             codes and not inside and path.startswith("/api/v1/") and path not in self.PUBLIC
         )
         # A pass from a network blocked by hand is no pass: the page drops it and asks for
         # the code, which that network can't enter until the block ends.
-        watch = bool(codes and (page or needs_pass) and not inside)
-        blocked = watch and await scope["app"].state.blocks.cover(ip)
-        if codes and not inside and page and (blocked or not held(codes, conn)):
-            await self._home(scope, receive, send, root)
-            return
         if needs_pass and (
-            blocked or codes.pass_expires(conn.query_params.get("pass", "")) is None
+            codes.pass_expires(given_pass(conn)) is None
+            or await scope["app"].state.blocks.cover(ip)
         ):
             await self._refuse(scope, receive, send, 401, "access code required")
             return
@@ -228,27 +265,12 @@ class AccessGate:
         return urlsplit(origin).hostname != host
 
     @staticmethod
-    async def _home(scope: Scope, receive: Receive, send: Send, root: str) -> None:
-        """To the page that asks for the code."""
-        if scope["type"] == "websocket":
-            await WebSocketClose(code=1008, reason="access code required")(scope, receive, send)
-            return
-        headers = {"Location": f"{root}/", "Cache-Control": "no-store"}
-        await Response(status_code=303, headers=headers)(scope, receive, send)
-
-    @staticmethod
     async def _refuse(scope: Scope, receive: Receive, send: Send, status: int, why: str) -> None:
         if scope["type"] == "websocket":
             await WebSocketClose(code=1008, reason=why)(scope, receive, send)
             return
         response = JSONResponse({"detail": why}, status, headers={"Cache-Control": "no-store"})
         await response(scope, receive, send)
-
-
-def held(codes: Codes, conn: HTTPConnection) -> bool:
-    """Whether a page load comes with a current pass, in its cookie (or ?pass=)."""
-    token = conn.cookies.get(PASS_COOKIE) or conn.query_params.get("pass", "")
-    return codes.pass_expires(token) is not None
 
 
 class BodyLimit:
@@ -448,6 +470,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     index = STATIC / "index.html"
     logo = page.logo_file(settings)
     shell = page.Shell(settings, logo)
+    origins = server_origins(settings)
 
     async def spa(request: Request) -> HTMLResponse:
         # Relative URLs in the page resolve against <base href>, which carries the prefix.
@@ -456,13 +479,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         outside = settings.internal_networks and not is_internal(ip, settings.internal_networks)
         hide = page.DESK_PAGES if outside else frozenset()
         root = request.scope.get("root_path", "")
-        codes = request.app.state.codes
         # Not the version for a visitor outside internal_networks, nor, without them, for
-        # one who hasn't entered the code: it would tell an attacker which flaws to try.
-        # Without internal_networks the page gets it from /api/v1/info once in.
-        known = shows_version(request) or (not settings.internal_networks and held(codes, request))
+        # one who needs the code: it would tell an attacker which flaws to try. Without
+        # internal_networks, a visitor who entered the code gets it from /api/v1/info.
+        known = shows_version(request)
         body = shell.render(index.read_text(), root, __version__ if known else "", hide)
-        return HTMLResponse(body, headers={"Cache-Control": "no-cache"})
+        policy = content_policy(body, origins)
+        return HTMLResponse(
+            body, headers={"Cache-Control": "no-cache", "Content-Security-Policy": policy}
+        )
 
     for route in SPA_ROUTES:
         app.add_api_route(route, spa, include_in_schema=False, methods=["GET"])
@@ -483,9 +508,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def openapi(request: Request) -> JSONResponse:
         # FastAPI would record the first prefix it sees in "servers" for good. Set it per
         # request instead, so "Try it out" targets the address the explorer was opened at.
-        return JSONResponse(
-            {**app.openapi(), "servers": [{"url": request.scope.get("root_path", "") or "/"}]}
-        )
+        spec = {**app.openapi(), "servers": [{"url": request.scope.get("root_path", "") or "/"}]}
+        if not shows_version(request):  # as the page has it: not for visitors who need a code
+            spec["info"] = {**spec["info"], "version": ""}
+        return JSONResponse(spec)
 
     @app.get("/api/docs", include_in_schema=False)
     async def api_docs(request: Request) -> HTMLResponse:
@@ -493,13 +519,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # the explorer works on networks without internet access.
         root = request.scope.get("root_path", "")
         assets = f"{root}/assets/swagger"
-        return get_swagger_ui_html(
+        explorer = get_swagger_ui_html(
             openapi_url=root + "/api/openapi.json",
             title=f"{app.title} - Swagger UI",
             swagger_js_url=f"{assets}/swagger-ui-bundle.js?v={stamps.get('swagger-ui-bundle.js')}",
             swagger_css_url=f"{assets}/swagger-ui.css?v={stamps.get('swagger-ui.css')}",
             swagger_favicon_url=f"{root}/favicon.svg",
         )
+        explorer.headers["Content-Security-Policy"] = content_policy(
+            bytes(explorer.body).decode(), []
+        )
+        return explorer
 
     if logo:
 

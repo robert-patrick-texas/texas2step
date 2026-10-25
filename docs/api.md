@@ -175,9 +175,10 @@ curl -s -X POST https://dallas.example.net/texas2step/api/v1/measure/full \
 ## Access codes
 
 On a server with `access_code` on ([Access codes](access.md)), a client from outside
-`internal_networks` sends a pass as `?pass=<pass>` with each request under `/api/v1/`
-(except `/health` and `/access`); without a valid one it gets `401`. The WebSocket takes
-it the same way. With `internal_networks` set, clients from outside them get `404` for
+`internal_networks` sends a pass with each request under `/api/v1/` (except `/health`
+and `/access`); without a valid one it gets `401`. It goes as `?pass=<pass>`, or in an
+`Authorization: Bearer <pass>` header; a WebSocket can also carry it in its subprotocol,
+offering `texas2step` and `texas2step.pass.<pass>`, and is answered with `texas2step`. With `internal_networks` set, clients from outside them get `404` for
 reading results, `/api/v1/measure/*`, `/api/docs`, `/api/openapi.json`, the current code and
 the lockouts, and the browser's requests to these made for a page on another site get
 `403`. With `internal_networks` set, `/api/v1/info` and `/api/v1/health` leave out the
@@ -187,7 +188,7 @@ clients that would need a pass.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/v1/access?pass=<pass>` | `{"required", "desk"}`: whether this client needs a pass, and gets the desk's functions; with `pass`, also whether that pass is valid and when it expires |
-| POST | `/api/v1/access` | `{"code": "maple.river.42"}` (any case and separators, or a standing phrase) returns `{"pass", "expires"}`, and sets the pass as a cookie for this server's pages. A wrong code is `403`. After `access_lockout_after` wrong codes in a row from one /24 or /48, every code from it gets that same `403`, unread, until `access_lockout_minutes` pass without one ([Lockouts and blocks](access.md#lockouts-and-blocks)). A body over 1 KB is `413` |
+| POST | `/api/v1/access` | `{"code": "maple.river.42"}` (any case and separators, or a standing phrase) returns `{"pass", "expires"}`. A wrong code is `403`. After `access_lockout_after` wrong codes in a row from one /24 or /48, every code from it gets that same `403`, unread, until `access_lockout_minutes` pass without one ([Lockouts and blocks](access.md#lockouts-and-blocks)). A body over 1 KB is `413` |
 | GET | `/api/v1/access/code` | The current code, when it changes, and the previous one while it still works; only from `internal_networks` |
 | GET | `/api/v1/access/blocks` | `{"lockouts": [{"network", "source", "wrong_codes", "since", "until", "by_hand"}], "counting"}` (`by_hand`: a block, which ends the passes used from the network too); only from `internal_networks` and the server itself |
 | POST | `/api/v1/access/blocks` | `{"network": "198.51.100.0/24", "minutes": 120}` locks a network out by hand, or keeps its lockout going, and ends the passes used from it; `minutes` defaults to `access_lockout_minutes`. One that overlaps `internal_networks`, or is wider than a /16 or a /32, is `400` |

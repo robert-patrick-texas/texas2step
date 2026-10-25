@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from starlette.requests import HTTPConnection
 
 from .. import cluster
 from ..access import Codes, is_internal
@@ -20,7 +21,28 @@ router = APIRouter(prefix="/api/v1/access", tags=["access"])
 log = logging.getLogger(__name__)
 
 WRONG = "that isn't the current access code"  # also the answer while a network is locked out
-PASS_COOKIE = "texas2step_pass"  # the pass again, for loading this server's own pages
+# Earlier versions sent the pass back as this cookie too, for loading the server's own
+# pages; pages need no pass now, and POST /access removes it.
+PASS_COOKIE = "texas2step_pass"
+# The page's WebSockets to its own server carry the pass in their subprotocol, as a
+# browser can't give them a header: "texas2step.pass.<pass>", answered with "texas2step".
+WS_PROTOCOL = "texas2step"
+WS_PASS = WS_PROTOCOL + ".pass."
+
+
+def given_pass(conn: HTTPConnection) -> str:
+    """The pass a request carries: as ?pass= (the CLI, and the page to other servers), in
+    an Authorization: Bearer header (the page to its own server, keeping it out of URLs
+    that proxies log), or in a WebSocket's subprotocol."""
+    if token := conn.query_params.get("pass", ""):
+        return token
+    scheme, _, token = conn.headers.get("authorization", "").partition(" ")
+    if scheme.lower() == "bearer":
+        return token.strip()
+    for protocol in conn.headers.get("sec-websocket-protocol", "").split(","):
+        if (protocol := protocol.strip()).startswith(WS_PASS):
+            return protocol[len(WS_PASS) :]
+    return ""
 
 
 class CodeIn(BaseModel):
@@ -78,6 +100,7 @@ async def status(
         "required": codes is not None and not internal(request),
         "desk": desk(request),
     }
+    pass_ = pass_ or given_pass(request)  # the page sends its own server's in a header
     if codes is not None and pass_:
         expires = codes.pass_expires(pass_)
         # A block set by hand on this client's network ends its pass (app.AccessGate).
@@ -135,15 +158,14 @@ async def unlock(request: Request, given: CodeIn, response: Response) -> dict[st
     if note != "access code":  # a standing phrase: every use is logged, so a leaked one shows
         log.warning("%s used from %s", note, ip)
     token, expires = codes.issue()
-    response.set_cookie(
-        PASS_COOKIE,
-        token,
-        max_age=codes.pass_seconds,
-        path=request.scope.get("root_path", "") + "/",
-        secure=_https(request),
-        httponly=True,
-        samesite="strict",
-    )
+    if PASS_COOKIE in request.cookies:  # an earlier version's: the page keeps the pass itself
+        response.delete_cookie(
+            PASS_COOKIE,
+            path=request.scope.get("root_path", "") + "/",
+            secure=_https(request),
+            httponly=True,
+            samesite="strict",
+        )
     return {"pass": token, "expires": expires}
 
 

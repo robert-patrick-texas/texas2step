@@ -531,7 +531,7 @@ export class MonitorView implements View {
       d.transport = got.transport;
     } catch {
       const ws = new WsProber();
-      if (!(await ws.open(d.ep.wsUrl("/ws")))) {
+      if (!(await ws.open(d.ep.wsUrl("/ws"), undefined, d.ep.wsProtocols()))) {
         d.transport = "unreachable";
         return null;
       }

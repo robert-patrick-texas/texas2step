@@ -101,7 +101,7 @@ export class TestRun {
 
       // Opening the probe's own connection, idle, is what each new connection costs.
       const opening = performance.now();
-      if (await prober.open(this.ep.wsUrl("/ws"))) r.latency.setup_ms = performance.now() - opening;
+      if (await prober.open(this.ep.wsUrl("/ws"), undefined, this.ep.wsProtocols())) r.latency.setup_ms = performance.now() - opening;
       for (const direction of ["download", "upload"] as const) {
         if (signal.aborted) break;
         this.on.phase(direction);
@@ -223,7 +223,7 @@ export class TestRun {
         reason = err instanceof Error ? err.message : String(err);
       }
     }
-    if (!prober.ready) await prober.open(this.ep.wsUrl("/ws"));
+    if (!prober.ready) await prober.open(this.ep.wsUrl("/ws"), undefined, this.ep.wsProtocols());
     const result = await measureLossWs(prober, opts);
     result.note = `${result.note} (${reason})`;
     return result;

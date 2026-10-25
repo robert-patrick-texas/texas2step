@@ -87,10 +87,10 @@ export async function measureDownload(ep: Endpoint, opts: ThroughputOptions): Pr
     while (performance.now() < meter.deadline && !opts.signal.aborted) {
       const ctrl = linked(opts.signal);
       try {
-        const res = await fetch(ep.url("/down", { bytes: opts.maxBytes, test: opts.test, r: nonce() }), {
+        const res = await fetch(ep.url("/down", { bytes: opts.maxBytes, test: opts.test, r: nonce() }), ep.init({
           cache: "no-store",
           signal: ctrl.signal,
-        });
+        }));
         if (res.status === 503) throw refusal(await res.text());
         if (!res.ok || !res.body) throw new Error(`download failed: ${res.status}`);
         const reader = res.body.getReader();
@@ -144,6 +144,7 @@ function payload(size: number): Blob {
 /** Whether the upload went through; a traffic limit's refusal rejects with Refused. */
 function xhrUpload(
   url: string,
+  headers: Record<string, string>,
   body: Blob,
   onBytes: (n: number) => void,
   signal: AbortSignal,
@@ -158,6 +159,7 @@ function xhrUpload(
       resolve(ok);
     };
     xhr.open("POST", url);
+    for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
     xhr.upload.onprogress = (e) => {
       if (e.loaded > reported) {
         onBytes(e.loaded - reported);
@@ -196,6 +198,7 @@ export async function measureUpload(ep: Endpoint, opts: ThroughputOptions): Prom
       const t0 = performance.now();
       const ok = await xhrUpload(
         ep.url("/up", { test: opts.test, r: nonce() }),
+        ep.headers(),
         payload(size),
         (n) => meter.add(i, n),
         ctrl.signal,

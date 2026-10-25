@@ -234,13 +234,18 @@ texas2step run https://speedtest.example.net/texas2step --code maple.river.42
 
 | | Needs |
 |---|---|
-| The page at `/`, which asks for the code; its scripts, styles and logo; `/api/v1/health` (for load balancers, without the version); `/api/v1/access` | Nothing |
-| The Monitor and Diag pages, the tests, and saving a result | A pass, or an address in `internal_networks`. Without a pass, `/monitor` and `/diag` send the visitor to `/`. |
+| The page, at `/`, `/monitor` or `/diag`, which asks for the code; its scripts, styles and logo; `/api/v1/health` (for load balancers, without the version); `/api/v1/access` | Nothing |
+| The tests, Monitor and Diag's measurements, and saving a result | A pass, or an address in `internal_networks` |
 | History, the API tab, `/r/<id>`, reading saved results, `/api/docs`, `/api/openapi.json`, `/api/v1/measure/*`, the current code, [lockouts and blocks](#lockouts-and-blocks) | An address in `internal_networks`; others get 404 |
 
-The pass goes with every request the page makes, as `?pass=`. A page load can't carry
-that, so a right code also sets the pass as a cookie for the server's own pages:
-`HttpOnly`, `Secure` over HTTPS, `SameSite=Strict`, gone when the pass expires.
+The page keeps the pass in the browser's local storage and sends it with every request
+it makes. To its own server it goes in an `Authorization: Bearer` header, and a
+WebSocket's in its subprotocol, which keeps the pass out of the URLs that
+TLS-inspecting proxies log. To the other servers in the picker it goes as `?pass=`: a
+header there would make the browser ask permission (a CORS preflight) before each timed
+request and skew the timings. The server takes the pass in any of these, so the CLI's
+`?pass=` works as before. There is no cookie: a page needs no pass to load, and asks for
+the code itself. A cookie an earlier version set is removed at the next right code.
 
 With `internal_networks` set, only those networks see the version. The page,
 `/api/v1/info` and `/api/v1/health` leave it out for everyone else, even after they enter
@@ -506,8 +511,7 @@ many as you need (`results_max_rows`). `sudo texas2step results clear` deletes t
 | Your `access_words` file | Yours: kept by `apt purge` |
 | `/var/lib/texas2step/access.db` | Wrong codes, lockouts and blocks, and with servers that defend together, the one-time values of their requests; made by the service when access codes are on; removed with `apt purge` |
 
-The pass lives in the visitor's browser (local storage, and the cookie for this server's
-pages) until it expires. Passes are not written to the journal: the request log shows
+The pass lives in the visitor's browser, in local storage, until it expires. Passes are not written to the journal: the request log shows
 `pass=*` in their place. nginx's access log doesn't have them either: the packaged
 snippets log texas2step's requests to `/var/log/nginx/access.log` without their query
 strings (the `texas2step` log format, in `/etc/nginx/conf.d/texas2step-log.conf`).

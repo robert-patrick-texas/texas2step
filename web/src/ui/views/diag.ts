@@ -191,7 +191,7 @@ class HttpsMethod extends Method {
     const done = this.lane.send();
     const t0 = performance.now();
     const wall = Date.now();
-    fetch(url, { cache: "no-store", signal: AbortSignal.timeout(2000) })
+    fetch(url, this.ep.init({ cache: "no-store", signal: AbortSignal.timeout(2000) }))
       .then(async (res) => {
         if (!res.ok) throw new Error(`${res.status}`);
         return (await res.json()) as DiagHttp;
@@ -251,7 +251,7 @@ class WsMethod extends Method {
     this.prober?.close();
     const prober = new WsProber();
     this.prober = prober;
-    void prober.open(this.ep.wsUrl("/ws"), 3000).then(() => {
+    void prober.open(this.ep.wsUrl("/ws"), 3000, this.ep.wsProtocols()).then(() => {
       this.opening = false;
       if (this.stopped) prober.close();
     });
