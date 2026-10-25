@@ -1,3 +1,3 @@
 """texas2step: web-centric throughput, latency, jitter and packet-loss measurement."""
 
-__version__ = "2.2.2"
+__version__ = "2.2.3"

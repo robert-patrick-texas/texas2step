@@ -116,6 +116,11 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.2.3](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.3) (2026-10-24)
+
+- [x] Spaces around any setting or typed value are ignored; a stray one in
+  `internal_networks` no longer breaks every request.
+
 ### [2.2.2](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.2.2) (2026-10-24)
 
 - [x] UDP works in Firefox: Monitor, Diag and the Test page's packet loss no longer fall
