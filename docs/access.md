@@ -114,8 +114,9 @@ tests until it changes, but for a short list, or a `fixed` code, consider
 `access_digits = 3` or `4`.
 
 **When it changes.** A new code starts at midnight in `access_timezone`. The previous
-code keeps working for 24 hours after the change, for a call that spans midnight. A
-`fixed` code changes only with a new key:
+code keeps working for 24 hours after the change, for a call that spans midnight. To
+change it before then, or to change a `fixed` code, [shuffle the codes](#shuffling-the-codes),
+or make a new key:
 
 ```bash
 sudo texas2step access key --new
@@ -124,6 +125,42 @@ sudo texas2step access key --new
 That makes a new key at once: every code and pass from the old one stops working. Copy
 the new key to the other servers as in step 1, and restart the service on each. Without
 `--yes`, it asks first.
+
+### Shuffling the codes
+
+When a code has gone further than it should, shuffle the codes. The current code and the
+previous one stop working at once, and a new one takes their place:
+
+```console
+$ sudo texas2step access shuffle
+Shuffle the codes? The current and previous codes stop working, and the desk reads the new one. [y/N] y
+Codes shuffled here. Today's code is now copper.lantern.42; the codes before it don't work.
+Passes already given keep working: add --end-passes to end them as well.
+Other servers: sent to dallas, houston.
+```
+
+A shuffle is a random value mixed into every code from then on. It is kept in
+`access_lockouts_file`, so it needs no new key and no restart, and outlasts a restart.
+Every code entered after it is checked against it, on every worker. The desk reads the
+new code at the top of History, or with `sudo texas2step access show`, which also says
+when the codes were shuffled. There is no previous code until the next change: at
+midnight, the shuffled code becomes yesterday's and works for 24 hours as usual. Phrases
+are not codes, so they keep working.
+
+Every server must hold the same shuffle, or they give different codes. With
+[servers that defend together](#servers-that-defend-together), it goes to every server in
+`[[locations]]`, and each keeps the latest it is given. Without them, the command prints
+the value for the others; run that on each:
+
+```bash
+sudo texas2step access shuffle --to 3f9a0c7e12b4d856
+```
+
+`access show`'s fingerprint includes the shuffle, so servers that agree show the same one.
+
+Passes already given keep working. Add `--end-passes` to [end them](#ending-every-pass)
+too, which has everyone outside enter the new code: the same as a new key, without
+copying a key to every server.
 
 **Typing it.** Case and separators don't matter: `Maple River 42`, `maple-river-42` and
 `maple.river.42` are the same code, and `7` counts for `07`.
@@ -438,8 +475,9 @@ With [servers that defend together](#servers-that-defend-together), the end goes
 server in `[[locations]]`, and each keeps the later of its own and the one it is sent.
 Without them, run the command on each server: until then, the others still take the
 passes. `sudo texas2step access passes` says how long passes last here and when they were
-last ended, and `access show` does too. A new key also ends every pass, and every code
-with it.
+last ended, and `access show` does too. To end the codes too, use
+`sudo texas2step access shuffle --end-passes` ([Shuffling the codes](#shuffling-the-codes)).
+A new key also ends every pass, and every code with it.
 
 ## Servers that defend together
 
@@ -455,8 +493,9 @@ access_peer_networks = ["198.51.100.20", "2001:db8:20::20", "203.0.113.30"]
 * **What goes to the others.** A lockout here goes, as a block, to every server in
   `[[locations]]`, at once. While the attacker keeps trying here, it goes again every
   third of `access_lockout_minutes`, so the others' blocks don't run out first.
-  `sudo texas2step access block`, `access lockouts --clear` and `access passes --end` go
-  to every server too: `--clear` on any one of them lets a caller back in everywhere. The
+  `sudo texas2step access block`, `access lockouts --clear`, `access passes --end` and
+  `access shuffle` go to every server too: `--clear` on any one of them lets a caller
+  back in everywhere. The
   [API's blocks](#lockouts-and-blocks) stay on the server they are sent to. A block from
   `access block` ends passes on every server, as here; a lockout ends none anywhere. A
   server on an earlier version sends either as a lockout.
@@ -473,7 +512,8 @@ access_peer_networks = ["198.51.100.20", "2001:db8:20::20", "203.0.113.30"]
   holds at most 1,000 of them. A wider block by hand stays on the server where it was set.
   Another server can end every pass issued before its request, which at worst has
   everyone enter the code again, but not set that time later than the receiving server's
-  clock allows, which would stamp new passes there too far ahead.
+  clock allows, which would stamp new passes there too far ahead. It can shuffle the
+  codes, which at worst has the desk read the new one.
 * **Counts stay on each server.** Wrong codes count where they are entered, so with three
   servers an attacker gets up to about seven guesses, two at each and one more, before
   the whole cluster locks them out.

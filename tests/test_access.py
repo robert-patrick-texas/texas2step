@@ -159,6 +159,30 @@ def test_the_previous_code_works_for_a_day():
     assert w.current(monday + timedelta(days=2)).previous is None
 
 
+def test_a_shuffle_changes_the_codes_and_drops_the_previous_one():
+    c = codes()
+    start = c.period(datetime(2026, 10, 22, 12, tzinfo=UTC)).start
+    noon = start + timedelta(hours=12)
+    before = c.current(noon)
+    assert c.code_for(before.period, "") == before.code  # no shuffle: the codes as ever
+    at = (start + timedelta(hours=11)).timestamp()  # shuffled this morning
+    shuffled = c.current(noon, "0123456789abcdef", at)
+    assert shuffled.code != before.code and shuffled.previous is None
+    assert c.check(shuffled.code, noon, "0123456789abcdef", at)
+    assert not c.check(before.code, noon, "0123456789abcdef", at)
+    assert not c.check(before.previous, noon, "0123456789abcdef", at)
+    assert c.current(noon, "fedcba9876543210", at).code != shuffled.code
+    # The next day, the shuffled code is yesterday's, still working for a day.
+    tomorrow = c.current(noon + timedelta(days=1), "0123456789abcdef", at)
+    assert tomorrow.previous == shuffled.code
+    assert c.check(shuffled.code, noon + timedelta(days=1), "0123456789abcdef", at)
+    # A fixed code changes too.
+    fixed = codes("fixed")
+    assert fixed.current(noon, "0123456789abcdef", at).code != fixed.current(noon).code
+    # Servers with different shuffles give different codes: their fingerprints differ.
+    assert c.fingerprint("0123456789abcdef") != c.fingerprint() == c.fingerprint("")
+
+
 def test_a_typed_code_counts_with_any_case_and_separators():
     c = codes()
     now = datetime(2026, 10, 22, 12, tzinfo=UTC)
@@ -757,11 +781,54 @@ def test_ending_every_pass(tmp_path, key_file, monkeypatch):
             assert ws.receive_text() == "3"
 
 
+def test_a_shuffle_ends_the_codes_given_before(tmp_path, key_file):
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        before = c.get("/api/v1/access/code", headers=INSIDE).json()
+        assert unlock(c)  # the code works
+        token = unlock(c)
+        c.app.state.lockouts.shuffle_codes("0123456789abcdef", time.time(), "by hand")
+        r = c.post("/api/v1/access", json={"code": before["code"]}, headers=OUTSIDE)
+        assert r.status_code == 403  # at once, on every worker: read for each code
+        after = c.get("/api/v1/access/code", headers=INSIDE).json()
+        assert after["code"] != before["code"] and after["previous"] is None
+        r = c.post("/api/v1/access", json={"code": after["code"]}, headers=OUTSIDE)
+        assert r.status_code == 200
+        # Passes already given keep working.
+        assert c.get("/api/v1/info", params={"pass": token}, headers=OUTSIDE).status_code == 200
+
+
+def test_the_shuffle_command(tmp_path, key_file, monkeypatch, capsys):
+    conf = config_file(tmp_path, key_file, access_code="daily", internal_networks=["10.0.0.0/8"])
+
+    def access_cli(*args: str) -> str:
+        cli.main(["access", *args, "--config", conf])
+        return capsys.readouterr().out
+
+    code = re.search(r"Today's code: +(\S+)", access_cli("show"))[1]
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))  # no terminal to ask on
+    with pytest.raises(SystemExit, match="add --yes to shuffle the codes"):
+        access_cli("shuffle")
+    with pytest.raises(SystemExit, match="--to: expected the 16 letters and digits"):
+        access_cli("shuffle", "--to", "nope")
+    out = access_cli("shuffle", "--yes")
+    new = re.search(r"Today's code is now (\S+);", out)[1]
+    assert new != code and "Passes already given keep working" in out
+    shown = access_cli("show")
+    assert re.search(rf"Today's code: +{re.escape(new)} ", shown)
+    assert "Yesterday's" not in shown and re.search(r"\nShuffled: +\S+ \S+ \S+, by hand\n", shown)
+    # Another server given the same value gives the same code.
+    value = LockoutStore(tmp_path / "access.db").codes_shuffled()[0]
+    other = tmp_path / "other"
+    other.mkdir()
+    conf = config_file(other, key_file, access_code="daily", internal_networks=["10.0.0.0/8"])
+    out = access_cli("shuffle", "--to", value, "--end-passes")
+    assert f"Today's code is now {new};" in out and "Every pass issued so far is ended" in out
+    assert LockoutStore(other / "access.db").passes_ended()[1] == "by hand, with a shuffle"
+
+
 def test_the_passes_command(tmp_path, key_file, monkeypatch, capsys):
     db = tmp_path / "access.db"
     conf = config_file(tmp_path, key_file, access_code="daily", internal_networks=["10.0.0.0/8"])
-    with open(conf, "a") as f:
-        f.write(f'access_lockouts_file = "{db}"\n')
 
     def access_cli(*args: str) -> str:
         cli.main(["access", *args, "--config", conf])
@@ -988,6 +1055,8 @@ def config_file(tmp_path, key_file, **kw) -> str:
     lines = [
         f'access_key_file = "{key_file}"',
         f'access_phrases_file = "{phrases}"',
+        # Never the host's own /var/lib/texas2step/access.db.
+        f'access_lockouts_file = "{tmp_path / "access.db"}"',
         *(f"{k} = {v!r}" for k, v in kw.items()),
     ]
     path.write_text("\n".join(lines).replace("'", '"') + "\n")
@@ -1042,8 +1111,6 @@ def test_access_show_and_words(tmp_path, key_file, capsys):
 def test_access_lockout_commands(tmp_path, key_file, capsys):
     db = tmp_path / "access.db"
     conf = config_file(tmp_path, key_file, access_code="daily", internal_networks=["10.0.0.0/8"])
-    with open(conf, "a") as f:
-        f.write(f'access_lockouts_file = "{db}"\n')
 
     def access_cli(*args: str) -> str:
         cli.main(["access", *args, "--config", conf])

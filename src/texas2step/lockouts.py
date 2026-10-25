@@ -10,7 +10,8 @@ right code. A block, set from the command line or the API, is a lockout set by h
 and ends the passes used from the network too (app.AccessGate); a lockout doesn't, so
 callers who share a network with a guesser keep testing with the pass they hold. Every
 pass can be ended at once, too (texas2step access passes --end): those issued before
-then are refused, wherever they are used.
+then are refused, wherever they are used. The codes' shuffle (texas2step access shuffle)
+lives here as well.
 
 The counts live in a small SQLite file (``access_lockouts_file``) that the service's
 workers and the command line share. Checking a code and counting it happen in one
@@ -60,6 +61,13 @@ CREATE TABLE IF NOT EXISTS shared (
 CREATE TABLE IF NOT EXISTS nonces (
     nonce TEXT PRIMARY KEY,
     seen  REAL NOT NULL
+);
+-- The codes' shuffle (texas2step access shuffle), mixed into every code. At most one row.
+CREATE TABLE IF NOT EXISTS codes_shuffled (
+    one    INTEGER PRIMARY KEY CHECK (one = 1),
+    value  TEXT NOT NULL,
+    at     REAL NOT NULL,
+    source TEXT NOT NULL  -- the command line, or the server that sent it
 );
 -- When every pass was last ended: those issued before then are refused. At most one row.
 CREATE TABLE IF NOT EXISTS passes_ended (
@@ -365,6 +373,30 @@ class LockoutStore:
         with self._lock:
             row = self._db.execute("SELECT at, source FROM passes_ended").fetchone()
         return (row["at"], row["source"]) if row else (0.0, "")
+
+    # --- Shuffling the codes ----------------------------------------------------------
+
+    def shuffle_codes(self, value: str, at: float, source: str) -> tuple[str, float]:
+        """Mix ``value`` into every code from ``at``. The later shuffle stays, so servers
+        that send theirs to each other end up with the same: the shuffle in force."""
+
+        def work() -> tuple[str, float]:
+            self._db.execute(
+                "INSERT INTO codes_shuffled VALUES (1, ?, ?, ?) ON CONFLICT (one) DO UPDATE SET "
+                "value = excluded.value, at = excluded.at, source = excluded.source "
+                "WHERE (excluded.at, excluded.value) > (codes_shuffled.at, codes_shuffled.value)",
+                (value, at, source),
+            )
+            row = self._db.execute("SELECT value, at FROM codes_shuffled").fetchone()
+            return row["value"], row["at"]
+
+        return self._write(work)
+
+    def codes_shuffled(self) -> tuple[str, float, str]:
+        """The codes' shuffle, when it was set and from where; ("", 0, "") if never."""
+        with self._lock:
+            row = self._db.execute("SELECT value, at, source FROM codes_shuffled").fetchone()
+        return (row["value"], row["at"], row["source"]) if row else ("", 0.0, "")
 
     # --- Servers that defend together (cluster.py) -------------------------------------
 

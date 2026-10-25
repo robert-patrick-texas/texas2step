@@ -54,6 +54,9 @@ GRACE = 24 * 3600  # the previous code still works this long after a change
 # How far ahead of this server's clock a pass may be stamped: another server's clock, or
 # one that issued it just after passes were ended there (Codes.issue).
 PASS_AHEAD = 300
+# The codes' shuffle (texas2step access shuffle): a random value, the same on every
+# server, mixed into each code. Not secret: the codes still need the key.
+SHUFFLE = re.compile(r"[0-9a-f]{16}")
 MIN_SITE_WORDS = 100
 MAX_ENTRY = 40
 GROUP = "texas2step"  # the service's group, which must read the key
@@ -379,8 +382,9 @@ class Codes:
             return Period(f"{first:%Y-%m}", self._midnight(first), self._midnight(following))
         return Period("fixed", None, None)
 
-    def code_for(self, period: Period) -> str:
-        mac = self._mac("code", self.interval, period.id)
+    def code_for(self, period: Period, shuffle: str = "") -> str:
+        """The period's code; with ``shuffle``, a different one, nobody's before it."""
+        mac = self._mac("code", self.interval, period.id, *([shuffle] if shuffle else []))
         n = len(self.words)
         first = int.from_bytes(mac[0:8]) % n
         parts = [self.words[first]]
@@ -390,21 +394,24 @@ class Codes:
         number = int.from_bytes(mac[16:24]) % 10**self.digits
         return ".".join([*parts, f"{number:0{self.digits}d}"])
 
-    def current(self, now: datetime) -> Current:
+    def current(self, now: datetime, shuffle: str = "", shuffled_at: float = 0) -> Current:
+        """The period's code, and the previous period's in its grace day. Shuffled in this
+        period, there is no previous one: the codes given before the shuffle end with it."""
         period = self.period(now)
         previous = until = None
-        if period.start is not None and now < period.start + timedelta(seconds=GRACE):
-            previous = self.code_for(self.period(period.start - timedelta(seconds=1)))
+        grace = period.start is not None and now < period.start + timedelta(seconds=GRACE)
+        if grace and period.start is not None and shuffled_at < period.start.timestamp():
+            previous = self.code_for(self.period(period.start - timedelta(seconds=1)), shuffle)
             until = period.start + timedelta(seconds=GRACE)
-        return Current(self.code_for(period), period, previous, until)
+        return Current(self.code_for(period, shuffle), period, previous, until)
 
-    def check(self, text: str, now: datetime) -> bool:
+    def check(self, text: str, now: datetime, shuffle: str = "", shuffled_at: float = 0) -> bool:
         """Whether ``text`` is the current code, or the previous one in its grace day."""
         given = normalize(text)
         head, _, tail = given.rpartition(".")
         if tail.isdigit() and len(tail) <= self.digits:  # "7" for "07"
             given = f"{head}.{int(tail):0{self.digits}d}"
-        current = self.current(now)
+        current = self.current(now, shuffle, shuffled_at)
         return any(
             hmac.compare_digest(given.encode(), code.encode())
             for code in (current.code, current.previous)
@@ -423,7 +430,7 @@ class Codes:
     def expired(self, phrase: Phrase, now: datetime) -> bool:
         return phrase.until is not None and now.astimezone(self.zone).date() > phrase.until
 
-    def fingerprint(self) -> str:
+    def fingerprint(self, shuffle: str = "") -> str:
         """The same on every server that would give the same codes; reveals nothing."""
         words = hashlib.sha256("\n".join(self.words).encode()).hexdigest()
         what = (
@@ -435,6 +442,8 @@ class Codes:
         if self.phrases:  # without any, as before there were phrases
             standing = sorted(f"{p.code}|{p.until or ''}" for p in self.phrases)
             what += (hashlib.sha256("\n".join(standing).encode()).hexdigest(),)
+        if shuffle:  # without one, as before codes could be shuffled
+            what += (shuffle,)
         mac = self._mac("fingerprint", *what, words).hex()
         return f"{mac[0:4]}-{mac[4:8]}-{mac[8:12]}"
 

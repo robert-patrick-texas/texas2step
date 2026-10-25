@@ -47,8 +47,10 @@ pass.
   [block set by hand](access.md#lockouts-and-blocks) ends it for the network blocked,
   WebSockets and UDP sessions already open included.
   [`texas2step access passes --end`](access.md#ending-every-pass) ends every pass issued
-  so far, on every server with lockouts shared, while the codes keep working. A new
-  access key ends every pass and code.
+  so far, on every server with lockouts shared, while the codes keep working.
+  [`texas2step access shuffle`](access.md#shuffling-the-codes) replaces the current and
+  previous codes with a new one, and with `--end-passes` ends the passes too. A new access
+  key ends every pass and code.
 * **Standing phrases.** For the desk away from a PC, in their own `0640` file
   (`access-phrases.toml`), with an optional last day. Each use is a journal warning with
   the phrase's name, never the phrase. The examples published in the docs are refused.

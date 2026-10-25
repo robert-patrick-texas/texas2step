@@ -162,6 +162,21 @@ def test_passes_ended(tmp_path):
     assert LockoutStore(tmp_path / "a.db").passes_ended()[0] == 1100.0
 
 
+def test_codes_shuffled(tmp_path):
+    store = LockoutStore(tmp_path / "a.db")
+    assert store.codes_shuffled() == ("", 0.0, "")
+    assert store.shuffle_codes("0123456789abcdef", 1000.0, "by hand") == (
+        "0123456789abcdef",
+        1000.0,
+    )
+    # An earlier one changes nothing; a later one, or the same moment's higher value, wins,
+    # so servers that send theirs to each other end up with the same.
+    assert store.shuffle_codes("ffffffffffffffff", 900.0, "x")[0] == "0123456789abcdef"
+    assert store.shuffle_codes("1111111111111111", 1000.0, "x")[0] == "1111111111111111"
+    assert store.shuffle_codes("0000000000000000", 1000.0, "x")[0] == "1111111111111111"
+    assert LockoutStore(tmp_path / "a.db").codes_shuffled() == ("1111111111111111", 1000.0, "x")
+
+
 def test_only_blocks_set_by_hand_end_passes(tmp_path):
     store = LockoutStore(tmp_path / "a.db", after=3, minutes=30)
     t = 1_000_000.0

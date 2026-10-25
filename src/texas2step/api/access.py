@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.requests import HTTPConnection
 
 from .. import cluster
-from ..access import Codes, is_internal
+from ..access import SHUFFLE, Codes, is_internal
 from ..lockouts import SHARED_BY, Lockout, inside_of, parse_network
 from .meta import client_address, from_trusted_proxy
 
@@ -70,10 +70,11 @@ class PeerIn(BaseModel):
 
     sender: str = Field(alias="from", max_length=64)
     to: str = Field(max_length=64)
-    action: Literal["block", "clear", "check", "end-passes"]
+    action: Literal["block", "clear", "check", "end-passes", "shuffle"]
     network: str = Field("", max_length=64)
     minutes: float | None = Field(None, gt=0, le=cluster.MOST_MINUTES)
-    at: float | None = Field(None, gt=0)  # end-passes: those issued before then end
+    at: float | None = Field(None, gt=0)  # end-passes: those issued before then end; shuffle:
+    value: str | None = Field(None, pattern=SHUFFLE.pattern)  # when, and the codes' shuffle
     # A block set by hand there ends passes here too; one from wrong codes doesn't. Older
     # servers send no kind, so theirs count as lockouts.
     kind: Literal["lockout", "block"] = "lockout"
@@ -130,8 +131,8 @@ async def status(
 @router.post("", summary="Exchange the access code for a pass")
 async def unlock(request: Request, given: CodeIn, response: Response) -> dict[str, Any]:
     """A pass for the current code or a standing phrase, valid on every server that holds
-    the same key. Send it as ``?pass=`` with each request; it also comes as a cookie, for
-    loading this server's pages. Wrong codes count against the client's /24 or /48: after
+    the same key. Send it as ``?pass=`` or in an ``Authorization: Bearer`` header with
+    each request. Wrong codes count against the client's /24 or /48: after
     ``access_lockout_after`` in a row, its codes are refused unread, with this same 403,
     until ``access_lockout_minutes`` pass without one."""
     codes = request.app.state.codes
@@ -140,12 +141,15 @@ async def unlock(request: Request, given: CodeIn, response: Response) -> dict[st
     ip, _ = client_address(request)
     now = datetime.now(UTC)
     lockouts = request.app.state.lockouts
+    # Read afresh: a code shuffled away a moment ago, on any worker, is no code.
+    shuffle, shuffled_at, _ = await asyncio.to_thread(lockouts.codes_shuffled)
     if is_internal(ip, request.app.state.settings.internal_networks):
-        right, note = verdict(codes, given.code, now)  # the desk trying a code: not counted
+        # The desk trying a code: not counted.
+        right, note = verdict(codes, given.code, now, shuffle, shuffled_at)
         outcome = None
     else:
         outcome = await asyncio.to_thread(
-            lockouts.submit, ip, lambda: verdict(codes, given.code, now)
+            lockouts.submit, ip, lambda: verdict(codes, given.code, now, shuffle, shuffled_at)
         )
         if outcome.locked:
             log.warning(
@@ -200,9 +204,11 @@ async def _reshare(request: Request, network: str) -> None:
         cluster.share_in_background(request.app, "block", network, minutes)
 
 
-def verdict(codes: Codes, text: str, now: datetime) -> tuple[bool, str]:
+def verdict(
+    codes: Codes, text: str, now: datetime, shuffle: str = "", shuffled_at: float = 0
+) -> tuple[bool, str]:
     """Whether ``text`` gets a pass, and what it was, for the journal."""
-    if codes.check(text, now):
+    if codes.check(text, now, shuffle, shuffled_at):
         return True, "access code"
     phrase = codes.phrase(text)
     if phrase is None:
@@ -229,7 +235,8 @@ async def current(request: Request) -> dict[str, Any]:
     if codes is None or not request.app.state.settings.internal_networks or not internal(request):
         raise HTTPException(404, "Not Found")
     now = datetime.now(UTC)
-    code = codes.current(now)
+    shuffle, shuffled_at, _ = await asyncio.to_thread(request.app.state.lockouts.codes_shuffled)
+    code = codes.current(now, shuffle, shuffled_at)
     return {
         "code": code.code,
         "interval": codes.interval,
@@ -338,9 +345,10 @@ async def peer(request: Request) -> dict[str, Any]:
     """Only with ``access_share_lockouts`` on, from an address in
     ``access_peer_networks``, signed with a key derived from the shared access key; 404 to
     everyone else. The body: ``{"from", "to", "action": "block" | "clear" | "check" |
-    "end-passes", "network", "minutes", "at"}``. A block covers at most a /24 or a /48 and
-    never ``internal_networks``; end-passes ends the passes issued before ``at``, no later
-    than this server's clock allows. Neither is passed on to other servers."""
+    "end-passes" | "shuffle", "network", "minutes", "at", "value"}``. A block covers at
+    most a /24 or a /48 and never ``internal_networks``; end-passes ends the passes issued
+    before ``at``, and shuffle mixes ``value`` into every code from ``at``, neither later
+    than this server's clock allows. None is passed on to other servers."""
     settings = request.app.state.settings
     codes = request.app.state.codes
     ip, _ = client_address(request)
@@ -372,6 +380,13 @@ async def peer(request: Request) -> dict[str, Any]:
         return {"server": settings.server_id, "ok": True}
     by_hand = given.kind == "block"
     source = f"{SHARED_BY}{given.sender} from {ip}" + (", set by hand" if by_hand else "")
+    if given.action == "shuffle":
+        # At worst the desk reads the new code. The later shuffle stays everywhere.
+        if given.value is None or given.at is None or given.at > now + cluster.SKEW:
+            raise HTTPException(400, "shuffle needs its value and its time, no later than now")
+        _, at = await asyncio.to_thread(lockouts.shuffle_codes, given.value, given.at, source)
+        log.warning("access codes shuffled at %s, %s", _at(codes, at), source)
+        return {"shuffled": at}
     if given.action == "end-passes":
         # At worst everyone enters the code again. Never ahead of this clock by more than
         # requests may be, or passes issued here would be stamped that far ahead.

@@ -130,6 +130,29 @@ def test_passes_ended_by_another_server(tmp_path, key_file):
         assert not c.app.state.tasks  # not passed on
 
 
+def test_codes_shuffled_by_another_server(tmp_path, key_file):
+    with TestClient(create_app(settings(tmp_path, key_file))) as c:
+        base = {"from": "dallas", "to": "houston", "action": "shuffle"}
+        now = time.time()
+
+        def send(**fields):
+            return c.post("/api/v1/access/peer", **request(key_file, base | fields))
+
+        r = send(value="0123456789abcdef", at=now)
+        assert r.status_code == 200 and r.json() == {"shuffled": now}
+        lockouts = c.app.state.lockouts
+        found = lockouts.codes_shuffled()
+        assert found == ("0123456789abcdef", now, "shared by dallas from 198.51.100.20")
+        # An earlier shuffle changes nothing; a later one wins, as on every other server.
+        assert send(value="fedcba9876543210", at=now - 60).json() == {"shuffled": now}
+        assert send(value="fedcba9876543210", at=now + 1).json() == {"shuffled": now + 1}
+        assert lockouts.codes_shuffled()[0] == "fedcba9876543210"
+        for bad in ({"value": "x", "at": now}, {"value": "0123456789abcdef", "at": now + 3600}):
+            assert send(**bad).status_code == 400
+        assert send(at=now + 2).status_code == 400
+        assert not c.app.state.tasks  # not passed on
+
+
 def test_what_another_server_cant_do(tmp_path, key_file):
     with TestClient(create_app(settings(tmp_path, key_file))) as c:
 
@@ -205,10 +228,12 @@ def test_the_hook(tmp_path, key_file):
 def test_the_command_line(tmp_path, key_file, monkeypatch, capsys):
     sent = []
 
-    async def fake_send(settings, key, action, network, minutes=0, kind="lockout", at=0):
+    async def fake_send(settings, key, action, network, minutes=0, kind="lockout", at=0, value=""):
         sent.append((action, network, minutes) + ((kind,) if action == "block" else ()))
         if action == "end-passes":
             sent[-1] = (action, at)
+        if action == "shuffle":
+            sent[-1] = (action, at, value)
         return [("dallas", None), ("austin", "404: sharing is off there")]
 
     monkeypatch.setattr(cluster, "send", fake_send)
@@ -236,6 +261,10 @@ def test_the_command_line(tmp_path, key_file, monkeypatch, capsys):
     (action, at) = sent[-1]
     assert action == "end-passes" and abs(at - time.time()) < 5
     assert "Other servers: sent to dallas" in capsys.readouterr().out
+    cli.main(["access", "shuffle", "--yes", "--end-passes", "--config", str(config)])
+    (action, at, value), end = sent[-2:]
+    assert action == "shuffle" and len(value) == 16 and end == ("end-passes", at)
+    assert "--to" not in capsys.readouterr().out  # sent: nothing to give by hand
     with pytest.raises(SystemExit):  # austin doesn't take them
         cli.main(["access", "peers", "--config", str(config)])
     out = capsys.readouterr().out

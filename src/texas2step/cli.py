@@ -8,6 +8,7 @@ import json
 import os
 import sys
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -458,22 +459,27 @@ def _when(moment: Any) -> str:
     return f"{moment:%a %Y-%m-%d %H:%M %Z}, in {span}"
 
 
+# What each interval calls the current and the previous code.
+CODE_NAMES = {
+    "daily": ("Today's code", "Yesterday's"),
+    "weekly": ("This week's code", "Last week's"),
+    "monthly": ("This month's code", "Last month's"),
+    "fixed": ("The code", ""),
+}
+
+
 def cmd_access_show(args: argparse.Namespace) -> None:
     from datetime import UTC, datetime
 
     settings = _server_settings(args)
     codes = _access_codes(settings)
-    current = codes.current(datetime.now(UTC))
-    this, last = {
-        "daily": ("Today's code", "Yesterday's"),
-        "weekly": ("This week's code", "Last week's"),
-        "monthly": ("This month's code", "Last month's"),
-        "fixed": ("The code", ""),
-    }[codes.interval]
+    state = _access_state(settings)
+    current = codes.current(datetime.now(UTC), state.shuffle, state.shuffled_at)
+    this, last = CODE_NAMES[codes.interval]
     if settings.access_code == "off":
         print('Access codes are off (access_code = "off"). Were they daily, the code would be:')
     elif codes.interval == "fixed":
-        print("Access codes: fixed. The code changes only with a new key.")
+        print("Access codes: fixed. The code changes only when shuffled or with a new key.")
     else:
         starts = {"daily": "", "weekly": " on Mondays", "monthly": " on the 1st"}[codes.interval]
         print(f"Access codes: {codes.interval}, changing at midnight{starts}, {codes.zone_name}.")
@@ -495,20 +501,28 @@ def cmd_access_show(args: argparse.Namespace) -> None:
         p.name + (f" ({_phrase_when(p, settings.access_timezone)})" if p.until else "")
         for p in codes.phrases
     ]
-    ended = _passes_ended(settings)
+    zone = settings.access_timezone
+    if state.shuffle:
+        rows.append(("Shuffled", f"{_moment(state.shuffled_at, zone)}, {state.shuffle_source}"))
     lasting = f"{settings.access_pass_hours:g} h from when each is issued"
-    if ended:
-        lasting += f"; those issued before {_moment(ended, settings.access_timezone)} are ended"
+    if state.ended:
+        lasting += f"; those issued before {_moment(state.ended, zone)} are ended"
+    fingerprint = codes.fingerprint(state.shuffle)
     rows += [
         ("Passes", lasting),
         ("Words", f"{len(codes.words)} {words}"),
         ("Phrases", ", ".join(standing) or "none"),
         ("Key", settings.access_key_file),
-        ("Fingerprint", f"{codes.fingerprint()}   (the same on servers that give the same codes)"),
+        ("Fingerprint", f"{fingerprint}   (the same on servers that give the same codes)"),
     ]
     width = max(len(label) for label, _ in rows) + 2
     for label, value in rows:
         print(f"{label + ':':<{width}}{value}")
+    if state.unread:
+        print(
+            f"\nCan't read {settings.access_lockouts_file} ({state.unread}), so the code shown "
+            "leaves out any shuffle (try sudo)."
+        )
     if settings.access_code != "off" and not settings.internal_networks:
         print(
             "\nNo internal_networks are set, so every visitor needs a code, and anyone with "
@@ -669,22 +683,32 @@ def _lockouts(settings: Any) -> Any:
         sys.exit(f"texas2step: can't use {path}: {exc}" + (" (try sudo)" if denied else ""))
 
 
-def _passes_ended(settings: Any) -> float:
-    """When every pass was last ended, for access show: 0 when never, or when the file
-    can't be read, which show doesn't need."""
+@dataclass
+class AccessState:
+    """What the command line and other servers set in access_lockouts_file, for show."""
+
+    shuffle: str = ""
+    shuffled_at: float = 0.0
+    shuffle_source: str = ""
+    ended: float = 0.0  # when every pass was last ended
+    unread: str = ""  # why the file couldn't be read
+
+
+def _access_state(settings: Any) -> AccessState:
     import sqlite3
 
     from .lockouts import LockoutStore
 
     path = Path(settings.access_lockouts_file)
     if not path.exists():
-        return 0.0
+        return AccessState()
     try:
         store = LockoutStore(path)
-    except (OSError, sqlite3.Error):
-        return 0.0
+    except (OSError, sqlite3.Error) as exc:
+        return AccessState(unread=str(exc))
     try:
-        return store.passes_ended()[0]
+        shuffle, at, source = store.codes_shuffled()
+        return AccessState(shuffle, at, source, store.passes_ended()[0])
     finally:
         store.close()
 
@@ -748,8 +772,9 @@ def _share(
     minutes: float = 0,
     kind: str = "block",
     at: float = 0,
+    value: str = "",
 ) -> None:
-    """Send a block, a clear or an end of passes to the other servers too, with
+    """Send a block, a clear, an end of passes or a shuffle to the other servers too, with
     access_share_lockouts on. A block from here is set by hand, so it ends passes there
     too."""
     from . import cluster
@@ -757,7 +782,7 @@ def _share(
     if not settings.access_share_lockouts:
         return
     key = cluster.peer_key(_access_codes(settings).key)
-    results = _run(cluster.send(settings, key, action, network, minutes, kind, at))
+    results = _run(cluster.send(settings, key, action, network, minutes, kind, at, value))
     print(f"Other servers: {cluster.summary(results)}.")
 
 
@@ -846,6 +871,51 @@ def cmd_access_passes(args: argparse.Namespace) -> None:
         print(f"Every pass issued before {_moment(ended, zone)} is ended, {source}.")
     else:
         print("No passes have been ended.")
+
+
+def cmd_access_shuffle(args: argparse.Namespace) -> None:
+    import secrets
+    import time
+    from datetime import UTC, datetime
+
+    from . import access
+
+    settings = _server_settings(args)
+    codes = _access_codes(settings)
+    if args.to is not None and not access.SHUFFLE.fullmatch(args.to):
+        sys.exit("texas2step: --to: expected the 16 letters and digits another server printed")
+    if args.to is None and not args.yes:
+        if not sys.stdin.isatty():
+            sys.exit("texas2step: add --yes to shuffle the codes")
+        answer = input(
+            "Shuffle the codes? The current and previous codes stop working, and the desk "
+            "reads the new one. [y/N] "
+        )
+        if answer.strip().lower() not in {"y", "yes"}:
+            sys.exit("Nothing changed.")
+    store = _lockouts(settings)
+    value, at = store.shuffle_codes(args.to or secrets.token_hex(8), time.time(), "by hand")
+    ended = store.end_passes(at, "by hand, with a shuffle") if args.end_passes else 0.0
+    store.close()
+    current = codes.current(datetime.now(UTC), value, at)
+    this = CODE_NAMES[codes.interval][0]
+    print(f"Codes shuffled here. {this} is now {current.code}; the codes before it don't work.")
+    if settings.access_code == "off":
+        print('Access codes are off (access_code = "off"), so no code is asked for now.')
+    if ended:
+        print("Every pass issued so far is ended too, within seconds.")
+    else:
+        print("Passes already given keep working: add --end-passes to end them as well.")
+    if settings.access_share_lockouts:
+        _share(settings, "shuffle", "", at=at, value=value)
+        if ended:
+            _share(settings, "end-passes", "", at=ended)
+    elif args.to is None and any(loc.url for loc in settings.locations):
+        also = " --end-passes" if ended else ""
+        print(
+            "The other servers in [[locations]] still give the codes before it. On each:\n"
+            f"  sudo texas2step access shuffle --to {value}{also}"
+        )
 
 
 def cmd_access_peers(args: argparse.Namespace) -> None:
@@ -1334,6 +1404,22 @@ def build_parser() -> argparse.ArgumentParser:
     passes.add_argument("-y", "--yes", action="store_true", help="with --end: don't ask first")
     settings_file(passes)
     passes.set_defaults(func=cmd_access_passes)
+    shuffle = acc_sub.add_parser(
+        "shuffle",
+        help="change the codes now: the current and previous ones stop working",
+        description="Mix a new random value into every code, so the current code and the "
+        "previous one stop working at once and a new one takes their place, with no new key "
+        "and no restart. With access_share_lockouts on, every server in [[locations]] takes "
+        "the same; otherwise give each the value printed, with --to. Passes keep working "
+        "unless --end-passes ends them too. access show gives the new code (docs/access.md).",
+    )
+    shuffle.add_argument("--to", metavar="VALUE", help="take the shuffle another server printed")
+    shuffle.add_argument(
+        "--end-passes", action="store_true", help="also end every pass issued so far"
+    )
+    shuffle.add_argument("-y", "--yes", action="store_true", help="don't ask first")
+    settings_file(shuffle)
+    shuffle.set_defaults(func=cmd_access_shuffle)
     peers = acc_sub.add_parser(
         "peers",
         help="check that the servers in [[locations]] take this server's lockouts",

@@ -15,7 +15,8 @@ can make another do is bounded, against a buggy or compromised one: a block cove
 most a /24 or a /48, never ``internal_networks`` or loopback, lasts at most a week, and is
 never passed on; and a server holds at most ``MOST_HELD`` blocks from the others. One
 can end every pass issued before now on the others (``texas2step access passes --end``),
-which at worst has everyone enter the code again.
+which at worst has everyone enter the code again, and shuffle their codes (``texas2step
+access shuffle``), which at worst has the desk read the new code.
 
 ``access_lockout_hook`` names a program run on each lockout, block and clear here, such as
 to tell a SIEM or a firewall's API.
@@ -119,18 +120,20 @@ async def send(
     minutes: float = 0,
     kind: str = "lockout",
     at: float = 0,
+    value: str = "",
 ) -> list[tuple[str, str | None]]:
-    """Send a block, a clear, an end of passes or a check to every server in [[locations]],
-    at once: each one's id, and why it didn't take it (None when it did). A block's
-    ``kind`` is "lockout" for one from wrong codes, "block" for one set by hand, which ends
-    passes. An end of passes ("end-passes") ends those issued before ``at``."""
+    """Send a block, a clear, an end of passes, a shuffle or a check to every server in
+    [[locations]], at once: each one's id, and why it didn't take it (None when it did). A
+    block's ``kind`` is "lockout" for one from wrong codes, "block" for one set by hand,
+    which ends passes. An end of passes ("end-passes") ends those issued before ``at``; a
+    "shuffle" mixes ``value`` into the codes from ``at``."""
     peers = [loc for loc in settings.locations if loc.url]
     async with httpx.AsyncClient(
         timeout=TIMEOUT, headers={"user-agent": f"texas2step-peer/{__version__}"}
     ) as client:
         answers = await asyncio.gather(
             *(
-                _send_one(client, settings, key, loc, action, network, minutes, kind, at)
+                _send_one(client, settings, key, loc, action, network, minutes, kind, at, value)
                 for loc in peers
             )
         )
@@ -159,12 +162,15 @@ async def _send_one(
     minutes: float,
     kind: str,
     at: float,
+    value: str,
 ) -> str | None:
     body = {"from": settings.server_id, "to": loc.id, "action": action, "network": network}
     if minutes:
         body["minutes"] = minutes
     if at:
         body["at"] = at
+    if value:
+        body["value"] = value
     if action == "block":
         body["kind"] = kind  # older servers ignore it
     raw = json.dumps(body, separators=(",", ":")).encode()
