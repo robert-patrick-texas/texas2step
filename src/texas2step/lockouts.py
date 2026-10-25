@@ -6,7 +6,9 @@ address alone: one host can take a new IPv6 address for every guess. After
 every code from it is refused unread, the right one too, with the same answer as a wrong
 code, and each one pushes the end of the lockout to ``access_lockout_minutes`` after it.
 A network quiet for that long starts again from nothing, and so does one that enters a
-right code. A block, set from the command line or the API, is a lockout set by hand.
+right code. A block, set from the command line or the API, is a lockout set by hand,
+and ends the passes used from the network too (app.AccessGate); a lockout doesn't, so
+callers who share a network with a guesser keep testing with the pass they hold.
 
 The counts live in a small SQLite file (``access_lockouts_file``) that the service's
 workers and the command line share. Checking a code and counting it happen in one
@@ -15,6 +17,7 @@ transaction, so guesses sent all at once can't slip past the count.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import sqlite3
 import threading
@@ -42,7 +45,8 @@ CREATE TABLE IF NOT EXISTS lockouts (
     failures  INTEGER NOT NULL,  -- wrong codes in a row
     locked_at REAL,              -- when the lockout or block began; NULL while counting
     expires   REAL NOT NULL,     -- when the lockout ends, or a quiet network is forgotten
-    source    TEXT NOT NULL      -- wrong codes, the command line, or the API and its caller
+    source    TEXT NOT NULL,     -- wrong codes, the command line, or the API and its caller
+    by_hand   INTEGER NOT NULL DEFAULT 0  -- a block set by hand, here or on another server
 );
 CREATE INDEX IF NOT EXISTS lockouts_span ON lockouts (family, first, last);
 -- Servers that defend together (cluster.py): when each lockout that began here was last
@@ -65,6 +69,7 @@ class Lockout:
     locked_at: float | None
     expires: float
     source: str
+    by_hand: bool = False  # a block: ends passes used from the network too
 
 
 @dataclass(frozen=True)
@@ -98,6 +103,44 @@ def parse_network(text: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
         mapped = net.network_address.ipv4_mapped
         net = ipaddress.ip_network(f"{mapped}/{max(net.prefixlen - 96, 0)}", strict=False)
     return net
+
+
+def in_blocks(ip: str, blocks: list[tuple[str, float]], now: float | None = None) -> bool:
+    """Whether ``ip`` is in one of ``blocks`` (as hand_blocks gives them) still in force."""
+    addr = address(ip)
+    if addr is None:
+        return False
+    now = now if now is not None else time.time()
+    return any(
+        expires > now and addr in ipaddress.ip_network(net, strict=False) for net, expires in blocks
+    )
+
+
+class HandBlocks:
+    """The blocks set by hand, as one worker sees them, for the checks that end passes:
+    each request that needs one (app.AccessGate), and the WebSockets and UDP sessions
+    already open. Read again every EVERY seconds, not for every request; a block set
+    elsewhere, such as from the command line, takes that long to reach every worker."""
+
+    EVERY = 5.0
+
+    def __init__(self, store: LockoutStore | None) -> None:
+        self.store = store
+        self._blocks: list[tuple[str, float]] = []
+        self._read = float("-inf")
+
+    def forget(self) -> None:
+        """Read the blocks again at the next check: this worker just set or ended one."""
+        self._read = float("-inf")
+
+    async def cover(self, ip: str) -> bool:
+        if self.store is None:
+            return False
+        # A block found is looked up again, so one ended elsewhere ends here at once.
+        if time.monotonic() - self._read >= self.EVERY or in_blocks(ip, self._blocks):
+            self._read = time.monotonic()
+            self._blocks = await asyncio.to_thread(self.store.hand_blocks)
+        return in_blocks(ip, self._blocks)
 
 
 def inside_of(
@@ -144,6 +187,22 @@ class LockoutStore:
         with self._lock:
             prepare(self._db, self.path, SCHEMA)
             self._db.execute("PRAGMA synchronous=NORMAL")
+            columns = {row["name"] for row in self._db.execute("PRAGMA table_info(lockouts)")}
+            if "by_hand" not in columns:
+                self._add_by_hand()
+
+    def _add_by_hand(self) -> None:
+        """A file an earlier version made: its blocks set here by hand end passes too."""
+        try:
+            self._db.execute("ALTER TABLE lockouts ADD COLUMN by_hand INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc):
+                raise
+            return  # another worker got there first
+        self._db.execute(
+            "UPDATE lockouts SET by_hand = 1 WHERE source != ? AND source NOT LIKE ?",
+            (WRONG_CODES, SHARED_BY + "%"),
+        )
 
     def close(self) -> None:
         with self._lock:
@@ -198,7 +257,8 @@ class LockoutStore:
             locked_now = failures >= self.after
             expires = now + self.seconds
             self._db.execute(
-                "INSERT INTO lockouts VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (network) "
+                "INSERT INTO lockouts (network, family, first, last, failures, locked_at, "
+                "expires, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (network) "
                 "DO UPDATE SET failures = excluded.failures, locked_at = excluded.locked_at, "
                 "expires = excluded.expires",
                 (
@@ -214,18 +274,28 @@ class LockoutStore:
 
         return self._write(work)
 
-    def block(self, net: str, minutes: float, source: str, now: float | None = None) -> Lockout:
-        """Lock ``net`` out by hand, or keep its lockout going at least ``minutes`` more."""
+    def block(
+        self,
+        net: str,
+        minutes: float,
+        source: str,
+        now: float | None = None,
+        *,
+        by_hand: bool = True,
+    ) -> Lockout:
+        """Lock ``net`` out by hand, or keep its lockout going at least ``minutes`` more.
+        ``by_hand`` False: another server's lockout, which ends no passes."""
         now = now if now is not None else time.time()
         network = str(parse_network(net))
 
         def work() -> Lockout:
             self._db.execute("DELETE FROM lockouts WHERE expires <= ?", (now,))
             self._db.execute(
-                "INSERT INTO lockouts VALUES (?, ?, ?, ?, 0, ?, ?, ?) ON CONFLICT (network) "
+                "INSERT INTO lockouts VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?) ON CONFLICT (network) "
                 "DO UPDATE SET locked_at = coalesce(locked_at, excluded.locked_at), "
-                "expires = max(expires, excluded.expires), source = excluded.source",
-                (network, *_span(network), now, now + minutes * 60, source),
+                "expires = max(expires, excluded.expires), source = excluded.source, "
+                "by_hand = max(by_hand, excluded.by_hand)",
+                (network, *_span(network), now, now + minutes * 60, source, int(by_hand)),
             )
             row = self._db.execute("SELECT * FROM lockouts WHERE network = ?", (network,))
             return _lockout(row.fetchone())
@@ -300,6 +370,17 @@ class LockoutStore:
             ).fetchone()
         return row[0]
 
+    def hand_blocks(self, now: float | None = None) -> list[tuple[str, float]]:
+        """The blocks set by hand in force, and when each ends: these end passes too."""
+        now = now if now is not None else time.time()
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT network, expires FROM lockouts WHERE by_hand = 1 "
+                "AND locked_at IS NOT NULL AND expires > ?",
+                (now,),
+            ).fetchall()
+        return [(row["network"], row["expires"]) for row in rows]
+
     def current(self, now: float | None = None) -> tuple[list[Lockout], int]:
         """The lockouts and blocks in force, oldest first, and how many networks are
         counting wrong codes without being locked out yet."""
@@ -313,4 +394,11 @@ class LockoutStore:
 
 
 def _lockout(row: sqlite3.Row) -> Lockout:
-    return Lockout(row["network"], row["failures"], row["locked_at"], row["expires"], row["source"])
+    return Lockout(
+        row["network"],
+        row["failures"],
+        row["locked_at"],
+        row["expires"],
+        row["source"],
+        bool(row["by_hand"]),
+    )

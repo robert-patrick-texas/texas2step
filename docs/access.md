@@ -282,7 +282,8 @@ codes in a row from a network, it is locked out:
 * A network quiet for 30 minutes starts counting again from nothing, and so does one that
   enters a right code.
 * Visitors from `internal_networks` and loopback need no code, so they are never counted
-  or locked out. Passes already given keep working.
+  or locked out. Passes already given keep working through a lockout; a block set by hand
+  ends them (below).
 
 | Setting | Default | |
 |---|---|---|
@@ -330,6 +331,14 @@ longer if it keeps trying; blocking it again keeps it going. A block can't overl
 take effect at once, with no restart, and with
 [servers that defend together](#servers-that-defend-together), on every server.
 
+A block also ends the passes used from the network it covers. Until it ends, their
+requests are refused as if they carried none (`401`), and the WebSockets and UDP
+sessions they have open close within a few seconds. The page goes back to asking for the
+code, which the blocked network can't enter. A lockout from wrong codes ends no passes,
+so callers who share a network with a guesser keep testing with the pass they hold. A
+block set or ended through the API counts at once. One from the command line reaches
+each of the service's workers within 5 seconds, and so does one that ends.
+
 **From automation.** The same, as an API that answers only `internal_networks` and the
 server itself, so a script can carry a block from the server that saw an attack to all
 the others, and renew it there:
@@ -341,8 +350,9 @@ curl -s -X POST https://houston.example.net/texas2step/api/v1/access/blocks \
 curl -s -X DELETE 'https://houston.example.net/texas2step/api/v1/access/blocks?network=198.51.100.0/24'
 ```
 
-A list gives each lockout's `network`, `source`, `wrong_codes`, `since` and `until`, and
-`counting`, the networks with wrong codes in a row. A block that overlaps
+A list gives each lockout's `network`, `source`, `wrong_codes`, `since`, `until` and
+`by_hand` (a block, which ends passes too), and `counting`, the networks with wrong codes
+in a row. A block that overlaps
 `internal_networks`, or is wider than a /16 or a /32, is refused with `400`. These calls
 change only the server they are sent to; for one that reaches every server by itself, see
 [Servers that defend together](#servers-that-defend-together).
@@ -378,7 +388,9 @@ access_peer_networks = ["198.51.100.20", "2001:db8:20::20", "203.0.113.30"]
   third of `access_lockout_minutes`, so the others' blocks don't run out first.
   `sudo texas2step access block` and `access lockouts --clear` go to every server too:
   `--clear` on any one of them lets a caller back in everywhere. The
-  [API's blocks](#lockouts-and-blocks) stay on the server they are sent to.
+  [API's blocks](#lockouts-and-blocks) stay on the server they are sent to. A block from
+  `access block` ends passes on every server, as here; a lockout ends none anywhere. A
+  server on an earlier version sends either as a lockout.
 * **What a server takes.** Only requests from an address in its `access_peer_networks`,
   signed with a key the servers work out from the access key they share. Use the
   addresses the other servers' requests leave from, which behind NAT may not be the

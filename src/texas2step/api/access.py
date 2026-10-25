@@ -51,6 +51,9 @@ class PeerIn(BaseModel):
     action: Literal["block", "clear", "check"]
     network: str = Field("", max_length=64)
     minutes: float | None = Field(None, gt=0, le=cluster.MOST_MINUTES)
+    # A block set by hand there ends passes here too; one from wrong codes doesn't. Older
+    # servers send no kind, so theirs count as lockouts.
+    kind: Literal["lockout", "block"] = "lockout"
 
 
 def internal(request: Request) -> bool:
@@ -77,6 +80,10 @@ async def status(
     }
     if codes is not None and pass_:
         expires = codes.pass_expires(pass_)
+        # A block set by hand on this client's network ends its pass (app.AccessGate).
+        ip, _ = client_address(request)
+        if expires is not None and body["required"] and await request.app.state.blocks.cover(ip):
+            expires = None
         body["pass"] = {"valid": expires is not None, "expires": expires}
     return body
 
@@ -211,6 +218,7 @@ def _lockout(codes: Codes, lockout: Lockout) -> dict[str, Any]:
         "network": lockout.network,
         "source": lockout.source,
         "wrong_codes": lockout.failures,
+        "by_hand": lockout.by_hand,  # a block: it ends the passes used from the network too
         "since": datetime.fromtimestamp(since, codes.zone).isoformat() if since else None,
         "until": datetime.fromtimestamp(lockout.expires, codes.zone).isoformat(),
     }
@@ -246,6 +254,7 @@ async def block(request: Request, given: BlockIn) -> dict[str, Any]:
     lockouts = request.app.state.lockouts
     why = f"blocked by the API from {ip}"
     lockout = await asyncio.to_thread(lockouts.block, str(net), minutes, why)
+    request.app.state.blocks.forget()
     codes = request.app.state.codes
     log.warning("%s blocked until %s, by the API from %s", net, _at(codes, lockout.expires), ip)
     until = datetime.fromtimestamp(lockout.expires, codes.zone)
@@ -319,7 +328,8 @@ async def peer(request: Request) -> dict[str, Any]:
         raise HTTPException(403, why)
     if given.action == "check":
         return {"server": settings.server_id, "ok": True}
-    source = f"{SHARED_BY}{given.sender} from {ip}"
+    by_hand = given.kind == "block"
+    source = f"{SHARED_BY}{given.sender} from {ip}" + (", set by hand" if by_hand else "")
     if given.action == "clear":
         try:  # ending lockouts can't harm: any network, or all
             target = None if given.network == "all" else str(parse_network(given.network))
@@ -338,7 +348,8 @@ async def peer(request: Request) -> dict[str, Any]:
         )
         raise HTTPException(429, f"this server holds {cluster.MOST_HELD} blocks from others")
     minutes = given.minutes or settings.access_lockout_minutes
-    lockout = await asyncio.to_thread(lockouts.block, net, minutes, source)
+    lockout = await asyncio.to_thread(lambda: lockouts.block(net, minutes, source, by_hand=by_hand))
+    request.app.state.blocks.forget()
     log.warning("%s blocked until %s, %s", net, _at(codes, lockout.expires), source)
     until = datetime.fromtimestamp(lockout.expires, codes.zone)
     cluster.hook_in_background(request.app, "block", net, until, source)

@@ -110,16 +110,25 @@ def in_networks(ip: str, networks: list[str]) -> bool:
 
 
 async def send(
-    settings: Any, key: bytes, action: str, network: str, minutes: float = 0
+    settings: Any,
+    key: bytes,
+    action: str,
+    network: str,
+    minutes: float = 0,
+    kind: str = "lockout",
 ) -> list[tuple[str, str | None]]:
     """Send a block, a clear or a check to every server in [[locations]], at once: each
-    one's id, and why it didn't take it (None when it did)."""
+    one's id, and why it didn't take it (None when it did). A block's ``kind`` is
+    "lockout" for one from wrong codes, "block" for one set by hand, which ends passes."""
     peers = [loc for loc in settings.locations if loc.url]
     async with httpx.AsyncClient(
         timeout=TIMEOUT, headers={"user-agent": f"texas2step-peer/{__version__}"}
     ) as client:
         answers = await asyncio.gather(
-            *(_send_one(client, settings, key, loc, action, network, minutes) for loc in peers)
+            *(
+                _send_one(client, settings, key, loc, action, network, minutes, kind)
+                for loc in peers
+            )
         )
     return [(loc.id, why) for loc, why in zip(peers, answers, strict=True)]
 
@@ -144,10 +153,13 @@ async def _send_one(
     action: str,
     network: str,
     minutes: float,
+    kind: str,
 ) -> str | None:
     body = {"from": settings.server_id, "to": loc.id, "action": action, "network": network}
     if minutes:
         body["minutes"] = minutes
+    if action == "block":
+        body["kind"] = kind  # older servers ignore it
     raw = json.dumps(body, separators=(",", ":")).encode()
     headers = {"content-type": "application/json", **signed(key, raw)}
     try:

@@ -29,7 +29,7 @@ from .api.access import PASS_COOKIE
 from .api.meta import client_address, http_version, shows_version
 from .api.results import MAX_RESULT_BYTES
 from .config import Settings, load_settings
-from .lockouts import LockoutStore
+from .lockouts import HandBlocks, LockoutStore
 from .rtc import RtcEcho
 from .store import ResultStore
 from .traffic import TrafficMeter
@@ -189,13 +189,19 @@ class AccessGate:
             await self._refuse(scope, receive, send, 403, "cross-site request refused")
             return
         page = path in self.PAGES or path.startswith("/r/")
-        if codes and not inside and page and not held(codes, conn):
-            await self._home(scope, receive, send, root)
-            return
         needs_pass = (
             codes and not inside and path.startswith("/api/v1/") and path not in self.PUBLIC
         )
-        if needs_pass and codes.pass_expires(conn.query_params.get("pass", "")) is None:
+        # A pass from a network blocked by hand is no pass: the page drops it and asks for
+        # the code, which that network can't enter until the block ends.
+        watch = bool(codes and (page or needs_pass) and not inside)
+        blocked = watch and await scope["app"].state.blocks.cover(ip)
+        if codes and not inside and page and (blocked or not held(codes, conn)):
+            await self._home(scope, receive, send, root)
+            return
+        if needs_pass and (
+            blocked or codes.pass_expires(conn.query_params.get("pass", "")) is None
+        ):
             await self._refuse(scope, receive, send, 401, "access code required")
             return
         await self.app(scope, receive, send)
@@ -402,6 +408,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             settings.access_lockout_minutes,
         )
     app.state.traffic = TrafficMeter.load(settings)
+    app.state.blocks = HandBlocks(app.state.lockouts)  # end passes, and sessions (AccessGate)
     app.state.tasks = set()  # sharing lockouts and running the hook, in the background
     app.state.store = None
     app.state.rtc = RtcEcho(
@@ -413,6 +420,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         video=settings.monitor_video,
     )
     app.state.rtc.meter = app.state.traffic
+    app.state.rtc.blocks = app.state.blocks
 
     @app.exception_handler(traffic.Closed)
     async def closed(request: Request, exc: traffic.Closed) -> JSONResponse:

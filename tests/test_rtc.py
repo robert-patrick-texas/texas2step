@@ -14,6 +14,7 @@ import pytest
 from aioice import stun
 from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
 
+from texas2step import rtc
 from texas2step.app import create_app
 from texas2step.config import Settings
 from texas2step.rtc import RtcBusy, RtcEcho, without_mdns
@@ -336,5 +337,32 @@ async def test_an_offer_without_candidates_still_opens(peers):
         await asyncio.wait_for(opened.wait(), 10)
         channel.send(b"probe-1")
         assert await asyncio.wait_for(echoed, 5) == b"probe-1"
+    finally:
+        await echo.stop()
+
+
+async def test_a_block_set_by_hand_ends_open_sessions(peers, monkeypatch):
+    covered: set[str] = set()
+
+    class Blocks:
+        async def cover(self, ip: str) -> bool:
+            return ip in covered
+
+    monkeypatch.setattr(rtc, "LIMIT_CHECK", 0.05)  # the reaper's round, every few seconds
+    echo = RtcEcho([], max_sessions=4, timeout=60, port_range=RANGE)
+    echo.blocks = Blocks()
+    echo.start()
+    try:
+        for ip in ("203.0.113.9", "198.51.100.8"):
+            pc, _ = await offer(peers)
+            await echo.answer(pc.localDescription.sdp, ip=ip)
+        unwatched, _ = await offer(peers)  # no access codes: not watched
+        await echo.answer(unwatched.localDescription.sdp)
+        covered.add("203.0.113.9")
+        for _ in range(100):
+            if len(echo.sessions) == 2:
+                break
+            await asyncio.sleep(0.02)
+        assert sorted(str(s.ip) for s in echo.sessions.values()) == ["198.51.100.8", "None"]
     finally:
         await echo.stop()

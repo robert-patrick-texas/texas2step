@@ -185,8 +185,8 @@ def test_the_hook(tmp_path, key_file):
 def test_the_command_line(tmp_path, key_file, monkeypatch, capsys):
     sent = []
 
-    async def fake_send(settings, key, action, network, minutes=0):
-        sent.append((action, network, minutes))
+    async def fake_send(settings, key, action, network, minutes=0, kind="lockout"):
+        sent.append((action, network, minutes) + ((kind,) if action == "block" else ()))
         return [("dallas", None), ("austin", "404: sharing is off there")]
 
     monkeypatch.setattr(cluster, "send", fake_send)
@@ -208,7 +208,8 @@ def test_the_command_line(tmp_path, key_file, monkeypatch, capsys):
     with pytest.raises(SystemExit, match="wider than a /16"):
         cli.main(["access", "block", "203.0.0.0/15", "--config", str(config)])
     cli.main(["access", "lockouts", "--clear", "all", "--config", str(config)])
-    assert sent == [("block", "203.0.113.7/32", 90.0), ("clear", "all", 0)]
+    # A block from here is set by hand, so it ends passes on the other servers too.
+    assert sent == [("block", "203.0.113.7/32", 90.0, "block"), ("clear", "all", 0)]
     with pytest.raises(SystemExit):  # austin doesn't take them
         cli.main(["access", "peers", "--config", str(config)])
     out = capsys.readouterr().out
@@ -231,3 +232,20 @@ def test_one_time_values_are_remembered_for_a_while(tmp_path):
     assert not store.first_use("n1", 600, now=1500.0)
     assert store.first_use("n1", 600, now=1700.0)  # forgotten after 600 s
     assert os.path.exists(tmp_path / "a.db")
+
+
+def test_a_block_set_by_hand_there_is_one_here(tmp_path, key_file):
+    with TestClient(create_app(settings(tmp_path, key_file))) as c:
+        base = {"from": "dallas", "to": "houston", "action": "block", "minutes": 45}
+        r = c.post(
+            "/api/v1/access/peer",
+            **request(key_file, {**base, "network": "192.0.2.0/24", "kind": "block"}),
+        )
+        assert r.json()["by_hand"] is True
+        assert r.json()["source"] == "shared by dallas from 198.51.100.20, set by hand"
+        # A lockout there, or a block from a server that sends no kind: a lockout here.
+        for net, extra in (("198.51.100.0/24", {"kind": "lockout"}), ("203.0.113.0/24", {})):
+            r = c.post(
+                "/api/v1/access/peer", **request(key_file, {**base, "network": net, **extra})
+            )
+            assert r.json()["by_hand"] is False, net

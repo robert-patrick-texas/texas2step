@@ -23,7 +23,7 @@ from texas2step.api import access as access_api
 from texas2step.api.meta import client_address
 from texas2step.app import create_app
 from texas2step.config import Settings
-from texas2step.lockouts import LockoutStore
+from texas2step.lockouts import HandBlocks, LockoutStore
 from texas2step.store import ID_LETTERS, ResultStore, new_id
 
 KEY = access.parse_key(access.new_key())
@@ -583,6 +583,83 @@ def test_the_pass_and_the_desks_answers_are_kept_in_no_browser_cache(tmp_path, k
         ]
     assert [r.status_code for r in answers] == [200, 200, 200]
     assert [r.headers["cache-control"] for r in answers] == ["no-store"] * 3
+
+
+def test_a_block_set_by_hand_ends_the_passes_used_from_it(tmp_path, key_file, monkeypatch):
+    monkeypatch.setattr(HandBlocks, "EVERY", 0)  # read the blocks for every request
+    there = {"X-Forwarded-For": "198.51.100.8"}
+    guesser = {"X-Forwarded-For": "192.0.2.50"}
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        passes = {
+            who: unlock(c, h)
+            for who, h in (("outside", OUTSIDE), ("there", there), ("guesser", guesser))
+        }
+
+        def works(who: str, headers: dict) -> bool:
+            return (
+                c.get("/api/v1/info", params={"pass": passes[who]}, headers=headers).status_code
+                == 200
+            )
+
+        assert works("outside", OUTSIDE)
+        r = c.post("/api/v1/access/blocks", json={"network": "203.0.113.0/24"}, headers=INSIDE)
+        assert r.json()["by_hand"] is True
+        # Its pass is no pass now: the page drops it and asks for the code again.
+        assert not works("outside", OUTSIDE)
+        r = c.get("/api/v1/info", params={"pass": passes["outside"]}, headers=OUTSIDE)
+        assert (r.status_code, r.json()["detail"]) == (401, "access code required")
+        r = c.get("/api/v1/access", params={"pass": passes["outside"]}, headers=OUTSIDE)
+        assert r.json()["pass"]["valid"] is False
+        r = c.get("/monitor", headers=OUTSIDE, follow_redirects=False)  # with the pass cookie
+        assert r.status_code == 303
+        # Other networks keep theirs; one locked out by wrong codes does too.
+        assert works("there", there)
+        for n in range(3):
+            c.post("/api/v1/access", json={"code": f"wrong.code.{n}"}, headers=guesser)
+        assert (
+            c.get("/api/v1/access/blocks", headers=INSIDE).json()["lockouts"][-1]["by_hand"]
+            is False
+        )
+        assert works("guesser", guesser)
+        # Once the block ends, the pass works again.
+        c.delete("/api/v1/access/blocks", params={"network": "203.0.113.0/24"}, headers=INSIDE)
+        assert works("outside", OUTSIDE)
+
+
+def test_blocks_through_the_api_and_clears_count_at_once(tmp_path, key_file, monkeypatch):
+    monkeypatch.setattr(HandBlocks, "EVERY", 3600)  # each worker keeps its list this long
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        token = unlock(c)
+
+        def works() -> bool:
+            r = c.get("/api/v1/info", params={"pass": token}, headers=OUTSIDE)
+            return r.status_code == 200
+
+        assert works()
+        net = {"network": "203.0.113.0/24"}
+        c.post("/api/v1/access/blocks", json=net, headers=INSIDE)
+        assert not works()  # set through this worker: it reads the list again
+        c.delete("/api/v1/access/blocks", params=net, headers=INSIDE)
+        assert works()  # a block found is looked up again, so an ended one ends at once
+        # Set elsewhere, such as from the command line: seen when the list is read again.
+        c.app.state.lockouts.block("203.0.113.0/24", 30, "the command line")
+        assert works()
+        monkeypatch.setattr(HandBlocks, "EVERY", 0)
+        assert not works()
+
+
+def test_a_block_set_by_hand_ends_open_websockets(tmp_path, key_file, monkeypatch):
+    monkeypatch.setattr(HandBlocks, "EVERY", 0)
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        token = unlock(c)
+        with c.websocket_connect(f"/api/v1/ws?pass={token}", headers=OUTSIDE) as ws:
+            ws.send_text("1")
+            assert ws.receive_text() == "1"
+            c.post("/api/v1/access/blocks", json={"network": "203.0.113.0/24"}, headers=INSIDE)
+            ws.send_text("2")  # the next message finds the block, and the socket ends
+            with pytest.raises(WebSocketDisconnect) as closed:
+                ws.receive_text()
+        assert closed.value.code == 1008
 
 
 def test_a_saved_result_gets_the_version_its_page_was_not_told(tmp_path, key_file):

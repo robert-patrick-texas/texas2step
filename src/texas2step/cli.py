@@ -716,14 +716,17 @@ def cmd_access_lockouts(args: argparse.Namespace) -> None:
         print('Access codes are off (access_code = "off"), so lockouts have no effect.')
 
 
-def _share(settings: Any, action: str, network: str, minutes: float = 0) -> None:
-    """Send a block or a clear to the other servers too, with access_share_lockouts on."""
+def _share(
+    settings: Any, action: str, network: str, minutes: float = 0, kind: str = "block"
+) -> None:
+    """Send a block or a clear to the other servers too, with access_share_lockouts on.
+    A block from here is set by hand, so it ends passes there too."""
     from . import cluster
 
     if not settings.access_share_lockouts:
         return
     key = cluster.peer_key(_access_codes(settings).key)
-    results = _run(cluster.send(settings, key, action, network, minutes))
+    results = _run(cluster.send(settings, key, action, network, minutes, kind))
     print(f"Other servers: {cluster.summary(results)}.")
 
 

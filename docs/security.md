@@ -40,7 +40,10 @@ pass.
 * **Passes.** A right code buys a pass for `access_pass_hours` (12 by default): an expiry
   time signed with the key, checked by every server that holds it. The browser sends it
   as `?pass=`; this server's own pages get it as a cookie that is `HttpOnly`,
-  `SameSite=Strict`, and `Secure` over HTTPS.
+  `SameSite=Strict`, and `Secure` over HTTPS. A pass is a bearer token: it isn't tied to
+  an address or a browser, and works until it expires. A
+  [block set by hand](access.md#lockouts-and-blocks) ends it for the network blocked,
+  WebSockets and UDP sessions already open included. A new access key ends every pass.
 * **Standing phrases.** For the desk away from a PC, in their own `0640` file
   (`access-phrases.toml`), with an optional last day. Each use is a journal warning with
   the phrase's name, never the phrase. The examples published in the docs are refused.

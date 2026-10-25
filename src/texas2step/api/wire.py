@@ -156,9 +156,19 @@ async def up(request: Request, test: TestId = None) -> Response:
 async def ws_echo(ws: WebSocket) -> None:
     """Echoes every message unchanged. Used for latency under load and live monitoring."""
     await ws.accept()
+    # With access codes, a block set by hand on the client's network ends its socket too,
+    # as it ends its pass (app.AccessGate); looked at as messages come, every few seconds.
+    ip, _ = client_address(ws)
+    blocks = ws.app.state.blocks if ws.app.state.codes is not None else None
+    checked = time.monotonic()
     try:
         while True:
             message = await ws.receive()
+            if blocks is not None and time.monotonic() - checked >= blocks.EVERY:
+                checked = time.monotonic()
+                if await blocks.cover(ip):
+                    await ws.close(code=1008, reason="access code required")
+                    return
             if message["type"] == "websocket.disconnect":
                 return
             if message.get("bytes") is not None:
@@ -191,8 +201,11 @@ async def rtc_offer(offer: Offer, request: Request) -> dict[str, str]:
     try:
         # Whose traffic a voice or video profile is, should a traffic limit count it.
         meter = request.app.state.traffic
-        whose = meter.kind(client_address(request)[0]) if meter is not None else None
-        return await request.app.state.rtc.answer(offer.sdp, whose=whose)
+        ip, _ = client_address(request)
+        whose = meter.kind(ip) if meter is not None else None
+        # With access codes, the session ends should a block set by hand cover this client.
+        watched = ip if request.app.state.codes is not None else None
+        return await request.app.state.rtc.answer(offer.sdp, whose=whose, ip=watched)
     except RtcUnavailable as exc:
         raise HTTPException(501, str(exc)) from exc
     except RtcBusy as exc:

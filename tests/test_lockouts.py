@@ -1,10 +1,19 @@
 """Wrong codes per network, lockouts and blocks, shared through one SQLite file."""
 
+import re
+import sqlite3
 import threading
 
 import pytest
 
-from texas2step.lockouts import LockoutStore, inside_of, network_of, parse_network
+from texas2step.lockouts import (
+    SCHEMA,
+    LockoutStore,
+    in_blocks,
+    inside_of,
+    network_of,
+    parse_network,
+)
 
 WRONG = (False, "wrong access code")
 RIGHT = (True, "access code")
@@ -140,3 +149,52 @@ def test_guesses_sent_all_at_once_cant_slip_past_the_count(tmp_path):
     assert len(checked) == 3  # 40 guesses at once from one /48: three were read
     for store in workers:
         store.close()
+
+
+def test_only_blocks_set_by_hand_end_passes(tmp_path):
+    store = LockoutStore(tmp_path / "a.db", after=3, minutes=30)
+    t = 1_000_000.0
+    for n in range(3):  # a lockout from wrong codes
+        store.submit("203.0.113.9", lambda: (False, "wrong"), now=t + n)
+    store.block("198.51.100.7", 60, "command line", now=t)
+    store.block("192.0.2.0/24", 60, "shared by dallas from 198.51.100.20", now=t, by_hand=False)
+    locked, _ = store.current(now=t + 10)
+    assert {x.network: x.by_hand for x in locked} == {
+        "203.0.113.0/24": False,
+        "198.51.100.7/32": True,
+        "192.0.2.0/24": False,
+    }
+    blocks = store.hand_blocks(now=t + 10)
+    assert blocks == [("198.51.100.7/32", t + 3600)]
+    assert in_blocks("198.51.100.7", blocks, now=t + 10)
+    assert not in_blocks("198.51.100.7", blocks, now=t + 3601)  # it ended
+    assert not in_blocks("203.0.113.9", blocks, now=t + 10)  # locked out, not blocked
+    # A lockout blocked by hand becomes a block; a later shared lockout doesn't undo that.
+    store.block("203.0.113.0/24", 5, "API from 10.1.2.3", now=t + 20)
+    store.block(
+        "203.0.113.0/24", 5, "shared by dallas from 198.51.100.20", now=t + 30, by_hand=False
+    )
+    assert in_blocks("203.0.113.9", store.hand_blocks(now=t + 40), now=t + 40)
+
+
+def test_a_file_from_an_earlier_version_learns_which_blocks_were_by_hand(tmp_path):
+    path = tmp_path / "old.db"
+    # The schema before by_hand: no such column, and no comma after source.
+    old = re.sub(r"\n\s*by_hand[^\n]*", "", SCHEMA).replace(
+        "source    TEXT NOT NULL,", "source    TEXT NOT NULL "
+    )
+    assert "by_hand" not in old.split("CREATE TABLE IF NOT EXISTS shared")[0]
+    db = sqlite3.connect(path)
+    db.executescript(old)
+    rows = [
+        ("203.0.113.0/24", "wrong codes"),
+        ("198.51.100.7/32", "the command line, by root"),
+        ("192.0.2.0/24", "shared by dallas from 198.51.100.20"),
+    ]
+    for net, source in rows:
+        db.execute("INSERT INTO lockouts VALUES (?, 4, '0', 'f', 0, 1.0, 9e12, ?)", (net, source))
+    db.commit()
+    db.close()
+    store = LockoutStore(path)
+    assert [net for net, _ in store.hand_blocks()] == ["198.51.100.7/32"]
+    LockoutStore(path).close()  # opened again, as by another worker: nothing to do
