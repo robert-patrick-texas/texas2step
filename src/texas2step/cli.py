@@ -495,7 +495,12 @@ def cmd_access_show(args: argparse.Namespace) -> None:
         p.name + (f" ({_phrase_when(p, settings.access_timezone)})" if p.until else "")
         for p in codes.phrases
     ]
+    ended = _passes_ended(settings)
+    lasting = f"{settings.access_pass_hours:g} h from when each is issued"
+    if ended:
+        lasting += f"; those issued before {_moment(ended, settings.access_timezone)} are ended"
     rows += [
+        ("Passes", lasting),
         ("Words", f"{len(codes.words)} {words}"),
         ("Phrases", ", ".join(standing) or "none"),
         ("Key", settings.access_key_file),
@@ -664,6 +669,26 @@ def _lockouts(settings: Any) -> Any:
         sys.exit(f"texas2step: can't use {path}: {exc}" + (" (try sudo)" if denied else ""))
 
 
+def _passes_ended(settings: Any) -> float:
+    """When every pass was last ended, for access show: 0 when never, or when the file
+    can't be read, which show doesn't need."""
+    import sqlite3
+
+    from .lockouts import LockoutStore
+
+    path = Path(settings.access_lockouts_file)
+    if not path.exists():
+        return 0.0
+    try:
+        store = LockoutStore(path)
+    except (OSError, sqlite3.Error):
+        return 0.0
+    try:
+        return store.passes_ended()[0]
+    finally:
+        store.close()
+
+
 def _moment(stamp: float, zone: str) -> str:
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -717,16 +742,22 @@ def cmd_access_lockouts(args: argparse.Namespace) -> None:
 
 
 def _share(
-    settings: Any, action: str, network: str, minutes: float = 0, kind: str = "block"
+    settings: Any,
+    action: str,
+    network: str,
+    minutes: float = 0,
+    kind: str = "block",
+    at: float = 0,
 ) -> None:
-    """Send a block or a clear to the other servers too, with access_share_lockouts on.
-    A block from here is set by hand, so it ends passes there too."""
+    """Send a block, a clear or an end of passes to the other servers too, with
+    access_share_lockouts on. A block from here is set by hand, so it ends passes there
+    too."""
     from . import cluster
 
     if not settings.access_share_lockouts:
         return
     key = cluster.peer_key(_access_codes(settings).key)
-    results = _run(cluster.send(settings, key, action, network, minutes, kind))
+    results = _run(cluster.send(settings, key, action, network, minutes, kind, at))
     print(f"Other servers: {cluster.summary(results)}.")
 
 
@@ -770,6 +801,51 @@ def cmd_access_block(args: argparse.Namespace) -> None:
         _share(settings, "block", str(net), min(minutes, cluster.MOST_MINUTES))
     ends = datetime.fromtimestamp(block.expires, ZoneInfo(settings.access_timezone))
     _hook(settings, "block", str(net), ends, why)
+
+
+def cmd_access_passes(args: argparse.Namespace) -> None:
+    import time
+
+    settings = _server_settings(args)
+    zone = settings.access_timezone
+    if args.end:
+        if not args.yes:
+            if not sys.stdin.isatty():
+                sys.exit("texas2step: add --yes to end every pass")
+            answer = input(
+                "End every pass issued so far? Everyone testing from outside enters the "
+                "code again. [y/N] "
+            )
+            if answer.strip().lower() not in {"y", "yes"}:
+                sys.exit("Nothing changed.")
+        store = _lockouts(settings)
+        at = store.end_passes(time.time(), "from the command line")
+        store.close()
+        print(
+            f"Every pass issued before {_moment(at, zone)} is ended here, within seconds; "
+            "tests running with one stop too."
+        )
+        if settings.access_code == "off":
+            print('Access codes are off (access_code = "off"), so there are no passes now.')
+        if settings.access_share_lockouts:
+            _share(settings, "end-passes", "", at=at)
+        elif any(loc.url for loc in settings.locations):
+            print(
+                "The other servers in [[locations]] still take them: run this there too, "
+                "or turn on access_share_lockouts (docs/access.md)."
+            )
+        return
+    hours = f"{settings.access_pass_hours:g}"
+    print(f"A pass lasts {hours} h from when it is issued here (access_pass_hours).")
+    ended, source = (0.0, "")
+    if Path(settings.access_lockouts_file).exists():
+        store = _lockouts(settings)
+        ended, source = store.passes_ended()
+        store.close()
+    if ended:
+        print(f"Every pass issued before {_moment(ended, zone)} is ended, {source}.")
+    else:
+        print("No passes have been ended.")
 
 
 def cmd_access_peers(args: argparse.Namespace) -> None:
@@ -1245,6 +1321,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     settings_file(block)
     block.set_defaults(func=cmd_access_block)
+    passes = acc_sub.add_parser(
+        "passes",
+        help="how long passes last, and end every pass given so far",
+        description="A right code or phrase buys a pass, which lasts access_pass_hours from "
+        "when it was issued. --end ends every pass issued so far, on this server and, with "
+        "access_share_lockouts on, on every server in [[locations]]: tests running with one "
+        "stop, and everyone testing from outside enters the code again. Codes and phrases "
+        "keep working (docs/access.md).",
+    )
+    passes.add_argument("--end", action="store_true", help="end every pass issued so far")
+    passes.add_argument("-y", "--yes", action="store_true", help="with --end: don't ask first")
+    settings_file(passes)
+    passes.set_defaults(func=cmd_access_passes)
     peers = acc_sub.add_parser(
         "peers",
         help="check that the servers in [[locations]] take this server's lockouts",

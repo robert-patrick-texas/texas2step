@@ -135,7 +135,9 @@ class Settings:
     access_timezone: str = "America/New_York"  # when daily, weekly and monthly codes change
     access_words: str = ""  # the site's own list, one entry per line; empty: built-in words
     access_digits: int = 2  # the digits that end a code
-    access_pass_hours: float = 12.0  # how long an entered code lets a browser keep testing
+    # How long a pass lasts from when it was issued, as passes are checked: a change
+    # applies to passes already given (texas2step access passes).
+    access_pass_hours: float = 12.0
     # The line under the code box, such as how to reach the desk; "" for none.
     access_note: str = "Contact the service desk for assistance."
     access_key_file: str = "/etc/texas2step/access.key"  # the same key on every server

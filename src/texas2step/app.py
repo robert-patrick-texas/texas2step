@@ -233,11 +233,13 @@ class AccessGate:
         needs_pass = (
             codes and not inside and path.startswith("/api/v1/") and path not in self.PUBLIC
         )
-        # A pass from a network blocked by hand is no pass: the page drops it and asks for
-        # the code, which that network can't enter until the block ends.
-        if needs_pass and (
-            codes.pass_expires(given_pass(conn)) is None
-            or await scope["app"].state.blocks.cover(ip)
+        # A pass issued before passes were last ended, or from a network blocked by hand,
+        # is no pass: the page drops it and asks for the code, which a blocked network
+        # can't enter until the block ends.
+        ends = scope["app"].state.blocks if needs_pass else None
+        if ends is not None and (
+            codes.pass_expires(given_pass(conn), ended=await ends.ended()) is None
+            or await ends.cover(ip)
         ):
             await self._refuse(scope, receive, send, 401, "access code required")
             return

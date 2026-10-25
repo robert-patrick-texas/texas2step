@@ -366,3 +366,31 @@ async def test_a_block_set_by_hand_ends_open_sessions(peers, monkeypatch):
         assert sorted(str(s.ip) for s in echo.sessions.values()) == ["198.51.100.8", "None"]
     finally:
         await echo.stop()
+
+
+async def test_ending_passes_ends_the_sessions_opened_with_them(peers, monkeypatch):
+    ended = 0.0
+
+    class Ends:
+        async def cover(self, ip: str) -> bool:
+            return False
+
+        async def ended(self) -> float:
+            return ended
+
+    monkeypatch.setattr(rtc, "LIMIT_CHECK", 0.05)
+    echo = RtcEcho([], max_sessions=4, timeout=60, port_range=RANGE)
+    echo.blocks = Ends()
+    echo.start()
+    try:
+        for issued in (1_000_000, 1_000_200, None):  # None: inside, with no pass to end
+            pc, _ = await offer(peers)
+            await echo.answer(pc.localDescription.sdp, ip="203.0.113.9", issued=issued)
+        ended = 1_000_100.0
+        for _ in range(100):
+            if len(echo.sessions) == 2:
+                break
+            await asyncio.sleep(0.02)
+        assert sorted(str(s.issued) for s in echo.sessions.values()) == ["1000200", "None"]
+    finally:
+        await echo.stop()

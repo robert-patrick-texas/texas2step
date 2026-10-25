@@ -70,9 +70,10 @@ class PeerIn(BaseModel):
 
     sender: str = Field(alias="from", max_length=64)
     to: str = Field(max_length=64)
-    action: Literal["block", "clear", "check"]
+    action: Literal["block", "clear", "check", "end-passes"]
     network: str = Field("", max_length=64)
     minutes: float | None = Field(None, gt=0, le=cluster.MOST_MINUTES)
+    at: float | None = Field(None, gt=0)  # end-passes: those issued before then end
     # A block set by hand there ends passes here too; one from wrong codes doesn't. Older
     # servers send no kind, so theirs count as lockouts.
     kind: Literal["lockout", "block"] = "lockout"
@@ -81,6 +82,16 @@ class PeerIn(BaseModel):
 def internal(request: Request) -> bool:
     ip, _ = client_address(request)
     return is_internal(ip, request.app.state.settings.internal_networks)
+
+
+async def pass_issued(conn: HTTPConnection) -> int | None:
+    """When the pass a WebSocket or a UDP session was let in with was issued, to end it
+    should every pass issued before some time be ended; None for one that needed none."""
+    codes = conn.app.state.codes
+    ip, _ = client_address(conn)
+    if codes is None or is_internal(ip, conn.app.state.settings.internal_networks):
+        return None
+    return codes.pass_issued(given_pass(conn), ended=await conn.app.state.blocks.ended())
 
 
 def desk(request: Request) -> bool:
@@ -107,7 +118,7 @@ async def status(
     }
     pass_ = pass_ or given_pass(request)  # the page sends its own server's in a header
     if codes is not None and pass_:
-        expires = codes.pass_expires(pass_)
+        expires = codes.pass_expires(pass_, ended=await request.app.state.blocks.ended())
         # A block set by hand on this client's network ends its pass (app.AccessGate).
         ip, _ = client_address(request)
         if expires is not None and body["required"] and await request.app.state.blocks.cover(ip):
@@ -162,7 +173,10 @@ async def unlock(request: Request, given: CodeIn, response: Response) -> dict[st
         raise HTTPException(403, WRONG)
     if note != "access code":  # a standing phrase: every use is logged, so a leaked one shows
         log.warning("%s used from %s", note, ip)
-    token, expires = codes.issue()
+    # Read afresh, not as this worker last saw it: a pass stamped before an end just made
+    # would be refused at once.
+    ended, _ = await asyncio.to_thread(lockouts.passes_ended)
+    token, expires = codes.issue(ended=ended)
     if PASS_COOKIE in request.cookies:  # an earlier version's: the page keeps the pass itself
         response.delete_cookie(
             PASS_COOKIE,
@@ -323,9 +337,10 @@ async def unblock(
 async def peer(request: Request) -> dict[str, Any]:
     """Only with ``access_share_lockouts`` on, from an address in
     ``access_peer_networks``, signed with a key derived from the shared access key; 404 to
-    everyone else. The body: ``{"from", "to", "action": "block" | "clear" | "check",
-    "network", "minutes"}``. A block covers at most a /24 or a /48 and never
-    ``internal_networks``, and isn't passed on to other servers."""
+    everyone else. The body: ``{"from", "to", "action": "block" | "clear" | "check" |
+    "end-passes", "network", "minutes", "at"}``. A block covers at most a /24 or a /48 and
+    never ``internal_networks``; end-passes ends the passes issued before ``at``, no later
+    than this server's clock allows. Neither is passed on to other servers."""
     settings = request.app.state.settings
     codes = request.app.state.codes
     ip, _ = client_address(request)
@@ -357,6 +372,15 @@ async def peer(request: Request) -> dict[str, Any]:
         return {"server": settings.server_id, "ok": True}
     by_hand = given.kind == "block"
     source = f"{SHARED_BY}{given.sender} from {ip}" + (", set by hand" if by_hand else "")
+    if given.action == "end-passes":
+        # At worst everyone enters the code again. Never ahead of this clock by more than
+        # requests may be, or passes issued here would be stamped that far ahead.
+        if given.at is None or given.at > now + cluster.SKEW:
+            raise HTTPException(400, "end-passes needs the time they end, no later than now")
+        at = await asyncio.to_thread(lockouts.end_passes, given.at, source)
+        request.app.state.blocks.forget()
+        log.warning("every pass issued before %s ended, %s", _at(codes, at), source)
+        return {"ended": at}
     if given.action == "clear":
         try:  # ending lockouts can't harm: any network, or all
             target = None if given.network == "all" else str(parse_network(given.network))

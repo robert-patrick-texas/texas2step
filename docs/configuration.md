@@ -48,7 +48,7 @@ file up to date with the new version's template and keeps your values; see
 | `access_timezone` | `America/New_York` | The time zone whose midnight starts a new code |
 | `access_words` | `""` | A file of your own words for codes, one entry per line; empty uses the built-in words |
 | `access_digits` | 2 | The digits that end a code: 2, 3 or 4 |
-| `access_pass_hours` | 12 | How long an entered code lets a browser keep testing |
+| `access_pass_hours` | 12 | How long a pass lasts from when it was issued; applied as passes are used, so a change applies to passes already given. See [Ending every pass](access.md#ending-every-pass). |
 | `access_note` | `Contact the service desk for assistance.` | The line under the code box, such as how to reach the desk; `""` for none |
 | `access_key_file` | `/etc/texas2step/access.key` | The key codes come from; the same on every server of an organization |
 | `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | Standing phrases that work as codes, if the file exists; see [Standing phrases](access.md#standing-phrases) |

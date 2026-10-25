@@ -1,5 +1,6 @@
 """Access codes, passes, and the desk's functions kept to internal networks."""
 
+import base64
 import io
 import logging
 import re
@@ -292,18 +293,55 @@ def test_the_fingerprint_covers_the_phrases():
 
 
 def test_passes():
-    c = codes()
+    c = codes()  # 12 h passes
     token, expires = c.issue(now=1_000_000)
-    assert expires == 1_000_000 + 12 * 3600
+    assert token.startswith("1000000.") and expires == 1_000_000 + 12 * 3600
+    assert c.pass_issued(token, now=1_000_100) == 1_000_000
     assert c.pass_expires(token, now=1_000_100) == expires
-    assert c.pass_expires(token, now=expires) is None  # expired
+    assert c.pass_expires(token, now=expires) is None  # ran out
     stamp, _, sig = token.partition(".")
     assert c.pass_expires(f"{int(stamp) + 60}.{sig}", now=1_000_100) is None  # altered
     assert codes(key=access.parse_key(access.new_key())).pass_expires(token, 1_000_100) is None
-    long = Codes(KEY, "daily", NYC, 2, c.words, False, 48).issue(now=1_000_000)[0]
-    assert c.pass_expires(long, now=1_000_100) is None  # longer than this server's passes
     for junk in ("", "abc", "1.2.3", f"{'9' * 20}.{sig}"):
         assert c.pass_expires(junk, now=1_000_100) is None
+
+
+def test_how_long_a_pass_lasts_is_the_checking_servers_setting_now():
+    token, _ = codes().issue(now=1_000_000)
+    two = Codes(KEY, "daily", NYC, 2, codes().words, False, 2)
+    assert two.pass_expires(token, now=1_000_100) == 1_000_000 + 2 * 3600  # shortened
+    assert two.pass_expires(token, now=1_000_000 + 2 * 3600) is None
+    day = Codes(KEY, "daily", NYC, 2, codes().words, False, 24)
+    assert day.pass_expires(token, now=1_000_000 + 13 * 3600) == 1_000_000 + 24 * 3600
+
+
+def test_a_pass_stamped_ahead_and_passes_ended():
+    c = codes()
+    # Another server's clock may be ahead: by up to PASS_AHEAD seconds.
+    ahead, _ = c.issue(now=1_000_000 + access.PASS_AHEAD)
+    assert c.pass_issued(ahead, now=1_000_000) == 1_000_000 + access.PASS_AHEAD
+    too_far, _ = c.issue(now=1_000_001 + access.PASS_AHEAD)
+    assert c.pass_issued(too_far, now=1_000_000) is None
+    # Ended: a pass issued before then, or in the same second, is no pass.
+    token, _ = c.issue(now=1_000_000)
+    assert c.pass_issued(token, now=1_000_100, ended=1_000_000.4) is None
+    assert c.pass_issued(token, now=1_000_100, ended=999_999.6) == 1_000_000
+    # A new one is stamped after the end, even by a clock behind the server that ended
+    # them, so it isn't refused the moment it is given.
+    later, expires = c.issue(now=1_000_050, ended=1_000_100.4)
+    assert later.startswith("1000101.") and expires == 1_000_101 + 12 * 3600
+    assert c.pass_issued(later, now=1_000_050, ended=1_000_100.4) == 1_000_101
+
+
+def test_an_earlier_versions_pass_is_not_read_as_issued_then():
+    # Earlier versions signed the expiry as "pass": once that time came, such a pass would
+    # otherwise look like one just issued, good for another access_pass_hours.
+    c = codes()
+    expires = 1_000_000 + 12 * 3600
+    mac = c._mac("pass", str(expires))[:18]
+    old = f"{expires}.{base64.urlsafe_b64encode(mac).decode()}"
+    assert c.pass_issued(old, now=expires) is None
+    assert c.pass_issued(old, now=expires + 3600) is None
 
 
 def test_who_is_internal():
@@ -684,6 +722,66 @@ def test_a_block_set_by_hand_ends_open_websockets(tmp_path, key_file, monkeypatc
             with pytest.raises(WebSocketDisconnect) as closed:
                 ws.receive_text()
         assert closed.value.code == 1008
+
+
+def test_ending_every_pass(tmp_path, key_file, monkeypatch):
+    monkeypatch.setattr(HandBlocks, "EVERY", 0)  # read the end for every request
+    with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
+        token = unlock(c)
+        before = unlock(c, {"X-Forwarded-For": "198.51.100.8"})
+
+        def works(pass_: str) -> bool:
+            r = c.get("/api/v1/info", params={"pass": pass_}, headers=OUTSIDE)
+            return r.status_code == 200
+
+        with c.websocket_connect(f"/api/v1/ws?pass={token}", headers=OUTSIDE) as ws:
+            ws.send_text("1")
+            assert ws.receive_text() == "1"
+            # As from texas2step access passes --end, here or on another server.
+            c.app.state.lockouts.end_passes(time.time() + 1, "from the command line")
+            ws.send_text("2")  # the next message finds its pass ended, and the socket ends
+            with pytest.raises(WebSocketDisconnect) as closed:
+                ws.receive_text()
+        assert closed.value.code == 1008
+        assert not works(token) and not works(before)
+        r = c.get("/api/v1/access", params={"pass": token}, headers=OUTSIDE)
+        assert r.json()["pass"]["valid"] is False
+        # The code still works, and buys a pass that does.
+        again = unlock(c)
+        assert works(again)
+        # Inside, no pass is needed, so an ended one changes nothing.
+        r = c.get("/api/v1/info", params={"pass": token}, headers=INSIDE)
+        assert r.status_code == 200
+        with c.websocket_connect(f"/api/v1/ws?pass={token}", headers=INSIDE) as ws:
+            ws.send_text("3")
+            assert ws.receive_text() == "3"
+
+
+def test_the_passes_command(tmp_path, key_file, monkeypatch, capsys):
+    db = tmp_path / "access.db"
+    conf = config_file(tmp_path, key_file, access_code="daily", internal_networks=["10.0.0.0/8"])
+    with open(conf, "a") as f:
+        f.write(f'access_lockouts_file = "{db}"\n')
+
+    def access_cli(*args: str) -> str:
+        cli.main(["access", *args, "--config", conf])
+        return capsys.readouterr().out
+
+    assert access_cli("passes") == (
+        "A pass lasts 12 h from when it is issued here (access_pass_hours).\n"
+        "No passes have been ended.\n"
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))  # no terminal to ask on
+    with pytest.raises(SystemExit, match="add --yes to end every pass"):
+        access_cli("passes", "--end")
+    out = access_cli("passes", "--end", "--yes")
+    assert out.startswith("Every pass issued before ") and "is ended here" in out
+    ended, source = LockoutStore(db).passes_ended()
+    assert abs(ended - time.time()) < 5 and source == "from the command line"
+    assert "Every pass issued before" in access_cli("passes")
+    assert re.search(
+        r"\nPasses: +12 h from when each is issued; those issued before ", (access_cli("show"))
+    )
 
 
 def test_a_saved_result_gets_the_version_its_page_was_not_told(tmp_path, key_file):

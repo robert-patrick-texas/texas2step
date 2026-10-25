@@ -8,7 +8,9 @@ code, and each one pushes the end of the lockout to ``access_lockout_minutes`` a
 A network quiet for that long starts again from nothing, and so does one that enters a
 right code. A block, set from the command line or the API, is a lockout set by hand,
 and ends the passes used from the network too (app.AccessGate); a lockout doesn't, so
-callers who share a network with a guesser keep testing with the pass they hold.
+callers who share a network with a guesser keep testing with the pass they hold. Every
+pass can be ended at once, too (texas2step access passes --end): those issued before
+then are refused, wherever they are used.
 
 The counts live in a small SQLite file (``access_lockouts_file``) that the service's
 workers and the command line share. Checking a code and counting it happen in one
@@ -58,6 +60,12 @@ CREATE TABLE IF NOT EXISTS shared (
 CREATE TABLE IF NOT EXISTS nonces (
     nonce TEXT PRIMARY KEY,
     seen  REAL NOT NULL
+);
+-- When every pass was last ended: those issued before then are refused. At most one row.
+CREATE TABLE IF NOT EXISTS passes_ended (
+    one    INTEGER PRIMARY KEY CHECK (one = 1),
+    at     REAL NOT NULL,
+    source TEXT NOT NULL  -- the command line, or the server that sent it
 );
 """
 
@@ -117,30 +125,47 @@ def in_blocks(ip: str, blocks: list[tuple[str, float]], now: float | None = None
 
 
 class HandBlocks:
-    """The blocks set by hand, as one worker sees them, for the checks that end passes:
-    each request that needs one (app.AccessGate), and the WebSockets and UDP sessions
-    already open. Read again every EVERY seconds, not for every request; a block set
-    elsewhere, such as from the command line, takes that long to reach every worker."""
+    """What ends passes, as one worker sees it: the blocks set by hand, and when every
+    pass was last ended. For the checks of each request that needs a pass (app.AccessGate)
+    and of the WebSockets and UDP sessions already open. Read again every EVERY seconds,
+    not for every request; a block or an end set elsewhere, such as from the command
+    line, takes that long to reach every worker."""
 
     EVERY = 5.0
 
     def __init__(self, store: LockoutStore | None) -> None:
         self.store = store
         self._blocks: list[tuple[str, float]] = []
+        self._ended = 0.0
         self._read = float("-inf")
 
     def forget(self) -> None:
-        """Read the blocks again at the next check: this worker just set or ended one."""
+        """Read them again at the next check: this worker just set or ended one."""
         self._read = float("-inf")
+
+    async def _refresh(self) -> None:
+        assert self.store is not None
+        store = self.store
+        self._read = time.monotonic()
+        self._blocks, (self._ended, _) = await asyncio.to_thread(
+            lambda: (store.hand_blocks(), store.passes_ended())
+        )
 
     async def cover(self, ip: str) -> bool:
         if self.store is None:
             return False
         # A block found is looked up again, so one ended elsewhere ends here at once.
         if time.monotonic() - self._read >= self.EVERY or in_blocks(ip, self._blocks):
-            self._read = time.monotonic()
-            self._blocks = await asyncio.to_thread(self.store.hand_blocks)
+            await self._refresh()
         return in_blocks(ip, self._blocks)
+
+    async def ended(self) -> float:
+        """When every pass was last ended, 0 for never: those issued before are no passes."""
+        if self.store is None:
+            return 0.0
+        if time.monotonic() - self._read >= self.EVERY:
+            await self._refresh()
+        return self._ended
 
 
 def inside_of(
@@ -319,6 +344,27 @@ class LockoutStore:
             return [row["network"] for row in rows]
 
         return self._write(work)
+
+    # --- Ending every pass ----------------------------------------------------------------
+
+    def end_passes(self, at: float, source: str) -> float:
+        """End every pass issued before ``at``. A later end stays: the end in force."""
+
+        def work() -> float:
+            self._db.execute(
+                "INSERT INTO passes_ended VALUES (1, ?, ?) ON CONFLICT (one) DO UPDATE SET "
+                "at = excluded.at, source = excluded.source WHERE excluded.at > passes_ended.at",
+                (at, source),
+            )
+            return self._db.execute("SELECT at FROM passes_ended").fetchone()["at"]
+
+        return self._write(work)
+
+    def passes_ended(self) -> tuple[float, str]:
+        """When every pass was last ended, and from where; (0, "") if never."""
+        with self._lock:
+            row = self._db.execute("SELECT at, source FROM passes_ended").fetchone()
+        return (row["at"], row["source"]) if row else (0.0, "")
 
     # --- Servers that defend together (cluster.py) -------------------------------------
 

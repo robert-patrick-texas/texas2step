@@ -151,6 +151,17 @@ def test_guesses_sent_all_at_once_cant_slip_past_the_count(tmp_path):
         store.close()
 
 
+def test_passes_ended(tmp_path):
+    store = LockoutStore(tmp_path / "a.db")
+    assert store.passes_ended() == (0.0, "")
+    assert store.end_passes(1000.0, "from the command line") == 1000.0
+    assert store.end_passes(900.0, "shared by dallas from 198.51.100.20") == 1000.0  # kept
+    assert store.passes_ended() == (1000.0, "from the command line")
+    assert store.end_passes(1100.0, "shared by dallas from 198.51.100.20") == 1100.0
+    # Another worker, or the command line, sees it in the same file.
+    assert LockoutStore(tmp_path / "a.db").passes_ended()[0] == 1100.0
+
+
 def test_only_blocks_set_by_hand_end_passes(tmp_path):
     store = LockoutStore(tmp_path / "a.db", after=3, minutes=30)
     t = 1_000_000.0

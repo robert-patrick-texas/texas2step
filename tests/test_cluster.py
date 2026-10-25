@@ -110,6 +110,26 @@ def test_a_signed_block_from_another_server(tmp_path, key_file):
         assert c.post("/api/v1/access", json={"code": code}, headers=STRANGER).status_code == 200
 
 
+def test_passes_ended_by_another_server(tmp_path, key_file):
+    with TestClient(create_app(settings(tmp_path, key_file))) as c:
+        base = {"from": "dallas", "to": "houston", "action": "end-passes"}
+        now = time.time()
+        r = c.post("/api/v1/access/peer", **request(key_file, base | {"at": now}))
+        assert r.status_code == 200 and r.json() == {"ended": now}
+        lockouts = c.app.state.lockouts
+        assert lockouts.passes_ended() == (now, "shared by dallas from 198.51.100.20")
+        # An earlier end changes nothing; one far ahead of this clock is refused, as it
+        # would stamp the passes given here that far ahead.
+        assert c.post(
+            "/api/v1/access/peer", **request(key_file, base | {"at": now - 60})
+        ).json() == {"ended": now}
+        r = c.post("/api/v1/access/peer", **request(key_file, base | {"at": now + 3600}))
+        assert r.status_code == 400
+        assert c.post("/api/v1/access/peer", **request(key_file, base)).status_code == 400
+        assert lockouts.passes_ended()[0] == now
+        assert not c.app.state.tasks  # not passed on
+
+
 def test_what_another_server_cant_do(tmp_path, key_file):
     with TestClient(create_app(settings(tmp_path, key_file))) as c:
 
@@ -185,8 +205,10 @@ def test_the_hook(tmp_path, key_file):
 def test_the_command_line(tmp_path, key_file, monkeypatch, capsys):
     sent = []
 
-    async def fake_send(settings, key, action, network, minutes=0, kind="lockout"):
+    async def fake_send(settings, key, action, network, minutes=0, kind="lockout", at=0):
         sent.append((action, network, minutes) + ((kind,) if action == "block" else ()))
+        if action == "end-passes":
+            sent[-1] = (action, at)
         return [("dallas", None), ("austin", "404: sharing is off there")]
 
     monkeypatch.setattr(cluster, "send", fake_send)
@@ -210,6 +232,10 @@ def test_the_command_line(tmp_path, key_file, monkeypatch, capsys):
     cli.main(["access", "lockouts", "--clear", "all", "--config", str(config)])
     # A block from here is set by hand, so it ends passes on the other servers too.
     assert sent == [("block", "203.0.113.7/32", 90.0, "block"), ("clear", "all", 0)]
+    cli.main(["access", "passes", "--end", "--yes", "--config", str(config)])
+    (action, at) = sent[-1]
+    assert action == "end-passes" and abs(at - time.time()) < 5
+    assert "Other servers: sent to dallas" in capsys.readouterr().out
     with pytest.raises(SystemExit):  # austin doesn't take them
         cli.main(["access", "peers", "--config", str(config)])
     out = capsys.readouterr().out

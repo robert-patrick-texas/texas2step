@@ -51,6 +51,9 @@ WORDS = Path(__file__).with_name("words.txt")
 KEY_BYTES = 32
 DRAW = 512  # built-in words each organization draws by its key
 GRACE = 24 * 3600  # the previous code still works this long after a change
+# How far ahead of this server's clock a pass may be stamped: another server's clock, or
+# one that issued it just after passes were ended there (Codes.issue).
+PASS_AHEAD = 300
 MIN_SITE_WORDS = 100
 MAX_ENTRY = 40
 GROUP = "texas2step"  # the service's group, which must read the key
@@ -435,24 +438,39 @@ class Codes:
         mac = self._mac("fingerprint", *what, words).hex()
         return f"{mac[0:4]}-{mac[4:8]}-{mac[8:12]}"
 
-    def issue(self, now: float | None = None) -> tuple[str, int]:
-        expires = int(now if now is not None else time.time()) + self.pass_seconds
-        return f"{expires}.{self._sign(expires)}", expires
+    # A pass is "<issued>.<signature>": when it was issued, in Unix seconds, signed with
+    # the key. How long it lasts is decided when it is checked, by access_pass_hours as
+    # it is then, so a shorter setting shortens passes already given and a longer one
+    # lengthens them. Passes issued before passes were last ended are refused.
 
-    def _sign(self, expires: int) -> str:
-        mac = self._mac("pass", str(expires))[:18]
+    def issue(self, now: float | None = None, ended: float = 0) -> tuple[str, int]:
+        """A new pass, and when it runs out here. Stamped after ``ended``, when passes
+        were last ended, even by a clock a little behind the server that ended them."""
+        issued = max(int(now if now is not None else time.time()), int(ended) + 1)
+        return f"{issued}.{self._sign(issued)}", issued + self.pass_seconds
+
+    def _sign(self, issued: int) -> str:
+        # Not the "pass" of earlier versions, which signed the expiry: such a pass must
+        # not be read as one issued at that time.
+        mac = self._mac("pass-issued", str(issued))[:18]
         return base64.urlsafe_b64encode(mac).decode()
 
-    def pass_expires(self, token: str, now: float | None = None) -> int | None:
-        """The pass's expiry, if it is ours, current, and no longer than passes are."""
+    def pass_issued(self, token: str, now: float | None = None, ended: float = 0) -> int | None:
+        """When the pass was issued, if it is ours and still good: issued after ``ended``,
+        within access_pass_hours, and not more than PASS_AHEAD seconds ahead of now."""
         stamp, _, sig = (token or "").partition(".")
         if not stamp.isdigit() or len(stamp) > 12:
             return None
-        expires = int(stamp)
+        issued = int(stamp)
         now = now if now is not None else time.time()
-        if not now < expires <= now + self.pass_seconds + 300:
+        if issued <= ended or issued > now + PASS_AHEAD or now >= issued + self.pass_seconds:
             return None
-        return expires if hmac.compare_digest(sig.encode(), self._sign(expires).encode()) else None
+        return issued if hmac.compare_digest(sig.encode(), self._sign(issued).encode()) else None
+
+    def pass_expires(self, token: str, now: float | None = None, ended: float = 0) -> int | None:
+        """When the pass runs out here, if it is still good (pass_issued)."""
+        issued = self.pass_issued(token, now, ended)
+        return None if issued is None else issued + self.pass_seconds
 
 
 # --- Who is inside -----------------------------------------------------------------

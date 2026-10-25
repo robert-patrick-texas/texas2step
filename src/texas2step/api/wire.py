@@ -20,7 +20,7 @@ from starlette.requests import ClientDisconnect
 from .. import payload
 from ..rtc import RtcBusy, RtcUnavailable
 from ..traffic import Closed, TrafficMeter
-from .access import WS_PROTOCOL
+from .access import WS_PROTOCOL, pass_issued
 from .meta import client_address
 
 router = APIRouter(prefix="/api/v1", tags=["wire"])
@@ -160,16 +160,19 @@ async def ws_echo(ws: WebSocket) -> None:
     offered = WS_PROTOCOL in ws.scope.get("subprotocols", [])
     await ws.accept(subprotocol=WS_PROTOCOL if offered else None)
     # With access codes, a block set by hand on the client's network ends its socket too,
-    # as it ends its pass (app.AccessGate); looked at as messages come, every few seconds.
+    # as it ends its pass (app.AccessGate), and so does ending the passes issued before
+    # some time, its own among them; looked at as messages come, every few seconds.
     ip, _ = client_address(ws)
     blocks = ws.app.state.blocks if ws.app.state.codes is not None else None
+    issued = await pass_issued(ws)
     checked = time.monotonic()
     try:
         while True:
             message = await ws.receive()
             if blocks is not None and time.monotonic() - checked >= blocks.EVERY:
                 checked = time.monotonic()
-                if await blocks.cover(ip):
+                ended = issued is not None and issued <= await blocks.ended()
+                if ended or await blocks.cover(ip):
                     await ws.close(code=1008, reason="access code required")
                     return
             if message["type"] == "websocket.disconnect":
@@ -206,9 +209,12 @@ async def rtc_offer(offer: Offer, request: Request) -> dict[str, str]:
         meter = request.app.state.traffic
         ip, _ = client_address(request)
         whose = meter.kind(ip) if meter is not None else None
-        # With access codes, the session ends should a block set by hand cover this client.
+        # With access codes, the session ends should a block set by hand cover this client,
+        # or the passes issued before its own be ended.
         watched = ip if request.app.state.codes is not None else None
-        return await request.app.state.rtc.answer(offer.sdp, whose=whose, ip=watched)
+        issued = await pass_issued(request)
+        rtc = request.app.state.rtc
+        return await rtc.answer(offer.sdp, whose=whose, ip=watched, issued=issued)
     except RtcUnavailable as exc:
         raise HTTPException(501, str(exc)) from exc
     except RtcBusy as exc:

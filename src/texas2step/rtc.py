@@ -215,6 +215,7 @@ class Session:
     stamp: bool = False
     whose: str | None = None  # the client's kind for a traffic limit (traffic.TrafficMeter.kind)
     ip: str | None = None  # with access codes, the client's address: a block set by hand ends it
+    issued: int | None = None  # ...and when its pass was issued: ending passes ends it
     profile: str = "path"
     limited: bool = False  # held to path probes by a traffic limit
     control: Any = None  # the control channel, to tell the client of a limit reached
@@ -313,7 +314,12 @@ class RtcEcho:
             channel.send(json.dumps(reply))
 
     async def answer(
-        self, sdp: str, kind: str = "offer", whose: str | None = None, ip: str | None = None
+        self,
+        sdp: str,
+        kind: str = "offer",
+        whose: str | None = None,
+        ip: str | None = None,
+        issued: int | None = None,
     ) -> dict[str, str]:
         if not self.enabled:
             raise RtcUnavailable("WebRTC probing is disabled or aiortc is not installed")
@@ -324,7 +330,7 @@ class RtcEcho:
         # STUN server, which an internal deployment should not contact unasked.
         config = RTCConfiguration(iceServers=[RTCIceServer(urls=url) for url in self.ice_servers])
         pc = RTCPeerConnection(configuration=config)
-        session = Session(id=secrets.token_urlsafe(8), pc=pc, whose=whose, ip=ip)
+        session = Session(id=secrets.token_urlsafe(8), pc=pc, whose=whose, ip=ip, issued=issued)
         self.sessions[session.id] = session
 
         @pc.on("datachannel")
@@ -425,4 +431,11 @@ class RtcEcho:
                     await self._close(session)
                 elif session.ip and self.blocks is not None and await self.blocks.cover(session.ip):
                     log.debug("closing rtc session %s: %s is blocked", session.id, session.ip)
+                    await self._close(session)
+                elif (
+                    session.issued is not None
+                    and self.blocks is not None
+                    and session.issued <= await self.blocks.ended()
+                ):
+                    log.debug("closing rtc session %s: its pass was ended", session.id)
                     await self._close(session)

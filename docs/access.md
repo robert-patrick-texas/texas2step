@@ -18,7 +18,8 @@ no user names or passwords. The desk's own tools stay on your networks: saved re
   works out the same code from it, with nothing shared between them while they run.
 * **A code buys a pass.** The visitor enters the code once. The server answers with a
   pass, good for 12 hours (`access_pass_hours`), which the browser then sends with every
-  request, to every server in the picker. A server with the same key accepts it.
+  request, to every server in the picker. A server with the same key accepts it. To end
+  every pass at once, see [Ending every pass](#ending-every-pass).
 * **The desk's tools stay inside.** Visitors from addresses in `internal_networks` need no
   code, and only they get History, the API tab, saved results and the code itself.
   Everyone else gets the Test, Monitor and Diag tabs.
@@ -88,7 +89,7 @@ To turn codes off again: `sudo texas2step config set access_code=off --write`, t
 | `access_timezone` | `America/New_York` | The time zone whose midnight starts a new code; the same on every server |
 | `access_words` | `""` | Your own word list; empty uses the built-in words |
 | `access_digits` | `2` | The digits that end a code: 2, 3 or 4 |
-| `access_pass_hours` | `12` | How long an entered code lets a browser keep testing |
+| `access_pass_hours` | `12` | How long a pass lasts from when it was issued (1 to 168). Each server applies its own as passes are used, so a change applies to passes already given; use the same on every server. |
 | `access_note` | `Contact the service desk for assistance.` | The line under the code box, such as how to reach the desk; `""` for none |
 | `access_key_file` | `/etc/texas2step/access.key` | The key |
 | `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | [Standing phrases](#standing-phrases), if the file exists |
@@ -205,7 +206,8 @@ journalctl -u texas2step --grep 'access phrase'
 stays guessable: several words that don't belong together, such as
 `copper lantern harbor violet`, rather than `vip access`. texas2step takes any phrase
 you choose. To withdraw one, `sudo texas2step access phrase remove vip` on every server,
-and restart; passes it already bought last until they expire (`access_pass_hours`).
+and restart. Passes it already bought last until they run out (`access_pass_hours`),
+unless you [end every pass](#ending-every-pass).
 A new key doesn't change the phrases.
 
 A phrase buys the same pass as the day's code, so the visitor gets what any visitor
@@ -402,6 +404,43 @@ every 30 minutes. One with 10,000 networks gets about 1.4 million a day:
 For a server open to the Internet, use `access_digits = 4`, and standing phrases of
 several unrelated words.
 
+## Ending every pass
+
+A pass holds the time it was issued, signed with the key: `1793030400.q7GxN0x2rY8vLmKp3TfWcA9b`.
+No server keeps a list of them. Each server checks a pass as it is used:
+
+* The signature matches, so a server with the same key issued it.
+* It was issued less than `access_pass_hours` ago, by this server's setting now. Lower
+  the setting, and restart, and passes already given end sooner; raise it, and they last
+  longer.
+* It wasn't issued more than 5 minutes ahead of this server's clock.
+* It was issued after passes were last ended.
+
+To end every pass given so far, such as when a code or a phrase went further than it
+should have:
+
+```console
+$ sudo texas2step access passes --end
+End every pass issued so far? Everyone testing from outside enters the code again. [y/N] y
+Every pass issued before 2026-10-25 14:02 EDT is ended here, within seconds; tests running with one stop too.
+Other servers: sent to dallas, houston.
+```
+
+The time is kept in `access_lockouts_file`, beside the lockouts, so it needs no restart
+and outlasts one. Each of the service's workers reads it within 5 seconds. From then on,
+a pass issued before it is refused as if there were none (`401`), and the WebSockets and
+UDP sessions opened with one close within a few seconds. The page asks for the code
+again. The codes and phrases still work, so everyone with the current code is back in at
+once, with a new pass. Visitors from `internal_networks` need no pass, so nothing changes
+for them.
+
+With [servers that defend together](#servers-that-defend-together), the end goes to every
+server in `[[locations]]`, and each keeps the later of its own and the one it is sent.
+Without them, run the command on each server: until then, the others still take the
+passes. `sudo texas2step access passes` says how long passes last here and when they were
+last ended, and `access show` does too. A new key also ends every pass, and every code
+with it.
+
 ## Servers that defend together
 
 When a lockout begins on one server, the others can block that network too, so an
@@ -416,8 +455,8 @@ access_peer_networks = ["198.51.100.20", "2001:db8:20::20", "203.0.113.30"]
 * **What goes to the others.** A lockout here goes, as a block, to every server in
   `[[locations]]`, at once. While the attacker keeps trying here, it goes again every
   third of `access_lockout_minutes`, so the others' blocks don't run out first.
-  `sudo texas2step access block` and `access lockouts --clear` go to every server too:
-  `--clear` on any one of them lets a caller back in everywhere. The
+  `sudo texas2step access block`, `access lockouts --clear` and `access passes --end` go
+  to every server too: `--clear` on any one of them lets a caller back in everywhere. The
   [API's blocks](#lockouts-and-blocks) stay on the server they are sent to. A block from
   `access block` ends passes on every server, as here; a lockout ends none anywhere. A
   server on an earlier version sends either as a lockout.
@@ -432,6 +471,9 @@ access_peer_networks = ["198.51.100.20", "2001:db8:20::20", "203.0.113.30"]
   compromised: a block from another server covers at most a /24 or a /48, never
   `internal_networks` or loopback, lasts at most a week, and isn't passed on. A server
   holds at most 1,000 of them. A wider block by hand stays on the server where it was set.
+  Another server can end every pass issued before its request, which at worst has
+  everyone enter the code again, but not set that time later than the receiving server's
+  clock allows, which would stamp new passes there too far ahead.
 * **Counts stay on each server.** Wrong codes count where they are entered, so with three
   servers an attacker gets up to about seven guesses, two at each and one more, before
   the whole cluster locks them out.
