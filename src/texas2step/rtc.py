@@ -85,11 +85,21 @@ RECEIVED_OVERHEAD = 150
 MDNS_CANDIDATE = re.compile(
     r"^a=candidate:\S+ \d+ \S+ \d+ \S+\.local \d+ [^\r\n]*\r?\n", re.M | re.I
 )
+END_OF_CANDIDATES = re.compile(r"^a=end-of-candidates\r?\n", re.M)
 
 
 def without_mdns(sdp: str) -> str:
-    """The offer without the candidates a browser names by multicast DNS."""
-    return MDNS_CANDIDATE.sub("", sdp)
+    """The offer without the candidates a browser names by multicast DNS.
+
+    An offer left with none loses its end-of-candidates too. Firefox sends one: aioice
+    would take the empty list as final, drop the stream's only component, and answer
+    with no candidates of its own, so no UDP session could open. Without it, aioice waits
+    for the browser's checks, as with Chrome, which sends none.
+    """
+    sdp = MDNS_CANDIDATE.sub("", sdp)
+    if not re.search(r"^a=candidate:", sdp, re.M):
+        sdp = END_OF_CANDIDATES.sub("", sdp)
+    return sdp
 
 
 def _bind_in_range(address: str, ports: tuple[int, int]) -> socket.socket | None:

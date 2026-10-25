@@ -290,3 +290,51 @@ def test_offers_lose_their_mdns_candidates_only():
     assert ".local" not in got.lower()
     assert "192.0.2.10 50000" in got and "203.0.113.9 61000" in got
     assert got.endswith("a=end-of-candidates\r\n")
+
+
+def test_an_offer_of_mdns_candidates_only_keeps_ice_open():
+    # Firefox: host candidates by name only, and end-of-candidates. Left in, the empty list
+    # made aioice answer with no candidates at all.
+    offer = (
+        "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n"
+        "a=candidate:0 1 UDP 2122187007 1aa86bc4-5b66-435e-a15a-5e051c804bb9.local 52501"
+        " typ host\r\n"
+        "a=candidate:2 1 TCP 2105458943 1aa86bc4-5b66-435e-a15a-5e051c804bb9.local 9"
+        " typ host tcptype active\r\n"
+        "a=end-of-candidates\r\n"
+        "a=setup:actpass\r\n"
+    )
+    got = without_mdns(offer)
+    assert "a=candidate" not in got and "end-of-candidates" not in got
+    assert got.endswith("a=setup:actpass\r\n")
+
+
+async def test_an_offer_without_candidates_still_opens(peers):
+    """Firefox's offer, once its .local names are out: no candidates, but end-of-candidates.
+    The server answers with its own, learns the browser's address from its checks, and
+    echoes."""
+    echo = RtcEcho([], max_sessions=4, timeout=60, port_range=RANGE)
+    echo.start()
+    try:
+        pc, channel = await offer(peers)
+        lines = [x for x in pc.localDescription.sdp.splitlines() if not x.startswith("a=candidate")]
+        at = next(
+            i
+            for i, x in enumerate(lines)
+            if x.startswith("a=end-of-candidates") or x.startswith("a=setup")
+        )
+        lines = [x for x in lines if not x.startswith("a=end-of-candidates")]
+        sdp = "\r\n".join([*lines[:at], "a=end-of-candidates", *lines[at:]]) + "\r\n"
+        answer = await echo.answer(sdp)
+        assert candidates(answer["sdp"])
+
+        opened = asyncio.Event()
+        echoed: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        channel.on("open", opened.set)
+        channel.on("message", lambda m: echoed.done() or echoed.set_result(m))
+        await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
+        await asyncio.wait_for(opened.wait(), 10)
+        channel.send(b"probe-1")
+        assert await asyncio.wait_for(echoed, 5) == b"probe-1"
+    finally:
+        await echo.stop()
