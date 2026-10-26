@@ -144,7 +144,9 @@ Path profile, which aren't counted, and Monitor says so with the site's message 
 Until the limit opens again, a call profile is refused at its start.
 `monitor_video = false` in the settings withholds the Video call profile altogether, and
 `monitor_voice = false` the Voice call one: the page doesn't offer them, and the server
-refuses them. With both, Monitor runs only the uncounted Path profile.
+refuses them. With both, Monitor runs only the uncounted Path profile. To bound how long
+a page left open keeps sending, see `page_monitor_max_runtime`, `page_diag_max_runtime`
+and `session_max_runtime` in [Configuration](configuration.md).
 
 ## What isn't counted
 

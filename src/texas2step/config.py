@@ -106,6 +106,9 @@ class Settings:
     max_download_bytes: int = 1 << 30
     max_upload_bytes: int = 1 << 30
     max_stream_seconds: float = 60.0
+    # The longest any one UDP probe session or echo socket lasts, in seconds; 0, no limit.
+    # The server then ends it and says why, and the page stops until it's reloaded.
+    session_max_runtime: int = 0
 
     # UDP probing over WebRTC data channels.
     webrtc_enabled: bool = True
@@ -134,6 +137,10 @@ class Settings:
     page_history: bool = True
     page_help: bool = True
     page_api: bool = True
+    # How long Monitor and Diag run before they stop and ask for a reload, in seconds; 0,
+    # no limit. Monitor's clock starts at each Start, Diag's each time it is shown.
+    page_monitor_max_runtime: int = 0
+    page_diag_max_runtime: int = 0
 
     # Defaults offered to the browser UI.
     default_streams: int = 4
@@ -247,6 +254,14 @@ class Settings:
         if not set(self.pages) - {"help"}:
             raise ValueError(
                 "page_test, page_monitor, page_diag, page_history, page_api: keep one shown"
+            )
+        for name in ("page_monitor_max_runtime", "page_diag_max_runtime"):
+            if getattr(self, name) != 0 and not 60 <= getattr(self, name) <= 31_536_000:
+                raise ValueError(f"{name}: expected 0 (no limit) or 60 to 31536000 seconds")
+        # A test's own sessions last a minute or two: a shorter limit would cut them off.
+        if self.session_max_runtime != 0 and not 300 <= self.session_max_runtime <= 31_536_000:
+            raise ValueError(
+                "session_max_runtime: expected 0 (no limit) or 300 to 31536000 seconds"
             )
         if self.default_theme not in THEMES:
             raise ValueError(f"default_theme: expected one of {', '.join(THEMES)}")

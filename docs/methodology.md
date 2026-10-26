@@ -315,6 +315,11 @@ screenshot of. The window can still be changed, to look back over the last 15 mi
 The 10 seconds cut short by Stop aren't scored. Going to another page stops the monitor
 the same way, and the page says so when you come back to it.
 
+**Time limits.** A site can stop Monitor a set time after each Start
+(`page_monitor_max_runtime`), for pages left running unattended, and a server can end any
+session after a set time (`session_max_runtime`). Either way Monitor stops as Stop does,
+holds its chart and figures, says why, and starts again only once the page is reloaded.
+
 **Outages.** A server that hasn't answered for 3 seconds has gone quiet: when Wi-Fi or
 mobile data drops while you move around, say, or when the server restarts. The line
 beside the chart's title says so. Its probes keep their places and count as lost, so
@@ -388,6 +393,10 @@ An attempt not answered within 2 s (1.5 s for WebSocket and UDP) counts as misse
 method that has answered before shows a miss as loss (red). One that hasn't answered
 yet stays grey and keeps trying. One the server turns out not to offer, such as UDP in
 a family it has no address in, is grey and isn't tried again.
+A site can stop Diag a set time after it's shown (`page_diag_max_runtime`), and a server
+can end its WebSocket or UDP session after a set time (`session_max_runtime`). Either way
+Diag stops as it does for another page, keeps its rows and events, says why, and starts
+again only once the page is reloaded.
 One whose address asks for the access code, as a server's IPv4-only name can for a
 visitor inside on IPv6 only, says **Restricted** (amber) and doesn't count as loss:
 its HTTP rows are tried every 10 s until the code is in, and no WebSocket is opened there

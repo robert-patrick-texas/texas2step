@@ -2,7 +2,7 @@
 // When the site lists two or more servers, it can probe two at once, at the same moments
 // from this browser, and compare the two paths on one chart. A profile picks what is sent:
 // small probes to follow the path, or a voice or video call's packets, scored every 10 s.
-import { WsProber } from "../../engine/latency";
+import { RUNTIME_CLOSE, WsProber } from "../../engine/latency";
 import { RtcProbe } from "../../engine/loss";
 import { type Endpoint, NeedsCode, REFUSED } from "../../engine/net";
 import { jitter, percentile } from "../../engine/stats";
@@ -13,6 +13,7 @@ import { awakeSwitch } from "../awake";
 import { LiveChart, type LiveSeries } from "../charts/live";
 import { clear, h, save, setText, store } from "../dom";
 import { type Formatted, ms, pct } from "../format";
+import { maxRuntime, reloadButton, sessionEnded, span } from "../runtime";
 
 interface Probe {
   send(seq: number, size: number): void;
@@ -162,6 +163,8 @@ export class MonitorView implements View {
   private outages = 0; // since Start, all servers
   private lastOutage = ""; // what the chart's note said about the latest one
   private leftRunning = false; // stopped by going to another page
+  private over = false; // stopped at a time limit: only a reload starts it again
+  private startedAt = 0; // Date.now() at Start, for the site's limit
   private off: (() => void) | null = null;
   private startBtn!: HTMLButtonElement;
   private transport!: HTMLElement;
@@ -248,7 +251,7 @@ export class MonitorView implements View {
 
   show(): void {
     this.away = false;
-    this.app.awake.hold("monitor");
+    if (!this.over) this.app.awake.hold("monitor");
     this.awakeOpt?.mark(); // it may have changed on another page
     this.refresh();
     this.timers.push(window.setInterval(() => this.refresh(), 500));
@@ -457,12 +460,13 @@ export class MonitorView implements View {
     for (const el of this.profileBox.querySelectorAll<HTMLButtonElement>("[aria-label=Profile] button")) el.disabled = on;
   }
 
-  private say(message: string | null, url: string | null = null, code: Endpoint | null = null): void {
+  private say(message: string | null, url: string | null = null, code: Endpoint | null = null, reload = false): void {
     clear(this.notice);
     this.notice.hidden = !message;
     if (!message) return;
     this.notice.append(message);
     if (url) this.notice.append(" ", h("a", { href: url }, "Click here to continue."));
+    if (reload) this.notice.append(" ", reloadButton());
     if (code && this.app.takesCode) {
       // Once it's in, Monitor starts, or a running one's next try gets through.
       const enter = h("button", { class: "btn small", type: "button" }, "Enter access code");
@@ -480,6 +484,7 @@ export class MonitorView implements View {
   // ---- Probing -------------------------------------------------------------------
 
   private async start(): Promise<void> {
+    if (this.over) return;
     const app = this.app;
     const sides = this.comparing ? this.sides() : null;
     this.startBtn.disabled = true;
@@ -526,6 +531,7 @@ export class MonitorView implements View {
       return;
     }
     this.running = true;
+    this.startedAt = Date.now();
     this.startBtn.textContent = "Stop";
     for (const d of this.dests) d.lastEcho = Date.now();
     this.showTransport();
@@ -563,6 +569,9 @@ export class MonitorView implements View {
         d.transport = "unreachable";
         return null;
       }
+      ws.onClose = (code) => {
+        if (code === RUNTIME_CLOSE) this.serverEnded(d);
+      };
       // Over TCP the probes are round trips of a fixed small size, and video isn't sent.
       d.probe = {
         send: (seq) =>
@@ -593,11 +602,13 @@ export class MonitorView implements View {
         return { message: `${info.server.name} doesn't offer Monitor's ${profile === "video" ? "Video call" : "Voice call"} profile.`, url: null };
       }
       if (info.capabilities.stamps) await rtc.stamp();
-      // At a traffic limit the server holds the session to path probes: follow it.
-      rtc.onNotice = (msg) => {
-        if (msg.op === "limit") this.limited(typeof msg.message === "string" ? msg.message : REFUSED, typeof msg.url === "string" ? msg.url : null);
-      };
     }
+    // At a traffic limit the server holds a call to path probes: follow it. At its
+    // session_max_runtime it ends the session: stop, rather than open another.
+    rtc.onNotice = (msg) => {
+      if (msg.op === "limit") this.limited(typeof msg.message === "string" ? msg.message : REFUSED, typeof msg.url === "string" ? msg.url : null);
+      else if (msg.op === "ended") this.serverEnded(d, msg.seconds);
+    };
     rtc.onEcho = (seq, rtt, now, stamp) => {
       this.record(d, series, seq, rtt);
       d.stream?.echo(seq, rtt, now, stamp);
@@ -626,6 +637,8 @@ export class MonitorView implements View {
    */
   private watch(): void {
     const now = Date.now();
+    const limit = maxRuntime("monitor");
+    if (limit && now - this.startedAt >= limit) return this.end(`Stopped after ${span(limit / 1000)}, this site's limit.`);
     for (const [i, d] of this.dests.entries()) {
       if (d.busy) continue;
       const quiet = now - d.lastEcho > SILENT_MS;
@@ -752,6 +765,24 @@ export class MonitorView implements View {
     const i = this.dests.indexOf(d);
     const name = d.info?.server.name ?? new URL(d.ep.base).host;
     return this.dests.length > 1 ? `${SIDES[i]!.short} (${name})` : name;
+  }
+
+  /**
+   * A time limit is reached, the site's or a server's: Monitor stops as it does for another
+   * page, holds what it shows, and starts again only once the page is reloaded.
+   */
+  private end(message: string): void {
+    if (this.over || !this.running) return;
+    this.over = true;
+    this.stop();
+    this.startBtn.disabled = true;
+    this.app.awake.hold("monitor", false);
+    this.say(`${message} Reload the page to start again.`, null, null, true);
+  }
+
+  /** A server ended its session at its session_max_runtime. */
+  private serverEnded(d: Dest, seconds: unknown = d.info?.limits.max_session_seconds): void {
+    this.end(sessionEnded(this.serverName(d), seconds));
   }
 
   /** A server's traffic limit is reached: carry on with path probes, and say why. */

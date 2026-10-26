@@ -173,7 +173,8 @@ export interface ServerInfo {
   server: { id: string; name: string; location: string };
   /** `stamps`: the UDP probe's echoes can carry the server's stamps; older servers leave it out. */
   capabilities: { websocket: boolean; webrtc: boolean; results: boolean; measure: boolean; stamps?: boolean };
-  limits: { max_download_bytes: number; max_upload_bytes: number; max_stream_seconds: number };
+  /** `max_session_seconds`: session_max_runtime, 0 for none; older servers leave it out. */
+  limits: { max_download_bytes: number; max_upload_bytes: number; max_stream_seconds: number; max_session_seconds?: number };
   ice_servers: RTCIceServer[];
   /** `one_stream`: whether a test measures one stream's download unless the visitor
    * chooses; older servers leave it out. */

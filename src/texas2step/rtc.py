@@ -235,6 +235,7 @@ class Session:
     profile: str = "path"
     limited: bool = False  # held to path probes by a traffic limit
     control: Any = None  # the control channel, to tell the client of a limit reached
+    ending: float | None = None  # when it was told session_max_runtime is up
 
     def counters(self) -> dict[str, int]:
         return {"rx": self.rx, "tx": self.tx, "rx_bytes": self.rx_bytes}
@@ -265,6 +266,7 @@ class RtcEcho:
         port_range: tuple[int, int] | None = None,
         voice: bool = True,
         video: bool = True,
+        max_runtime: float = 0,
     ) -> None:
         self.enabled = enabled and AVAILABLE
         self.offered = {"path": True, "voice": voice, "video": video}  # monitor_voice, _video
@@ -274,6 +276,7 @@ class RtcEcho:
         self.ice_servers = ice_servers
         self.max_sessions = max_sessions
         self.timeout = timeout
+        self.max_runtime = max_runtime  # session_max_runtime; 0, none
         self.port_range = port_range
         self.sessions: dict[str, Session] = {}
         self._reaper: asyncio.Task[None] | None = None
@@ -456,3 +459,17 @@ class RtcEcho:
                 ):
                     log.debug("closing rtc session %s: its pass was ended", session.id)
                     await self._close(session)
+                elif self.max_runtime and now - session.created > self.max_runtime:
+                    await self._end(session, now)
+
+    async def _end(self, session: Session, now: float) -> None:
+        """At session_max_runtime: tell the client why, so it doesn't open another session
+        in its place, then close it on the reaper's next round."""
+        if session.ending is not None:
+            log.debug("closing rtc session %s: session_max_runtime", session.id)
+            await self._close(session)
+            return
+        session.ending = now
+        reply = {"op": "ended", "reason": "runtime", "seconds": self.max_runtime}
+        with contextlib.suppress(Exception):
+            session.control.send(json.dumps(reply))

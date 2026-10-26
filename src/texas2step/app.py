@@ -444,6 +444,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         port_range=settings.rtc_ports,
         voice=settings.monitor_voice,
         video=settings.monitor_video,
+        max_runtime=settings.session_max_runtime,
     )
     app.state.rtc.meter = app.state.traffic
     app.state.rtc.blocks = app.state.blocks

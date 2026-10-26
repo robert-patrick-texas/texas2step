@@ -80,6 +80,8 @@ async def info(request: Request) -> dict[str, Any]:
             "max_download_bytes": s.max_download_bytes,
             "max_upload_bytes": s.max_upload_bytes,
             "max_stream_seconds": s.max_stream_seconds,
+            # 0: sessions run until the client closes them, or go idle.
+            "max_session_seconds": s.session_max_runtime,
         },
         "ice_servers": [{"urls": url} for url in s.ice_servers],
         "defaults": {

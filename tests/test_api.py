@@ -4,6 +4,7 @@ import json
 import re
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from texas2step import __version__
@@ -63,6 +64,22 @@ def test_websocket_echo(client):
         assert ws.receive_bytes() == b"\x01\x02\x03"
         ws.send_text("hello")
         assert ws.receive_text() == "hello"
+
+
+def test_echo_socket_ends_at_session_max_runtime(client, settings):
+    from starlette.websockets import WebSocketDisconnect
+
+    assert client.get("/api/v1/info").json()["limits"]["max_session_seconds"] == 0
+    settings.session_max_runtime = 1  # under the 300 s a settings file allows, to be quick
+    assert client.get("/api/v1/info").json()["limits"]["max_session_seconds"] == 1
+    with client.websocket_connect("/api/v1/ws") as ws:
+        ws.send_text("hello")
+        assert ws.receive_text() == "hello"
+        time.sleep(1.1)
+        ws.send_text("again")
+        with pytest.raises(WebSocketDisconnect) as closed:
+            ws.receive_text()
+    assert closed.value.code == 4001  # the page stops rather than open another
 
 
 def test_info_whoami_locations(client):
@@ -444,6 +461,21 @@ def test_hidden_pages_lose_their_tabs(tmp_path):
         assert c.get("/help").status_code == 200  # the page's own script sends it home
     assert '<html lang="en" data-pages="test monitor diag history api">' in page
     assert 'data-page="help"' not in page and ">?</a>" not in page
+
+
+def test_the_page_carries_the_runtime_limits(tmp_path):
+    settings = Settings(results_path=str(tmp_path / "r.db"))
+    with TestClient(create_app(settings)) as c:
+        page = c.get("/monitor").text
+    assert "data-monitor-max" not in page and "data-diag-max" not in page
+    settings = Settings(
+        results_path=str(tmp_path / "r.db"),
+        page_monitor_max_runtime=900,
+        page_diag_max_runtime=3600,
+    )
+    with TestClient(create_app(settings)) as c:
+        page = c.get("/monitor").text
+    assert '<html lang="en" data-monitor-max="900" data-diag-max="3600">' in page
 
 
 def test_branding_is_written_into_the_page(tmp_path):

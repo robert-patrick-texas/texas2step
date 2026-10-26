@@ -19,6 +19,7 @@
 # max_download_bytes = 1073741824
 # max_upload_bytes = 1073741824
 # max_stream_seconds = 60.0
+# session_max_runtime = 0               # seconds a UDP or WebSocket session may last; 0 = no limit
 
 # --- UDP probe (WebRTC) ----------------------------------------------------------------
 # webrtc_enabled = true
@@ -44,6 +45,8 @@ results_path = "/var/lib/texas2step/results.db"
 # page_history = true                   # the History tab
 # page_help = true                      # the ? tab: what each page does, for anyone
 # page_api = true                       # the API tab
+# page_monitor_max_runtime = 0          # seconds Monitor runs before it stops; 0 = no limit
+# page_diag_max_runtime = 0             # seconds Diag runs before it stops; 0 = no limit
 
 # --- Defaults offered to the browser UI --------------------------------------------------
 # default_streams = 4

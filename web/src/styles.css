@@ -2238,15 +2238,18 @@ a.brand-org:hover,
   max-width: 88ch;
 }
 
-/* Monitor: a server refused a profile, or held it to path probes at a traffic limit. */
-.monitor-notice {
+/* Monitor: a server refused a profile, or held it to path probes at a traffic limit; Monitor
+   or Diag stopped at a time limit. */
+.monitor-notice,
+.diag-notice {
   margin: 6px 0 0;
   max-width: 88ch;
   color: var(--ink);
   font-weight: 550;
 }
 
-.monitor-notice[hidden] {
+.monitor-notice[hidden],
+.diag-notice[hidden] {
   display: none;
 }
 

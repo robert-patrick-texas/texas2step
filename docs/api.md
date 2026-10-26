@@ -20,7 +20,7 @@ headers. Measurement endpoints add `Server-Timing` so clients can subtract serve
 | GET | `/api/v1/down?bytes=N` | Exactly N random bytes (≤ `max_download_bytes`) with `Content-Length` |
 | GET | `/api/v1/down?seconds=S` | Stream random bytes for S seconds (chunked, ≤ `max_stream_seconds`) |
 | POST | `/api/v1/up` | Read and discard the body; returns `{"bytes", "rx_ms", "mbps"}` measured server-side |
-| WS | `/api/v1/ws` | Echo every message unchanged |
+| WS | `/api/v1/ws` | Echo every message unchanged; closed with code `4001` once `session_max_runtime` is up |
 | POST | `/api/v1/rtc/offer` | WebRTC signalling for the UDP probe (see below) |
 
 ```bash
@@ -84,7 +84,12 @@ sending the offer. The offer must include data channels:
   server sends `{"op":"limit","message":…,"url":…}` unasked and from then on echoes only
   probes of up to 64 bytes.
 
-Sessions close when the peer disconnects or after `rtc_session_timeout` seconds idle.
+  Once `session_max_runtime` is up, the server sends `{"op":"ended","reason":"runtime","seconds":…}`
+  unasked and closes the session a few seconds later. texas2step's pages then stop and ask
+  for a reload rather than open another session.
+
+Sessions close when the peer disconnects, after `rtc_session_timeout` seconds idle, or
+after `session_max_runtime` seconds in all, where it is set.
 The server answers `503` when it already holds `max_rtc_sessions` sessions, or when
 every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 
@@ -92,7 +97,7 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/v1/info` | name, version (left out for clients outside `internal_networks`), server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes), limits, ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `monitor` (`profile`: Monitor's until a visitor picks; `voice`, `video`: whether the Voice call and Video call profiles are offered); with a [traffic limit](traffic.md), `traffic` (below) |
+| GET | `/api/v1/info` | name, version (left out for clients outside `internal_networks`), server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes), limits (`max_session_seconds`: `session_max_runtime`, `0` for none), ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `monitor` (`profile`: Monitor's until a visitor picks; `voice`, `video`: whether the Voice call and Video call profiles are offered); with a [traffic limit](traffic.md), `traffic` (below) |
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |

@@ -3,7 +3,7 @@
 // as the server offers them. Each answer also says what the server saw: the client's
 // address and port, the HTTP version, TLS, the server's own TCP round trip, and its clock.
 import { eui64Mac } from "../../engine/addr";
-import { WsProber } from "../../engine/latency";
+import { RUNTIME_CLOSE, WsProber } from "../../engine/latency";
 import { NotOffered, RtcProbe, type UdpAddress } from "../../engine/loss";
 import { Endpoint } from "../../engine/net";
 import { percentile } from "../../engine/stats";
@@ -13,6 +13,7 @@ import { awakeSwitch } from "../awake";
 import { drawTimeline, Lane, type Sample, type Tone } from "../charts/diag";
 import { clear, h, onResize, setText } from "../dom";
 import { ms, text } from "../format";
+import { maxRuntime, reloadButton, sessionEnded, span } from "../runtime";
 
 type Fam = "IPv4" | "IPv6";
 type Http = "http1" | "http2" | "http3";
@@ -373,6 +374,9 @@ class WsMethod extends Method {
     this.next = Date.now() + WS_RETRY_MS;
     this.prober?.close();
     const prober = new WsProber();
+    prober.onClose = (code) => {
+      if (code === RUNTIME_CLOSE) this.view.serverEnded();
+    };
     this.prober = prober;
     void prober.open(this.ep.wsUrl("/ws"), 3000, this.ep.wsProtocols()).then(() => {
       this.opening = false;
@@ -440,6 +444,9 @@ class UdpMethod extends Method {
       .then(async (probe) => {
         if (this.stopped) return probe.close();
         probe.onEcho = (seq, rtt) => this.waitingFor.get(seq)?.(rtt);
+        probe.onNotice = (msg) => {
+          if (msg.op === "ended") this.view.serverEnded(msg.seconds);
+        };
         this.rtc = probe;
         const [path, seen] = await Promise.all([probe.path(), probe.address()]);
         if (path?.port) this.port = `UDP ${path.port}`;
@@ -499,8 +506,10 @@ export class DiagView implements View {
   private logShown = -1;
   private away = false; // another page is shown
   private stale = false; // the server was changed while away
+  private over = false; // stopped at a time limit: only a reload starts it again
+  private since = 0; // Date.now() when it last started, for the site's limit
   private awakeOpt: ReturnType<typeof awakeSwitch> = null; // Keep screen on
-  private els!: { you: HTMLElement; clock: HTMLElement; rows: HTMLElement; egress: HTMLElement; log: HTMLElement };
+  private els!: { you: HTMLElement; clock: HTMLElement; rows: HTMLElement; egress: HTMLElement; log: HTMLElement; notice: HTMLElement };
   private readonly onVisibility = () => this.log(null, document.hidden ? "tab hidden: browsers slow down timers in background tabs, so gaps may follow" : "tab visible again");
 
   constructor(private readonly app: App) {}
@@ -521,6 +530,7 @@ export class DiagView implements View {
       rows: h("div", { class: "diag-rows" }),
       egress: h("div", { class: "egress" }),
       log: h("ol", { class: "diag-log" }),
+      notice: h("p", { class: "diag-notice", role: "status", hidden: true }),
     };
     const card = (title: string, note: string, ...body: (HTMLElement | null)[]) =>
       h("section", { class: "card diag-card" }, h("header", { class: "card-head head-inline" }, h("h2", {}, title), note ? h("p", { class: "wide" }, note) : null), ...body);
@@ -534,6 +544,7 @@ export class DiagView implements View {
           {},
           h("h1", {}, "Diag"),
           h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second while this page is shown."),
+          this.els.notice,
         ),
         this.awakeOpt ? h("div", { class: "head-actions" }, this.awakeOpt.el) : null,
       ),
@@ -571,10 +582,12 @@ export class DiagView implements View {
       ),
     );
     this.off = this.app.onServer(() => {
+      if (this.over) return;
       if (this.away) this.stale = true;
       else this.restart();
     });
     document.addEventListener("visibilitychange", this.onVisibility);
+    this.since = Date.now();
     this.restart();
     this.timer = window.setInterval(() => this.render(), 1000);
     this.app.awake.hold("diag"); // the screen stays on while Diag is shown
@@ -583,6 +596,7 @@ export class DiagView implements View {
   /** Another page is shown: the attempts pause, and what they found stays. */
   hide(): void {
     this.away = true;
+    if (this.over) return; // already stopped
     clearInterval(this.timer);
     for (const m of this.methods) m.pause();
     document.removeEventListener("visibilitychange", this.onVisibility);
@@ -592,6 +606,8 @@ export class DiagView implements View {
 
   show(): void {
     this.away = false;
+    if (this.over) return; // stopped at a time limit, it stays stopped
+    this.since = Date.now(); // the site's limit counts from each return
     this.app.awake.hold("diag");
     this.awakeOpt?.mark(); // it may have changed on another page
     document.addEventListener("visibilitychange", this.onVisibility);
@@ -713,7 +729,31 @@ export class DiagView implements View {
     return this.app.enterCode(ep);
   }
 
+  /**
+   * A time limit is reached, the site's or the server's: Diag stops as it does for another
+   * page, keeps what it found, and starts again only once the page is reloaded.
+   */
+  private end(message: string): void {
+    if (this.over) return;
+    this.over = true;
+    clearInterval(this.timer);
+    for (const m of this.methods) m.pause();
+    document.removeEventListener("visibilitychange", this.onVisibility);
+    this.app.awake.hold("diag", false);
+    this.log(null, "stopped at a time limit");
+    this.els.notice.replaceChildren(`${message} Reload the page to start again. `, reloadButton());
+    this.els.notice.hidden = false;
+    this.render();
+  }
+
+  /** The server ended a session at its session_max_runtime. */
+  serverEnded(seconds: unknown = this.app.info?.limits.max_session_seconds): void {
+    this.end(sessionEnded(this.app.info?.server.name ?? "The server", seconds));
+  }
+
   private render(): void {
+    const limit = maxRuntime("diag");
+    if (limit && !this.over && !this.away && Date.now() - this.since >= limit) return this.end(`Stopped after ${span(limit / 1000)}, this site's limit.`);
     // One button for each address that asks for the code, on the first of its rows.
     const offered = new Set<string>();
     for (const m of this.methods) {

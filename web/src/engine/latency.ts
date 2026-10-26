@@ -137,12 +137,16 @@ export function responsivenessWhile(ep: Endpoint, loaded: boolean, everyMs = 100
 }
 
 const PROBE_BYTES = 12; // u32 sequence + f64 send time
+/** The echo socket's close code when the server's session_max_runtime is up (docs/api.md). */
+export const RUNTIME_CLOSE = 4001;
 
 /** Echo probes over a dedicated WebSocket (its own TCP connection, outside the HTTP pool). */
 export class WsProber {
   private ws: WebSocket | null = null;
   private seq = 0;
   private pending = new Map<number, (rtt: number | null) => void>();
+  /** The socket closed, by either end: its close code, such as RUNTIME_CLOSE. */
+  onClose: ((code: number) => void) | null = null;
 
   /** `protocols`: the subprotocols that carry the pass to the page's own server (net.ts). */
   async open(url: string, timeoutMs = 4000, protocols: string[] = []): Promise<boolean> {
@@ -168,10 +172,11 @@ export class WsProber {
         clearTimeout(timer);
         resolve(false);
       };
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         this.ws = null;
         for (const done of this.pending.values()) done(null);
         this.pending.clear();
+        this.onClose?.(ev.code);
       };
       ws.onmessage = (ev) => {
         const now = performance.now();

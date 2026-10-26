@@ -143,6 +143,14 @@ def test_branding_rejects_unsafe_or_unknown_values(tmp_path):
         )
     assert Settings(page_history=False).pages == ["test", "monitor", "diag", "help", "api"]
     assert Settings(page_help=False).pages == ["test", "monitor", "diag", "history", "api"]
+    for name in ("page_monitor_max_runtime", "page_diag_max_runtime"):
+        assert getattr(Settings(**{name: 60}), name) == 60
+        with pytest.raises(ValueError, match=name):
+            Settings(**{name: 59})
+    # A test's own sessions run a minute or two, so the cap on any session starts higher.
+    assert Settings(session_max_runtime=300).session_max_runtime == 300
+    with pytest.raises(ValueError, match="session_max_runtime"):
+        Settings(session_max_runtime=299)
     path = tmp_path / "typo.toml"
     path.write_text('[[brand_links]]\nlable = "Help"\nurl = "https://help.example"\n')
     with pytest.raises(ValueError, match="brand_links"):

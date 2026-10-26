@@ -87,6 +87,11 @@ class Shell:
         root = ['lang="en"']
         if s.default_theme != "system":
             root.append(f'data-default-theme="{s.default_theme}"')
+        # How long Monitor and Diag may run, where the site limits them (ui/runtime.ts).
+        if s.page_monitor_max_runtime:
+            root.append(f'data-monitor-max="{s.page_monitor_max_runtime}"')
+        if s.page_diag_max_runtime:
+            root.append(f'data-diag-max="{s.page_diag_max_runtime}"')
         if pages != list(PAGES):
             # The tabs of hidden pages go, and the UI is told which pages it has.
             root.append(f'data-pages="{" ".join(pages)}"')

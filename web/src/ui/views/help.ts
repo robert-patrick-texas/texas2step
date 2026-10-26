@@ -2,12 +2,15 @@
 // then more on each page shown. It never names the tool, as a site may be renamed.
 import type { App, View } from "../app";
 import { h, reducedMotion } from "../dom";
+import { maxRuntime, span } from "../runtime";
 
 type Part = string | HTMLElement;
 
 const b = (text: string) => h("strong", {}, text);
 const p = (...parts: Part[]) => h("p", {}, ...parts);
 const list = (tag: "ul" | "ol", items: Part[][]) => h(tag, {}, ...items.map((parts) => h("li", {}, ...parts)));
+/** Where the site stops a page after a while, a line that says so. */
+const limit = (page: "monitor" | "diag", text: (span: string) => string) => (maxRuntime(page) ? [p(text(span(maxRuntime(page) / 1000)))] : []);
 
 /** One of the pages described: its summary up top, and its section below. */
 interface Topic {
@@ -94,6 +97,7 @@ const TOPICS: Topic[] = [
         " sends the same packets to two of them at the same moments and compares them side by side, with the difference B − A. When one path is worse, the trouble lies on that path, not in this device.",
       ),
       p("A server that stops answering for 3s is reported over the chart; Monitor keeps trying, and says how long it was gone once it answers. Stop holds the chart still for a screenshot. Going to another page stops Monitor too."),
+      ...limit("monitor", (t) => `This site stops Monitor ${t} after each Start; reload the page to run it again.`),
     ],
   },
   {
@@ -122,6 +126,7 @@ const TOPICS: Topic[] = [
         b("Copy log"),
         " copies them, to send to the service desk.",
       ),
+      ...limit("diag", (t) => `This site stops Diag after ${t} on screen; reload the page to run it again.`),
     ],
   },
 ];

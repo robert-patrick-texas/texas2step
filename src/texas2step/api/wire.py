@@ -25,6 +25,10 @@ from .meta import client_address
 
 router = APIRouter(prefix="/api/v1", tags=["wire"])
 
+# The echo socket's close code at session_max_runtime: the page stops rather than open
+# another (docs/api.md). 4000-4999 are for applications to define.
+RUNTIME_CLOSE = 4001
+
 NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache"}
 
 
@@ -165,7 +169,8 @@ async def ws_echo(ws: WebSocket) -> None:
     ip, _ = client_address(ws)
     blocks = ws.app.state.blocks if ws.app.state.codes is not None else None
     issued = await pass_issued(ws)
-    checked = time.monotonic()
+    checked = opened = time.monotonic()
+    limit = ws.app.state.settings.session_max_runtime
     try:
         while True:
             message = await ws.receive()
@@ -176,6 +181,9 @@ async def ws_echo(ws: WebSocket) -> None:
                     await ws.close(code=1008, reason="access code required")
                     return
             if message["type"] == "websocket.disconnect":
+                return
+            if limit and time.monotonic() - opened > limit:
+                await ws.close(code=RUNTIME_CLOSE, reason="session_max_runtime")
                 return
             if message.get("bytes") is not None:
                 await ws.send_bytes(message["bytes"])

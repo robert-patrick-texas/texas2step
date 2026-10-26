@@ -326,6 +326,9 @@ async def test_a_connection_closed_during_its_checks_sends_nothing_more():
 def test_settings_reach_the_echo(tmp_path):
     settings = Settings(results_path=str(tmp_path / "r.db"), rtc_port_min=50000, rtc_port_max=50999)
     assert create_app(settings).state.rtc.port_range == (50000, 50999)
+    assert create_app(settings).state.rtc.max_runtime == 0
+    settings = Settings(results_path=str(tmp_path / "r.db"), session_max_runtime=3600)
+    assert create_app(settings).state.rtc.max_runtime == 3600
     assert create_app(Settings(results_path=str(tmp_path / "r.db"))).state.rtc.port_range is None
 
 
@@ -445,5 +448,32 @@ async def test_ending_passes_ends_the_sessions_opened_with_them(peers, monkeypat
                 break
             await asyncio.sleep(0.02)
         assert sorted(str(s.issued) for s in echo.sessions.values()) == ["1000200", "None"]
+    finally:
+        await echo.stop()
+
+
+async def test_a_session_ends_at_session_max_runtime_and_says_why(peers, monkeypatch):
+    monkeypatch.setattr(rtc, "LIMIT_CHECK", 0.05)
+    echo = RtcEcho([], max_sessions=4, timeout=60, port_range=RANGE, max_runtime=0.5)
+    echo.start()
+    try:
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        peers.append(pc)
+        pc.createDataChannel("probe", ordered=False, maxRetransmits=0)
+        control = pc.createDataChannel("control")
+        await pc.setLocalDescription(await pc.createOffer())
+        answer = await echo.answer(pc.localDescription.sdp)
+        notices: asyncio.Queue[Any] = asyncio.Queue()
+        control.on("message", lambda m: notices.put_nowait(json.loads(m)))
+        await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
+        # Told why first, so the page stops rather than open another session...
+        got = await asyncio.wait_for(notices.get(), 10)
+        assert got == {"op": "ended", "reason": "runtime", "seconds": 0.5}
+        # ...then closed on the reaper's next round.
+        for _ in range(100):
+            if not echo.sessions:
+                break
+            await asyncio.sleep(0.02)
+        assert not echo.sessions
     finally:
         await echo.stop()
