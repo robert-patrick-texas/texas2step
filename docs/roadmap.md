@@ -112,6 +112,13 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.4.3](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.3) (2026-10-26)
+
+- [x] With `brand_logo` set, the logo is the browser tab's icon, in the API explorer too.
+- [x] The API explorer takes `brand_name`, in its title and heading.
+- [x] The API tab's command-line examples keep the `texas2step` command, which they need
+  to work, and install it from PyPI.
+
 ### [2.4.2](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.2) (2026-10-26)
 
 - [x] The journal files each line at its level, so `journalctl -u texas2step -p warning`
