@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from websockets.sync.client import connect
 
+from texas2step import logs
 from texas2step.app import RequestLog, create_app
 
 NGINX = {"x-forwarded-for": "2001:db8::7", "x-client-protocol": "HTTP/2.0"}
@@ -161,3 +162,66 @@ def test_texas2step_and_webrtc_messages(mode, shown):
         [sys.executable, "-c", LIBRARIES, mode], capture_output=True, text=True, check=True
     )
     assert [" ".join(line.split(maxsplit=1)) for line in run.stderr.splitlines()] == shown
+
+
+JOURNAL = """
+import logging, logging.config, os, sys
+from texas2step import logs
+if sys.argv[1] == "journal":  # stderr is the stream systemd names
+    stat = os.fstat(2)
+    os.environ["JOURNAL_STREAM"] = f"{stat.st_dev}:{stat.st_ino}"
+else:  # inherited from the service, with stderr somewhere else
+    os.environ["JOURNAL_STREAM"] = "1:2"
+logging.config.dictConfig(logs.config(debug=True))
+logging.getLogger("texas2step.rtc").debug("probe")
+logging.getLogger("texas2step.access").info("ok")
+logging.getLogger("texas2step.access").warning("refused")
+try:
+    1 / 0
+except ZeroDivisionError:
+    logging.getLogger("uvicorn.error").exception("Exception in ASGI application")
+logging.getLogger("asyncio").error("Task exception was never retrieved")
+logging.getLogger("asyncio").info("not even with debug")
+"""
+
+
+@pytest.mark.parametrize("stderr", ["journal", "elsewhere"])
+def test_lines_to_the_journal_carry_their_priority(stderr):
+    run = subprocess.run(
+        [sys.executable, "-c", JOURNAL, stderr], capture_output=True, text=True, check=True
+    )
+    shown = [" ".join(line.split(maxsplit=1)) for line in run.stderr.splitlines()]
+    want = [
+        "<7>DEBUG: texas2step.rtc: probe",
+        "<6>INFO: ok",
+        "<4>WARNING: refused",
+        "<3>ERROR: Exception in ASGI application",
+        "<3>Traceback (most recent call last):",
+    ]
+    # The traceback's every line, and asyncio's error, which used to have no level at all.
+    tail = [
+        "<3>ZeroDivisionError: division by zero",
+        "<3>ERROR: asyncio: Task exception was never retrieved",
+    ]
+    if stderr == "journal":
+        assert shown[:5] == want and shown[-2:] == tail
+        assert all(line.startswith("<3>") for line in shown[3:])
+    else:
+        assert shown[:5] == [line[3:] for line in want]
+        assert shown[-2:] == [line[3:] for line in tail]
+        assert not any(line.startswith("<") for line in shown)
+
+
+@pytest.mark.parametrize(
+    ("level", "priority"),
+    [
+        (logging.CRITICAL, 2),
+        (logging.ERROR, 3),
+        (logging.WARNING, 4),
+        (25, 6),
+        (logging.INFO, 6),
+        (5, 7),
+    ],
+)
+def test_syslog_priorities(level, priority):
+    assert logs.priority(level) == priority

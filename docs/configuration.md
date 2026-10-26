@@ -300,12 +300,21 @@ The service logs to the journal (`journalctl -u texas2step -f`), and by default 
 needs attention:
 
 * start, stop and worker messages;
-* warnings and errors from texas2step and from the WebRTC libraries behind the UDP probe;
+* warnings and errors from texas2step, from the WebRTC libraries behind the UDP probe,
+  and from any other library it uses;
 * a line for each request that failed (status 400 or above), such as an upload over
   `max_upload_bytes`:
 
 ```text
 WARNING:  203.0.113.7 - "POST /api/v1/up HTTP/2.0" 413
+```
+
+The journal files each line at its level, so you can leave out the start and stop
+messages:
+
+```bash
+journalctl -u texas2step -p warning   # warnings, errors and failed requests
+journalctl -u texas2step -p err       # errors only
 ```
 
 The address is the client's, as `/api/v1/whoami` reports it: behind nginx, it comes from
