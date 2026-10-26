@@ -46,7 +46,7 @@ function mismatch(want: Http, got: string): string {
 
 // "address : port", spaced so the port can't be read as part of an IPv4 or IPv6 address.
 const hostPort = (ip: string | null | undefined, port: number | null | undefined) => (!ip ? "—" : port ? `${ip} : ${port}` : ip);
-const seconds = (msecs: number) => `${Math.max(1, Math.round(msecs / 1000))} s`; // never wrapped apart
+const seconds = (msecs: number) => `${Math.max(1, Math.round(msecs / 1000))}s`; // never wrapped apart
 const famName = (fam: Fam | "Auto") => (fam === "Auto" ? "This address" : fam);
 
 /** One way of reaching the server, with what its answers have shown. */

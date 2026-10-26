@@ -256,7 +256,7 @@ export class TestView implements View {
         "div",
         { class: "opt-grid" },
         seg("streams", "Parallel streams", [[1, "1"], [2, "2"], [4, "4"], [6, "6"], [8, "8"]], "Concurrent transfers. Browsers allow six HTTP/1.1 connections per server; HTTP/2 multiplexes on one."),
-        seg("seconds", "Duration", [[5, "5 s"], [10, "10 s"], [15, "15 s"], [20, "20 s"]], "Length of each of the download and upload phases."),
+        seg("seconds", "Duration", [[5, "5s"], [10, "10s"], [15, "15s"], [20, "20s"]], "Length of each of the download and upload phases."),
         seg("packets", "UDP probes", [[0, "Skip"], [200, "200"], [500, "500"], [1000, "1000"]], "Packets sent in the loss test."),
         seg("intervalMs", "Probe spacing", [[5, "5 ms"], [10, "10 ms"], [20, "20 ms"]], "Time between UDP probes."),
         seg("oneStream", "One stream", [[true, "Download"], [false, "Skip"]], "After the download, one stream for the same time: what a single file copy gets. Skipped when the test uses one stream. Until you choose, as the server says.", () => this.oneStream()),
@@ -385,7 +385,7 @@ export class TestView implements View {
         this.gauge.set(live.mbps, dir === "one" ? "download" : dir);
         this.link.setRate(live.mbps);
         this.link.setLabel(`${dir === "upload" ? "↑" : "↓"} ${text(rate(live.mbps))}`);
-        put(this.tiles[dir], rate(live.mbps), `${live.elapsed.toFixed(1)} s of ${seconds} s`);
+        put(this.tiles[dir], rate(live.mbps), `${live.elapsed.toFixed(1)}s of ${seconds}s`);
         this.throughput.set(dir, { timeline: live.timeline, binMs: 100, warmupS: 0, durationS: seconds, stable: null });
       },
       packetSent: (seq) => {
@@ -429,7 +429,7 @@ export class TestView implements View {
     this.result = result;
     this.describeEndpoints();
     this.renderResult(result);
-    setText(this.status, `Done in ${result.duration_s?.toFixed(0)} s.`);
+    setText(this.status, `Done in ${result.duration_s?.toFixed(0)}s.`);
     await this.save(result);
   }
 
@@ -594,7 +594,7 @@ export class TestView implements View {
     const each = call.basis === "each way" && call.up && call.down;
     const where = each ? (call.worse === "up" ? " ↑" : " ↓") : "";
     // A gap a caller would hear lowers the rating below the score's own; say which gap.
-    let sub = ` ${seconds.toLocaleString()} s snapshot`;
+    let sub = ` ${seconds.toLocaleString()}s snapshot`;
     if (gapped(call)) sub = ` ${call.longest_gap_ms.toLocaleString()} ms gap${where}`;
     else if (each) sub = ` ${ways(call, (c) => c.mos.toFixed(1))}`;
     this.tiles.call.sub.replaceChildren(chip, sub);
@@ -666,18 +666,18 @@ export class TestView implements View {
     // Browser results from before mac_source read theirs from EUI-64 too.
     add("MAC", r.client.mac && `${r.client.mac}, ${r.client.mac_source === "nic" ? "of the NIC the connection left by" : "read from the IPv6 address (EUI-64)"}`);
     add("Started", when(r.started_at));
-    add("Configuration", `${r.config.streams} streams · ${r.config.seconds} s per direction${r.config.one_stream ? " · one stream's download" : ""} · ${r.config.packets} UDP probes every ${r.config.interval_ms} ms`);
+    add("Configuration", `${r.config.streams} streams · ${r.config.seconds}s per direction${r.config.one_stream ? " · one stream's download" : ""} · ${r.config.packets} UDP probes every ${r.config.interval_ms} ms`);
     const lat = r.latency;
     if (lat) add("Idle latency", `median ${text(ms(lat.median))} · min ${text(ms(lat.min))} · p90 ${text(ms(lat.p90))} · max ${text(ms(lat.max))} · jitter ${text(ms(lat.jitter))} · ${lat.count} samples${lat.lost ? `, ${lat.lost} lost` : ""}`);
     const tp = (t: ThroughputResult | undefined, d: Direction) => {
       if (!t) return;
       const loaded = t.loaded_latency;
-      add(d === "download" ? "Download" : "Upload", `${text(rate(t.mbps))} stable · peak ${text(rate(t.peak_mbps))} · ${bytes(t.bytes)} in ${t.duration_s} s · ${t.streams} streams`);
+      add(d === "download" ? "Download" : "Upload", `${text(rate(t.mbps))} stable · peak ${text(rate(t.peak_mbps))} · ${bytes(t.bytes)} in ${t.duration_s}s · ${t.streams} streams`);
       if (loaded) add(`Latency during ${d}`, `median ${text(ms(loaded.median))} · p90 ${text(ms(loaded.p90))} · jitter ${text(ms(loaded.jitter))} · ${loaded.count} probes`);
     };
     tp(r.download, "download");
     const one = r.one_stream;
-    if (one) add("One stream", `${text(rate(one.mbps))} stable · peak ${text(rate(one.peak_mbps))} · ${bytes(one.bytes)} in ${one.duration_s} s${r.download?.mbps ? ` · ${Math.round((one.mbps / r.download.mbps) * 100)} % of the ${r.download.streams}-stream rate` : ""}`);
+    if (one) add("One stream", `${text(rate(one.mbps))} stable · peak ${text(rate(one.peak_mbps))} · ${bytes(one.bytes)} in ${one.duration_s}s${r.download?.mbps ? ` · ${Math.round((one.mbps / r.download.mbps) * 100)} % of the ${r.download.streams}-stream rate` : ""}`);
     tp(r.upload, "upload");
     if (r.bufferbloat?.grade) add("Bufferbloat", `grade ${r.bufferbloat.grade}`);
     const l = r.loss;

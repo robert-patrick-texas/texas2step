@@ -950,11 +950,11 @@ function lede(c: Choice, two: boolean): string {
   const each = Math.ceil(Math.round(total) / step) * step;
   const rate = (b: number) => (video ? `${(b / 1e6).toFixed(1)} Mb/s` : `${b / 1000} kb/s`);
   const what = video ? `A video call's packets, voice and ${VIDEO_FPS} frames a second of video` : "A voice call's packets";
-  if (two) return `A ${c.profile} call to two servers at once: about ${rate(each)} each way per server on the network, ${rate(2 * each)} in all, scored every 10 s.`;
+  if (two) return `A ${c.profile} call to two servers at once: about ${rate(each)} each way per server on the network, ${rate(2 * each)} in all, scored every 10s.`;
   return `${what}, about ${rate(each)} each way on the network, echoed by the server. Each 10 seconds is scored as the call would sound, to catch the moments it breaks up.`;
 }
 
-/** How long before `now`, as "40 s ago" or "3 min ago". */
+/** How long before `now`, as "40s ago" or "3 min ago". */
 function ago(t: number, now: number): string {
   const s = Math.max(0, Math.round((now - t) / 1000));
   return s < 120 ? `${s}s ago` : `${Math.round(s / 60)}\u00a0min ago`; // the unit can't wrap away

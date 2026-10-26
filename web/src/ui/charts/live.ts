@@ -99,7 +99,7 @@ export class LiveChart {
    * profile. */
   setCalls(calls: (Slice[] | null)[]): void {
     this.calls = calls;
-    const label = calls.some((c) => c) ? "Loss per second · call quality per 10\u00a0s" : "Loss per second";
+    const label = calls.some((c) => c) ? "Loss per second · call quality per 10s" : "Loss per second";
     if (this.stripLabel.textContent !== label) this.stripLabel.textContent = label;
     this.draw();
   }
@@ -365,11 +365,11 @@ export class LiveChart {
       rows.push({ value: text(pct((lost / inSecond.length) * 100)), label: `${who}lost in this second (${lost} of ${inSecond.length})` });
     }
     const s = (this.calls[i] ?? []).find((c) => t >= c.start && t < c.end);
-    if (s && (s.dead || !s.call)) rows.push({ value: "No packets came back", label: `in these 10 s, ${s.sent} sent` });
+    if (s && (s.dead || !s.call)) rows.push({ value: "No packets came back", label: `in these 10s, ${s.sent} sent` });
     else if (s?.call) {
       const c = s.call;
       const rated = (r: CallRating, mos: number) => `${mos.toFixed(1)} · ${RATING_WORD[r]}`;
-      rows.push({ value: rated(c.rating, c.mos), label: "call quality, these 10 s", color: `var(${RATING_INK[c.rating]})`, shape: "dot" });
+      rows.push({ value: rated(c.rating, c.mos), label: "call quality, these 10s", color: `var(${RATING_INK[c.rating]})`, shape: "dot" });
       if (c.down && c.up) {
         rows.push({ value: rated(c.down.rating, c.down.mos), label: "you hear" });
         rows.push({ value: rated(c.up.rating, c.up.mos), label: "the other end hears" });

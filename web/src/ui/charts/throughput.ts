@@ -134,7 +134,7 @@ export class ThroughputChart {
       cross.setAttribute("x1", String(px));
       cross.setAttribute("x2", String(px));
       cross.setAttribute("visibility", "visible");
-      showTip(ev.clientX, ev.clientY, `${t.toFixed(1)} s`, rows);
+      showTip(ev.clientX, ev.clientY, `${t.toFixed(1)}s`, rows);
     });
     hit.addEventListener("pointerleave", () => {
       cross.setAttribute("visibility", "hidden");
