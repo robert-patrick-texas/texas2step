@@ -163,7 +163,7 @@ def test_diag_page_can_be_hidden(tmp_path):
     settings = Settings(results_path=str(tmp_path / "r.db"), page_diag=False)
     page = Shell(settings, None).render(template, "", "0")
     assert 'data-page="diag"' not in page and 'data-page="monitor"' in page
-    assert 'data-pages="test monitor history api"' in page
+    assert 'data-pages="test monitor history help api"' in page
     assert 'data-page="diag"' in Shell(Settings(), None).render(template, "", "0")
 
 
@@ -240,7 +240,7 @@ def test_rtc_offer_rejects_garbage(client):
 
 
 def test_spa_routes(client):
-    for path in ("/", "/monitor", "/diag", "/history", "/api", "/r/abc123"):
+    for path in ("/", "/monitor", "/diag", "/history", "/help", "/api", "/r/abc123"):
         r = client.get(path)
         assert r.status_code == 200, path
         assert "text/html" in r.headers["content-type"]
@@ -435,9 +435,15 @@ def test_hidden_pages_lose_their_tabs(tmp_path):
     settings = Settings(results_path=str(tmp_path / "r.db"), page_test=False, page_api=False)
     with TestClient(create_app(settings)) as c:
         page = c.get("/history").text
-    assert '<html lang="en" data-pages="monitor diag history">' in page
+    assert '<html lang="en" data-pages="monitor diag history help">' in page
     assert 'data-page="monitor"' in page and 'data-page="history"' in page
     assert 'data-page="test"' not in page and 'data-page="api"' not in page
+    settings = Settings(results_path=str(tmp_path / "r.db"), page_help=False)
+    with TestClient(create_app(settings)) as c:
+        page = c.get("/").text
+        assert c.get("/help").status_code == 200  # the page's own script sends it home
+    assert '<html lang="en" data-pages="test monitor diag history api">' in page
+    assert 'data-page="help"' not in page and ">?</a>" not in page
 
 
 def test_branding_is_written_into_the_page(tmp_path):

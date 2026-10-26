@@ -2925,6 +2925,132 @@ a.brand-org:hover,
   margin-bottom: 20px;
 }
 
+/* Help page: a summary up top, then a section for each page, kept to a reading width. */
+
+.help-summary h2,
+.help-card h2,
+.help-more {
+  font-size: 19px;
+  font-weight: 650;
+}
+
+.help-summary > p,
+.help-card p,
+.help-card li,
+.help-words {
+  max-width: 76ch;
+}
+
+.help-summary > p {
+  margin: 8px 0 0;
+  font-size: 16px;
+}
+
+.help-topics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin: 16px 0;
+}
+
+.help-topic {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--ink) 3%, var(--surface));
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.help-topic h3 {
+  font-size: 17px;
+}
+
+.help-topic h3 a {
+  text-decoration: none;
+}
+
+.help-topic h3 a:hover {
+  text-decoration: underline;
+}
+
+.help-topic p {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.help-topic p.help-question {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.help-topic .btn {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.help-topic p:last-of-type {
+  margin-bottom: 10px;
+}
+
+.help-more {
+  margin: 28px 0 12px;
+}
+
+.help-card p,
+.help-card ol,
+.help-card ul {
+  margin: 10px 0 0;
+  color: var(--ink-2);
+}
+
+.help-card ol,
+.help-card ul {
+  padding-left: 22px;
+}
+
+.help-card li + li {
+  margin-top: 4px;
+}
+
+.help-card strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.help-card h3 {
+  margin-top: 18px;
+  font-size: 15px;
+}
+
+.help-words {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  margin: 12px 0 0;
+}
+
+.help-words dt {
+  font-weight: 600;
+}
+
+.help-words dd {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+@media (max-width: 600px) {
+  .help-words {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .help-words dd {
+    margin-bottom: 8px;
+  }
+}
+
 /* API page */
 
 .cli-card {

@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from .access import INTERVALS
 
 ENV_PREFIX = "TEXAS2STEP_"
-PAGES = ("test", "monitor", "diag", "history", "api")  # the web UI's tabs, in order
+PAGES = ("test", "monitor", "diag", "history", "help", "api")  # the web UI's tabs, in order
 THEMES = ("system", "light", "dark", "america", "energy", "federal", "military", "texas")
 # Branding URLs end up in href attributes, so only these schemes are accepted.
 LINK_SCHEMES = ("https://", "http://", "mailto:", "tel:")
@@ -132,6 +132,7 @@ class Settings:
     page_monitor: bool = True
     page_diag: bool = True
     page_history: bool = True
+    page_help: bool = True
     page_api: bool = True
 
     # Defaults offered to the browser UI.
@@ -243,7 +244,7 @@ class Settings:
             raise ValueError(
                 f"rtc_port_min/rtc_port_max: need 1 <= min <= max <= 65535, or both 0; got {ports}"
             )
-        if not self.pages:
+        if not set(self.pages) - {"help"}:
             raise ValueError(
                 "page_test, page_monitor, page_diag, page_history, page_api: keep one shown"
             )

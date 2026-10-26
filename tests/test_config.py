@@ -141,7 +141,8 @@ def test_branding_rejects_unsafe_or_unknown_values(tmp_path):
             page_history=False,
             page_api=False,
         )
-    assert Settings(page_history=False).pages == ["test", "monitor", "diag", "api"]
+    assert Settings(page_history=False).pages == ["test", "monitor", "diag", "help", "api"]
+    assert Settings(page_help=False).pages == ["test", "monitor", "diag", "history", "api"]
     path = tmp_path / "typo.toml"
     path.write_text('[[brand_links]]\nlable = "Help"\nurl = "https://help.example"\n')
     with pytest.raises(ValueError, match="brand_links"):

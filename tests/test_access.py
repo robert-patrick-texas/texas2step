@@ -581,7 +581,7 @@ def test_pages_need_no_pass_and_no_cookie(tmp_path, key_file):
     """The page asks for the code itself, so pages load without a pass; what they fetch and
     open needs one, which the page keeps in its local storage, not a cookie."""
     with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
-        for page in ("/", "/monitor", "/diag"):
+        for page in ("/", "/monitor", "/diag", "/help"):
             assert c.get(page, headers=OUTSIDE, follow_redirects=False).status_code == 200
         assert c.get("/history", headers=OUTSIDE).status_code == 404  # the desk's, as before
         code = c.app.state.codes.current(datetime.now(UTC)).code
@@ -983,7 +983,7 @@ def test_desk_functions_stay_on_internal_networks(tmp_path, key_file):
         assert status == {"required": False, "desk": False, "codes": False, "note": NOTE}
 
         page = c.get("/", headers=OUTSIDE).text
-        assert 'data-pages="test monitor diag"' in page
+        assert 'data-pages="test monitor diag help"' in page
         assert 'data-page="history"' not in page and 'data-page="api"' not in page
         page = c.get("/", headers=INSIDE).text
         assert "data-pages=" not in page and 'data-page="history"' in page

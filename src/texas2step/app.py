@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 access = logging.getLogger("texas2step.access")
 
 STATIC = Path(__file__).parent / "static"
-SPA_ROUTES = ("/", "/monitor", "/diag", "/history", "/api", "/r/{rid}")
+SPA_ROUTES = ("/", "/monitor", "/diag", "/history", "/help", "/api", "/r/{rid}")
 PREFIX = re.compile(r"(?:/(?!\.\.?(?:/|$))[A-Za-z0-9._~-]+)+")  # no "." or ".." segments
 # The first message of a response, which settles its status for RequestLog. A WebSocket
 # closed before it was accepted gets a 403 from uvicorn.

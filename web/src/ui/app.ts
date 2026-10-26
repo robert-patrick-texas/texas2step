@@ -59,9 +59,9 @@ export class App {
   settings: Settings;
   readonly awake = new Awake(() => this.settings.keepAwake);
   /** The pages this site shows: all of them unless the server lists fewer. */
-  readonly pages = new Set((document.documentElement.dataset.pages ?? "test monitor diag history api").split(" "));
-  /** Where an address with no page of its own lands: the first page shown. */
-  readonly home = this.pages.has("test") ? "/" : `/${[...this.pages][0]}`;
+  readonly pages = new Set((document.documentElement.dataset.pages ?? "test monitor diag history help api").split(" "));
+  /** Where an address with no page of its own lands: the first page shown, other than help. */
+  readonly home = this.pages.has("test") ? "/" : `/${[...this.pages].find((p) => p !== "help") ?? "help"}`;
   private listeners = new Set<ServerListener>();
   private current: Page | null = null;
   private kept = new Map<string, Page>();

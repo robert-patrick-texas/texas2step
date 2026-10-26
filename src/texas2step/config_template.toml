@@ -42,6 +42,7 @@ results_path = "/var/lib/texas2step/results.db"
 # page_monitor = true                   # the Monitor tab
 # page_diag = true                      # the Diag tab
 # page_history = true                   # the History tab
+# page_help = true                      # the ? tab: what each page does, for anyone
 # page_api = true                       # the API tab
 
 # --- Defaults offered to the browser UI --------------------------------------------------
