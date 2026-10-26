@@ -13,7 +13,7 @@ import { awakeSwitch } from "../awake";
 import { LiveChart, type LiveSeries } from "../charts/live";
 import { clear, h, save, setText, store } from "../dom";
 import { type Formatted, ms, pct } from "../format";
-import { maxRuntime, reloadButton, sessionEnded, span } from "../runtime";
+import { maxRuntime, reloadButton, type RuntimeCounter, runtimeCounter, sessionEnded, span } from "../runtime";
 
 interface Probe {
   send(seq: number, size: number): void;
@@ -165,6 +165,7 @@ export class MonitorView implements View {
   private leftRunning = false; // stopped by going to another page
   private over = false; // stopped at a time limit: only a reload starts it again
   private startedAt = 0; // Date.now() at Start, for the site's limit
+  private counter: RuntimeCounter | null = null; // the time counted against it, where it's set
   private off: (() => void) | null = null;
   private startBtn!: HTMLButtonElement;
   private transport!: HTMLElement;
@@ -220,10 +221,11 @@ export class MonitorView implements View {
     this.tiles = h("div", { class: "tiles six" });
     this.compare = h("div", { class: "table-wrap compare-wrap" });
     this.chartHead = h("p", { role: "status" });
+    this.counter = runtimeCounter("monitor", (limit) => `Time Monitor has run since Start, counted against this site's ${limit} limit. Each Start counts from zero.`);
 
     root.append(
       h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "Monitor"), this.lede, this.notice), h("div", { class: "head-actions" }, this.profileBox, this.startBtn)),
-      h("div", { class: "toolbar" }, this.destBox, this.rateBox, seg("Window", WINDOWS, 60, (v) => this.chart.setWindow(v)), this.sizes),
+      h("div", { class: "toolbar" }, this.destBox, this.rateBox, seg("Window", WINDOWS, 60, (v) => this.chart.setWindow(v)), this.counter?.el, this.sizes),
       this.tiles,
       h("section", { class: "card chart-card" }, h("header", { class: "card-head head-inline" }, h("h2", {}, "Round-trip time"), this.chartHead, this.transport), this.compare, this.chart.el),
     );
@@ -914,6 +916,13 @@ export class MonitorView implements View {
     const figures = this.dests.length ? this.dests.map((_, i) => this.figuresFor(i, slices[i] ?? [])) : [this.figuresFor(0, [])];
     if (this.comparing && this.cells.length) this.refreshCompare(figures);
     else this.refreshTiles(figures[0]!);
+    this.counter?.set(this.ranFor());
+  }
+
+  /** How long Monitor has run since Start: to now, or to its Stop. */
+  private ranFor(): number {
+    if (this.running) return Date.now() - this.startedAt;
+    return this.stoppedAt !== null && this.startedAt ? this.stoppedAt - this.startedAt : 0;
   }
 
   private refreshTiles(v: Figures): void {

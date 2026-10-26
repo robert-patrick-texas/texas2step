@@ -13,7 +13,7 @@ import { awakeSwitch } from "../awake";
 import { drawTimeline, Lane, type Sample, type Tone } from "../charts/diag";
 import { clear, h, onResize, setText } from "../dom";
 import { ms, text } from "../format";
-import { maxRuntime, reloadButton, sessionEnded, span } from "../runtime";
+import { maxRuntime, reloadButton, type RuntimeCounter, runtimeCounter, sessionEnded, span } from "../runtime";
 
 type Fam = "IPv4" | "IPv6";
 type Http = "http1" | "http2" | "http3";
@@ -508,6 +508,7 @@ export class DiagView implements View {
   private stale = false; // the server was changed while away
   private over = false; // stopped at a time limit: only a reload starts it again
   private since = 0; // Date.now() when it last started, for the site's limit
+  private counter: RuntimeCounter | null = null; // the time counted against it, where it's set
   private awakeOpt: ReturnType<typeof awakeSwitch> = null; // Keep screen on
   private els!: { you: HTMLElement; clock: HTMLElement; rows: HTMLElement; egress: HTMLElement; log: HTMLElement; notice: HTMLElement };
   private readonly onVisibility = () => this.log(null, document.hidden ? "tab hidden: browsers slow down timers in background tabs, so gaps may follow" : "tab visible again");
@@ -535,6 +536,7 @@ export class DiagView implements View {
     const card = (title: string, note: string, ...body: (HTMLElement | null)[]) =>
       h("section", { class: "card diag-card" }, h("header", { class: "card-head head-inline" }, h("h2", {}, title), note ? h("p", { class: "wide" }, note) : null), ...body);
     this.awakeOpt = awakeSwitch(this.app);
+    this.counter = runtimeCounter("diag", (limit) => `Time Diag has run since it was last shown, counted against this site's ${limit} limit. Coming back to Diag counts from zero.`);
     root.append(
       h(
         "section",
@@ -546,7 +548,7 @@ export class DiagView implements View {
           h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second while this page is shown."),
           this.els.notice,
         ),
-        this.awakeOpt ? h("div", { class: "head-actions" }, this.awakeOpt.el) : null,
+        this.counter || this.awakeOpt ? h("div", { class: "head-actions" }, this.counter?.el, this.awakeOpt?.el) : null,
       ),
       h("section", { class: "card diag-card diag-addresses" }, this.els.you, this.els.clock),
       card(
@@ -608,6 +610,7 @@ export class DiagView implements View {
     this.away = false;
     if (this.over) return; // stopped at a time limit, it stays stopped
     this.since = Date.now(); // the site's limit counts from each return
+    this.counter?.set(0);
     this.app.awake.hold("diag");
     this.awakeOpt?.mark(); // it may have changed on another page
     document.addEventListener("visibilitychange", this.onVisibility);
@@ -753,7 +756,9 @@ export class DiagView implements View {
 
   private render(): void {
     const limit = maxRuntime("diag");
-    if (limit && !this.over && !this.away && Date.now() - this.since >= limit) return this.end(`Stopped after ${span(limit / 1000)}, this site's limit.`);
+    const ran = Date.now() - this.since;
+    if (!this.over && !this.away) this.counter?.set(ran);
+    if (limit && !this.over && !this.away && ran >= limit) return this.end(`Stopped after ${span(limit / 1000)}, this site's limit.`);
     // One button for each address that asks for the code, on the first of its rows.
     const offered = new Set<string>();
     for (const m of this.methods) {

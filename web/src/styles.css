@@ -55,6 +55,10 @@
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --notice: #0e1013;
   --notice-ink: #f3f2ee;
+  /* The one button that must stand out: Reload page, once a time limit stops a page.
+     Dark orange-red in every theme; white on it is 5.7:1. */
+  --urgent: #b83a14;
+  --on-urgent: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -2210,6 +2214,16 @@ a.brand-org:hover,
   font-size: 13px;
 }
 
+.btn.urgent {
+  color: var(--on-urgent);
+  background: var(--urgent);
+  box-shadow: 0 4px 14px -6px color-mix(in srgb, var(--urgent) 80%, transparent);
+}
+
+.btn.urgent:hover {
+  background: color-mix(in srgb, var(--urgent) 86%, #000);
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: progress;
@@ -2251,6 +2265,27 @@ a.brand-org:hover,
 .monitor-notice[hidden],
 .diag-notice[hidden] {
   display: none;
+}
+
+/* Monitor's and Diag's Runtime box: the time counted against the site's limit. As tall as
+   a switch beside it (its 3px padding plus its buttons' 5px), and quieter. */
+.runtime {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 11px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  width: fit-content;
+}
+
+.runtime-ran {
+  margin-right: 0.3em;
+  color: var(--ink-2);
+  font-weight: 600;
 }
 
 .head-actions {
