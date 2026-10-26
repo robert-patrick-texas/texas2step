@@ -77,6 +77,15 @@ links and footer credit. Three places still say texas2step:
   the throwaway certificates, drop the CBC cipher suites and save a round trip, and later
   allow post-quantum key exchange. The probe carries nothing secret, so this can wait for
   the libraries.
+- [ ] **Diag's UDP rows and the access code.** Each UDP row sets up its session through
+  the page's own name, then keeps to one address family. A visitor inside
+  `internal_networks` over IPv6 but outside over IPv4 sees the IPv4 UDP row answering
+  while that family's HTTP and WebSocket rows say Restricted: the setup passed over IPv6,
+  and UDP packets have no access check of their own. No one else gains by it, since only
+  a browser the server already accepts can set up a session. Setting up each row through
+  its family's own name, where the server has one, would check each family on its own, as
+  the Test page and Monitor do. The cost: a family whose TCP path is broken couldn't set
+  up its UDP row either.
 
 ### Updates
 
