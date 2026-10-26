@@ -122,6 +122,13 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.4.2](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.2) (2026-10-26)
+
+- [x] The journal files each line at its level, so `journalctl -u texas2step -p warning`
+  shows warnings, errors and failed requests.
+- [x] History asks for the access code only where the server gives it, which logged a
+  warning on servers with codes off.
+
 ### [2.4.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.1) (2026-10-26)
 
 - [x] A UDP session closed while it connects stops its connection checks, which logged
