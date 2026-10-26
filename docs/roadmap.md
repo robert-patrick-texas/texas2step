@@ -29,9 +29,6 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 - [ ] **The UDP ports call apps use.** A STUN responder on ports the operator chooses,
   such as Teams' 3478 to 3481, would show whether a network lets calls through on UDP or
   makes them fall back to TCP. It needs a listener and firewall rules for each port.
-- [ ] **HTTP/3 (QUIC).** Whether the network passes QUIC on UDP 443, which many corporate
-  firewalls block, and how HTTP/3 compares with HTTP/2. nginx would need a `quic` listener,
-  an `Alt-Svc` header and a firewall rule; the browser decides whether to use it.
 - [ ] **DNS lookup time.** Slow or overloaded resolvers make every new site slow. A browser
   only looks up a name it hasn't cached, so each test would need a fresh name under a
   wildcard DNS record.
@@ -124,6 +121,17 @@ links and footer credit. Three places still say texas2step:
 ## Done
 
 Newest first. Each release's notes have the details and its upgrade steps.
+
+### [2.4.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.0) (2026-10-26)
+
+- [x] **HTTP/3 (QUIC)** and the other HTTP versions in Diag: with a name for each, rows
+  for HTTP/1.1, HTTP/2 and HTTP/3 in each address family, so a network that blocks QUIC
+  on UDP 443 shows. Diag lists only what the server offers, and shows the UDP probe's
+  DTLS version and cipher.
+- [x] `texas2step update --proxy`, and `update_proxy` for the update timer;
+  `-k/--insecure` for a proxy that inspects TLS.
+- [x] The setup tool names the site's main name where several server blocks publish
+  texas2step.
 
 ### [2.3.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.3.0) (2026-10-25)
 
