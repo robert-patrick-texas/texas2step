@@ -142,12 +142,28 @@ if AVAILABLE:
         aioice binds every host socket to port 0, and aiortc has no option to change that.
         A connection created while ``_PORT_RANGE`` is set binds its host sockets here
         instead and leaves the STUN and TURN candidates to aioice. Without a range it
-        behaves exactly like its base class.
+        behaves like its base class, but for stopping its checks when it closes.
         """
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             self.port_range = _PORT_RANGE.get()
+            self._closing = False
+
+        # aioice closes the sockets but leaves its checks retrying, and keeps starting the
+        # waiting ones; each send then hits a closed socket, which asyncio raises (on an
+        # unconnected UDP transport) into the check. A session closed while its ICE is
+        # under way, such as one a block ends, stops them here instead.
+        def check_start_task(self, pair: Any) -> None:
+            if not self._closing:
+                super().check_start_task(pair)
+
+        async def close(self) -> None:
+            self._closing = True
+            for pair in self._check_list:
+                if pair.task is not None:
+                    pair.task.cancel()
+            await super().close()
 
         async def get_component_candidates(
             self,

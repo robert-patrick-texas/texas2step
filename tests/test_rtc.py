@@ -4,6 +4,8 @@ an exhausted range is refused rather than spilling onto other ports."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import gc
 import ipaddress
 import json
 import re
@@ -11,7 +13,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
-from aioice import stun
+from aioice import Candidate, stun
 from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
 
 from texas2step import rtc
@@ -287,6 +289,38 @@ async def test_stun_candidates_come_from_the_ranged_sockets(peers):
     finally:
         await echo.stop()
         transport.close()
+
+
+async def test_a_connection_closed_during_its_checks_sends_nothing_more():
+    # aioice keeps starting the checks still waiting after a close, and leaves those under
+    # way to retry: each send then goes to a closed socket, an error asyncio raises into
+    # the check. connect() cancels its checks, and so silences those errors, once it ends;
+    # at shutdown, or at the end of a test, it's cancelled first, and they are logged.
+    errors: list[dict[str, Any]] = []
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(lambda _, context: errors.append(context))
+    try:
+        conn = rtc._PortRangeConnection(ice_controlling=True, use_ipv6=False)
+        await conn.gather_candidates()
+        conn.remote_username, conn.remote_password = "peer", "password-nobody-checks"
+        for port in range(29200, 29210):  # nothing listens there
+            await conn.add_remote_candidate(
+                Candidate(str(port), 1, "udp", 1, "127.0.0.1", port, "host")
+            )
+        await conn.add_remote_candidate(None)
+        connecting = asyncio.create_task(conn.connect())
+        await asyncio.sleep(0.05)  # a few checks under way, the rest waiting
+        await conn.close()
+        await asyncio.sleep(0.1)  # when aioice would start more
+        connecting.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await connecting
+        await asyncio.sleep(1.2)  # past the first retransmissions
+        del conn, connecting  # a task's error is logged once nothing holds the task
+        gc.collect()
+        assert errors == []
+    finally:
+        loop.set_exception_handler(None)
 
 
 def test_settings_reach_the_echo(tmp_path):
