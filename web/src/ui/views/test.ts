@@ -711,7 +711,7 @@ export class TestView implements View {
     };
     const download = h("button", { class: "btn", type: "button" }, "Download JSON");
     download.addEventListener("click", () => {
-      const a = h("a", { href: URL.createObjectURL(new Blob([json()], { type: "application/json" })), download: `texas2step-${r.started_at.replace(/[:.]/g, "-")}.json` });
+      const a = h("a", { href: URL.createObjectURL(new Blob([json()], { type: "application/json" })), download: `results-${r.started_at.replace(/[:.]/g, "-")}.json` });
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     });
