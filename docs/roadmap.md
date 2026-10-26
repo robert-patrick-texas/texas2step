@@ -112,6 +112,10 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.4.4](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.4) (2026-10-26)
+
+- [x] **Download JSON** saves a result as `results-<time>.json`, on renamed sites too.
+
 ### [2.4.3](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.3) (2026-10-26)
 
 - [x] With `brand_logo` set, the logo is the browser tab's icon, in the API explorer too.
