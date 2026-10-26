@@ -533,15 +533,20 @@ export class DiagView implements View {
           "div",
           {},
           h("h1", {}, "Diag"),
-          h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second while this page is shown: HTTP/1.1, HTTP/2 and HTTP/3, WebSocket and UDP, over IPv4 and IPv6, as this server offers them."),
+          h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second while this page is shown."),
         ),
         this.awakeOpt ? h("div", { class: "head-actions" }, this.awakeOpt.el) : null,
       ),
       h("section", { class: "card diag-card diag-addresses" }, this.els.you, this.els.clock),
       card(
         "Connection methods",
-        "Each ping leaves on the left and its pong comes back from the server on the right. Green: answering. Red: answered before, not now. Grey: no answer yet, or not offered. Amber: restricted, access code required.",
+        "",
         this.els.rows,
+        h(
+          "p",
+          { class: "diag-note" },
+          "Each ping leaves on the left and its pong comes back from the server on the right. Green: answering. Red: answered before, not now. Grey: no answer yet, or not offered. Amber: restricted, access code required.",
+        ),
         h(
           "p",
           { class: "diag-note" },
