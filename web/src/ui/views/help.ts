@@ -33,15 +33,15 @@ const TOPICS: Topic[] = [
       p("Press ", b("Start"), ". The test runs five steps in turn, shown under Phases:"),
       list("ol", [
         [b("Latency"), ": 20 small requests, each timed to the server and back. The figure is the middle one, in milliseconds (ms); lower is better. ", b("Jitter"), " is how much one differs from the next."],
-        [b("Download"), ": several transfers at once, 4 by default, for 10s. The figure, in megabits a second (Mbps), leaves out the first seconds, while the connection speeds up."],
+        [b("Download"), ": pulling data from the server to your device, several transfers at once, 4 by default, for 10s. The figure, in megabits a second (Mbps), leaves out the first seconds, while the connection speeds up."],
         [b("One stream"), ": one transfer on its own for the same time, as a single file copy or remote desktop gets."],
-        [b("Upload"), ": as Download, the other way."],
+        [b("Upload"), ": pushing data from your device to the server, with the same transfers and timing as Download."],
         [b("Packet loss"), ": 500 small numbered UDP packets, 10 ms apart, each echoed by the server. Any that don't come back were lost. Calls and video travel this way."],
       ]),
       p("While the transfers run, the page also measures:"),
       list("ul", [
         [b("Under load"), ": how much the delay grows while the connection is busy, graded A+ to F. A big rise is why calls break up while someone else on the network downloads."],
-        [b("Responsiveness"), ": round trips a minute while busy (RPM); higher is better."],
+        [b("Responsiveness"), ": round trips per minute while busy (RPM); higher is better."],
         [b("Call quality"), ": how a voice call would sound, from the packet-loss step, scored 1 to 5 and rated Excellent, Good, Fair, Poor or Bad. Each direction is scored, and the worse is shown."],
       ]),
       p(
