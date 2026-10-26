@@ -20,10 +20,10 @@ import typing
 from dataclasses import dataclass, field
 from typing import Any
 
-from .config import Settings, _coerce, parse_toml
+from .config import PROTOCOL_URLS, Settings, _coerce, parse_toml
 from .config_merge import SETTING, TABLE, _tables, toml_value
 
-LOCATION_FIELDS = ("id", "name", "url", "location", "url_v4", "url_v6")
+LOCATION_FIELDS = ("id", "name", "url", "location", "url_v4", "url_v6", *PROTOCOL_URLS)
 
 
 @dataclass

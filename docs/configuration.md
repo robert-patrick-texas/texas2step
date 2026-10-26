@@ -22,6 +22,7 @@ file up to date with the new version's template and keeps your values; see
 | `server_name` | `texas2step` | Display name |
 | `server_location` | `""` | Free text, e.g. `Dallas, TX` |
 | `server_url_v4` / `server_url_v6` | `""` | IPv4-only / IPv6-only base URLs for this server; they add the header's IP drop-down. See [IPv4 and IPv6](#ipv4-and-ipv6). |
+| `server_url_v4_http1` / `server_url_v4_http3` / `server_url_v6_http1` / `server_url_v6_http3` | `""` | Single-family base URLs that serve only HTTP/1.1, or offer HTTP/3, for Diag's rows of those versions. See [HTTP versions](#http-versions). |
 | `max_download_bytes` | 1 GiB | Largest single `/down` response |
 | `max_upload_bytes` | 1 GiB | Largest single `/up` body |
 | `max_stream_seconds` | 60 | Cap for `/down?seconds=` |
@@ -101,10 +102,12 @@ sudo systemctl restart texas2step
   `[[brand_links]]` and `[[brand_footer_links]]` in the file, or use `add-location`.
 * **`config add-location URL`** lists another texas2step server in the location picker.
   It asks that server for its id, name and location (`/api/v1/info`), and for its
-  IPv4-only and IPv6-only URLs (its own entry in `/api/v1/locations`), using the
-  system's trusted certificates. Give `--id`, `--name`, `--location`, `--url-v4` and
-  `--url-v6` to set them yourself, or when the server can't be reached. A server that is already listed, by id or by URL, is left
-  as it is.
+  single-family URLs (its own entry in `/api/v1/locations`), using the system's trusted
+  certificates. Give `--id`, `--name`, `--location`, `--url-v4` and `--url-v6` to set
+  them yourself, or when the server can't be reached, and `--url-v4-http1`,
+  `--url-v4-http3`, `--url-v6-http1` and `--url-v6-http3` for its
+  [HTTP versions](#http-versions) names. A server that is already listed, by id or by
+  URL, is left as it is.
 * **`config merge`** brings the whole file up to date after an upgrade; see
   [Upgrade](install.md#upgrade).
 
@@ -207,6 +210,8 @@ url = "https://houston.example.net/texas2step"
 location = "Houston, TX"
 url_v4 = "https://v4.houston.example.net/texas2step"   # optional: A record only
 url_v6 = "https://v6.houston.example.net/texas2step"   # optional: AAAA record only
+url_v6_http1 = "https://h1-6.houston.example.net/texas2step"   # optional: Diag's HTTP/1.1 row
+url_v6_http3 = "https://h3-6.houston.example.net/texas2step"   # optional: Diag's HTTP/3 row
 ```
 
 Each listed server must allow the page's origin in its `cors_origins` (the default `*`
@@ -243,6 +248,51 @@ set these and check each name's DNS records. For the other servers in the picker
 `url_v4` and `url_v6` of their `[[locations]]` entries do the same;
 `texas2step config add-location` and the setup tool's `--peer` fill them in from the
 other server.
+
+## HTTP versions
+
+**Diag** lists a row for each way the server can be reached, in each address family:
+HTTP/1.1, HTTP/2, HTTP/3, WebSocket and UDP. It lists only what the server offers:
+
+| Row | Listed when |
+|---|---|
+| HTTP/2 and WebSocket | The family's single-family name is set: `server_url_v4` or `server_url_v6` |
+| HTTP/1.1 | `server_url_v4_http1` or `server_url_v6_http1` is set |
+| HTTP/3 | `server_url_v4_http3` or `server_url_v6_http3` is set |
+| UDP | WebRTC is on (`webrtc_enabled`) |
+
+A family with none of its names set isn't listed. A server without any single-family
+names lists an HTTP/2 and a WebSocket row for its own address, over whichever family
+the browser picks, and a UDP row for each family.
+
+A web page can't choose an HTTP version. The browser and the server agree on one for
+each connection, and a browser moves to HTTP/3 only once a server's `Alt-Svc` header
+says it offers it. So each version needs a name of its own: the IPv4-only and
+IPv6-only names, served over HTTP/2, are the HTTP/2 rows, and two more names in each
+family serve only HTTP/1.1 and offer HTTP/3:
+
+```toml
+server_url_v6 = "https://v6.dallas.example.net/texas2step"         # HTTP/2
+server_url_v6_http1 = "https://h1-6.dallas.example.net/texas2step" # HTTP/1.1 only
+server_url_v6_http3 = "https://h3-6.dallas.example.net/texas2step" # Alt-Svc: h3
+```
+
+The names must also keep to their own connections. Over HTTP/2 and HTTP/3, a browser
+sends a name's requests over a connection it opened for another name when the
+certificate covers both and both names resolve to the address that connection uses.
+Give each name an address of its own, or each version's names a certificate of their
+own; [Names for each HTTP version](install.md#names-for-each-http-version) shows both
+in nginx. Don't publish a DNS HTTPS record (type 65) that advertises `h3` for the other
+names either: browsers would use HTTP/3 there too.
+
+Each row checks the version its answers came over, as the browser reports it. An
+HTTP/1.1 or HTTP/2 row that gets another version still counts the answer, since TCP got
+through, and says what's wrong, such as `answered over HTTP/1.1, not HTTP/2: this name
+doesn't offer HTTP/2`. The HTTP/3 row counts only answers over HTTP/3; see
+[Diag](methodology.md#diag). For the other servers in the picker, the `url_v4_http1`,
+`url_v4_http3`, `url_v6_http1` and `url_v6_http3` of their `[[locations]]` entries do the
+same; `texas2step config add-location` and the setup tool's `--peer` fill them in from
+the other server.
 
 ## Logging
 

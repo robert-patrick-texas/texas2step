@@ -432,17 +432,19 @@ def test_peers():
 def test_peers_bring_their_single_family_urls():
     v4 = "https://v4.dallas.example.net/texas2step"
     v6 = "https://v6.dallas.example.net/texas2step"
+    h3 = "https://h3-6.dallas.example.net/texas2step"
     peer = setup.Peer(
         "https://dallas.example.net/texas2step",
         {"server": {"id": "dallas", "name": "dallas.example.net", "location": "Dallas, TX"}},
-        own={"id": "dallas", "url": "", "url_v4": v4, "url_v6": v6},
+        own={"id": "dallas", "url": "", "url_v4": v4, "url_v6": v6, "url_v6_http3": h3},
     )
     h = host(peers=[peer])
     p = setup.plan(h, setup.Options(id="houston"))
     assert (p.peers[0]["url_v4"], p.peers[0]["url_v6"]) == (v4, v6)
+    assert p.peers[0]["url_v6_http3"] == h3
     assert any("with its IPv4-only and IPv6-only URLs" in t for t in levels(p, setup.CHANGE))
     script = setup.install_script(h, p, setup.Options(id="houston"))
-    assert f"--url-v4 {v4} --url-v6 {v6} --write" in script
+    assert f"--url-v4 {v4} --url-v6 {v6} --url-v6-http3 {h3} --write" in script
 
 
 def test_single_family_urls_are_set_and_their_names_checked():

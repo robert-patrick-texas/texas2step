@@ -267,6 +267,75 @@ That is realistic for modern web traffic, but it doesn't show how several TCP fl
 behave. To make "4 streams" mean four TCP connections, publish texas2step in a server
 block without `http2 on` (a separate hostname or port).
 
+### Names for each HTTP version
+
+Diag tests HTTP/1.1, HTTP/2 and HTTP/3 each on a name of its own
+([HTTP versions](configuration.md#http-versions)). The IPv4-only and IPv6-only names
+are its HTTP/2 rows. For HTTP/1.1 and HTTP/3, add two more names in each family you
+want tested, each with one A record or one AAAA record. Over HTTP/2 and HTTP/3,
+browsers share a connection between names that resolve to the same address when the
+certificate covers both, so keep the names apart in one of two ways:
+
+* **An address for each name.** Simplest where the server has addresses to spare, as
+  with IPv6. The site's certificate can cover every name.
+* **A certificate for each version.** On one address, give each version's names a
+  certificate that covers only them, and keep the names outside the site's wildcard:
+  `h3-6.houston.example.net` isn't covered by `*.example.net`.
+
+With an address for each, here `2001:db8::2` for HTTP/1.1 and `2001:db8::3` for
+HTTP/3, beside the site's `server` block:
+
+```nginx
+server {                                     # HTTP/1.1 only
+    listen [2001:db8::2]:443 ssl;
+    http2 off;
+    server_name h1-6.houston.example.net;
+    # the site's ssl_certificate and ssl_certificate_key lines
+    include snippets/texas2step.conf;
+}
+
+server {                                     # HTTP/3, found over TCP first
+    listen [2001:db8::3]:443 ssl;
+    listen [2001:db8::3]:443 quic;
+    http2 on;
+    server_name h3-6.houston.example.net;
+    # the site's ssl_certificate and ssl_certificate_key lines
+    add_header Alt-Svc 'h3=":443"; ma=86400' always;
+    include snippets/texas2step.conf;
+}
+```
+
+* A `listen` on an address takes every connection to that address, so each block
+  includes texas2step itself. Use the include line from the site's block, such as
+  `snippets/texas2step-at-speedtest.conf` for `/speedtest/`. Copy any `add_header`
+  lines you want from the site's block too, such as HSTS: they don't carry over to
+  another `server` block.
+* `always` puts `Alt-Svc` on every answer, including a 401 to a visitor who needs the
+  access code. Send it only from the HTTP/3 name: from the site's own block, browsers
+  would move all of texas2step there to HTTP/3, and Diag's HTTP/2 rows with it.
+* Allow TCP 443 to both addresses in the firewall, and UDP 443 to the HTTP/3 address.
+* Linux may start sending the server's own outgoing traffic from a new address, such as
+  updates and the access peers' messages. To keep them on the main address, mark the
+  new ones not to be chosen as a source: `lifetime: 0` on each in netplan, or
+  `preferred_lft 0` with `ip address`. They still take connections as before.
+
+With a certificate for each version, the same blocks listen on the site's address
+(`listen 443 ssl;` and `listen [::]:443 ssl;`, plus `quic` for HTTP/3), each with its own
+certificate lines.
+
+Check each name, then set the URLs and restart:
+
+```bash
+curl -s -D - -o /dev/null https://h1-6.houston.example.net/texas2step/api/v1/health   # HTTP/1.1 200
+curl -s -D - -o /dev/null https://h3-6.houston.example.net/texas2step/api/v1/health   # alt-svc: h3=":443"
+sudo texas2step config set \
+    server_url_v6_http1=https://h1-6.houston.example.net/texas2step \
+    server_url_v6_http3=https://h3-6.houston.example.net/texas2step --write
+sudo systemctl restart texas2step
+```
+
+Diag then shows each row's version, and says so when a name answers over another one.
+
 ## 3. Configure
 
 Edit `/etc/texas2step/config.toml`, then run `sudo systemctl restart texas2step`. The

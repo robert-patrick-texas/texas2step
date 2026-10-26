@@ -61,6 +61,9 @@ PACKAGED_SNIPPET = f"{NGINX_PREFIX}/{SNIPPET}"
 DEFAULT_PATH = "/texas2step"
 SPEEDTEST_SNIPPET = "snippets/texas2step-speedtest.conf"
 DEFAULT_PORTS = (61000, 61999)
+# A peer's single-family URLs, copied from its own [[locations]] entry: url_v4 and url_v6,
+# then those that serve one HTTP version.
+PEER_URLS = ("url_v4", "url_v6", "url_v4_http1", "url_v4_http3", "url_v6_http1", "url_v6_http3")
 REPORT = "texas2step-preflight.txt"
 INSTALL = "texas2step-install.sh"
 PLAN_JSON = "texas2step-plan.json"
@@ -1104,8 +1107,9 @@ def _check_settings(host: Host, opts: Options, p: Plan) -> None:
             "name": info.get("name", ""),
             "location": info.get("location", ""),
         }
-        # Its single-family URLs, so the IP drop-down works for it on this server's page.
-        for key in ("url_v4", "url_v6"):
+        # Its single-family URLs, so the IP drop-down works for it on this server's page,
+        # and those that serve one HTTP version, for Diag's rows.
+        for key in PEER_URLS:
             found = str(peer.own.get(key) or "")
             if found.startswith(("https://", "http://")):
                 entry[key] = found
@@ -1447,7 +1451,7 @@ def install_script(host: Host, p: Plan, opts: Options) -> str:
             ]
             if peer.get("location"):
                 args += ["--location", peer["location"]]
-            for key in ("url_v4", "url_v6"):
+            for key in PEER_URLS:
                 if peer.get(key):
                     args += [f"--{key.replace('_', '-')}", peer[key]]
             out.append(shlex.join([*args, "--write"]))

@@ -371,6 +371,7 @@ def cmd_config_add_location(args: argparse.Namespace) -> None:
     import shlex
 
     from . import config_edit
+    from .config import PROTOCOL_URLS
 
     location = {
         "id": args.id,
@@ -380,7 +381,9 @@ def cmd_config_add_location(args: argparse.Namespace) -> None:
         "url_v4": args.url_v4,
         "url_v6": args.url_v6,
     }
-    if not all(location.values()):
+    basics = list(location)
+    location |= {key: getattr(args, key) for key in PROTOCOL_URLS}
+    if not all(location[key] for key in basics):
         try:
             server, own = _fetch_peer(args.url)
         except (httpx.HTTPError, ValueError) as exc:
@@ -393,8 +396,9 @@ def cmd_config_add_location(args: argparse.Namespace) -> None:
             print(f"Couldn't reach {args.url}; adding it with what was given.")
         for key in ("id", "name", "location"):
             location[key] = location[key] or server.get(key) or ""
-        # Its single-family URLs, so the IP drop-down works for it here too.
-        for key in ("url_v4", "url_v6"):
+        # Its single-family URLs, so the IP drop-down works for it here too, and those that
+        # serve one HTTP version, for Diag's rows.
+        for key in ("url_v4", "url_v6", *PROTOCOL_URLS):
             found = str(own.get(key) or "")
             if not location[key] and found.startswith(("https://", "http://")):
                 location[key] = found
@@ -1255,6 +1259,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_location.add_argument("--location", help="free text, e.g. 'Houston, TX'")
     add_location.add_argument("--url-v4", help="IPv4-only base URL")
     add_location.add_argument("--url-v6", help="IPv6-only base URL")
+    add_location.add_argument("--url-v4-http1", help="IPv4-only base URL serving only HTTP/1.1")
+    add_location.add_argument("--url-v4-http3", help="IPv4-only base URL that offers HTTP/3")
+    add_location.add_argument("--url-v6-http1", help="IPv6-only base URL serving only HTTP/1.1")
+    add_location.add_argument("--url-v6-http3", help="IPv6-only base URL that offers HTTP/3")
     settings_file(add_location)
     add_location.set_defaults(func=cmd_config_add_location)
 

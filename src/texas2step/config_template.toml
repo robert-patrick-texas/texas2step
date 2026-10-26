@@ -10,6 +10,10 @@
 # server_location = ""                  # free text, e.g. "Dallas, TX"
 # server_url_v4 = ""                    # IPv4-only base URL (enables the IPv4/IPv6 switch)
 # server_url_v6 = ""                    # IPv6-only base URL
+# server_url_v4_http1 = ""              # IPv4-only base URL serving only HTTP/1.1 (Diag's HTTP/1.1 row)
+# server_url_v4_http3 = ""              # IPv4-only base URL that offers HTTP/3 (Diag's HTTP/3 row)
+# server_url_v6_http1 = ""              # the same, IPv6-only
+# server_url_v6_http3 = ""
 
 # --- Limits --------------------------------------------------------------------------
 # max_download_bytes = 1073741824

@@ -79,6 +79,18 @@ def test_target_allow_list():
     assert Settings(allow_any_target=True).is_allowed_target("http://anything")
 
 
+def test_names_for_each_http_version_are_listed_with_the_server():
+    h1, h3 = "https://h1-6.dallas.example.net/t2s", "https://h3-6.dallas.example.net/t2s"
+    me = Settings(
+        server_url_v6="https://v6.dallas.example.net/t2s",
+        server_url_v6_http1=h1,
+        server_url_v6_http3=h3,
+    ).all_locations()[0]
+    assert (me.url_v6_http1, me.url_v6_http3, me.url_v4_http1) == (h1, h3, "")
+    assert me.public()["url_v6_http3"] == h3
+    assert [u for u in me.urls() if u] == ["https://v6.dallas.example.net/t2s", h1, h3]
+
+
 def test_branding_from_toml(tmp_path):
     path = tmp_path / "brand.toml"
     path.write_text(

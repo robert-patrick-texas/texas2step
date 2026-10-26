@@ -1,13 +1,13 @@
 // Diagnostics: every way this browser can reach the server, tried once a second while the
-// page is shown: HTTPS, WebSocket and UDP, over IPv4 and over IPv6. Each answer also
-// says what the server saw: the client's address and port, the HTTP version, TLS, the
-// server's own TCP round trip, and its clock.
+// page is shown: HTTP/1.1, HTTP/2 and HTTP/3, WebSocket and UDP, over IPv4 and over IPv6,
+// as the server offers them. Each answer also says what the server saw: the client's
+// address and port, the HTTP version, TLS, the server's own TCP round trip, and its clock.
 import { eui64Mac } from "../../engine/addr";
 import { WsProber } from "../../engine/latency";
 import { NotOffered, RtcProbe, type UdpAddress } from "../../engine/loss";
 import { Endpoint } from "../../engine/net";
 import { percentile } from "../../engine/stats";
-import type { DiagHttp } from "../../types";
+import type { DiagHttp, Location } from "../../types";
 import type { App, View } from "../app";
 import { awakeSwitch } from "../awake";
 import { drawTimeline, Lane, type Sample, type Tone } from "../charts/diag";
@@ -15,7 +15,8 @@ import { clear, h, onResize, setText } from "../dom";
 import { ms, text } from "../format";
 
 type Fam = "IPv4" | "IPv6";
-type Kind = "https" | "ws" | "udp";
+type Http = "http1" | "http2" | "http3";
+type Kind = Http | "ws" | "udp";
 
 const KEEP_MS = 300_000; // five minutes of samples, for the timelines
 const RECENT_MS = 60_000; // the figures beside each row
@@ -23,20 +24,41 @@ const LOG_MAX = 300;
 const UDP_RETRY_MS = 10_000; // a WebRTC session takes seconds to open and holds a server port
 const WS_RETRY_MS = 2_000;
 const CODE_RETRY_MS = 10_000; // an address that asks for the access code, until it's in
-const KINDS: Record<Kind, string> = { https: "HTTPS", ws: "WebSocket", udp: "UDP" };
+// Answers over TCP on the HTTP/3 row's name before it says the browser stays on TCP:
+// browsers ask over TCP first, and move once the server's Alt-Svc says it offers HTTP/3.
+const H3_WAIT_MS = 10_000;
+const KINDS: Record<Kind, string> = { http1: "HTTP/1.1", http2: "HTTP/2", http3: "HTTP/3", ws: "WebSocket", udp: "UDP" };
 
-const httpName = (p: string | null | undefined) =>
-  ({ h2: "HTTP/2", "http/1.1": "HTTP/1.1", h3: "HTTP/3", "HTTP/2.0": "HTTP/2" })[p ?? ""] ?? (p || "");
+/** The browser's or the server's word for an HTTP version, as the rows name them. */
+function httpName(p: string | null | undefined): string {
+  const s = p ?? "";
+  if (/^(h3|http\/3)/i.test(s)) return "HTTP/3";
+  if (/^(h2|http\/2)/i.test(s)) return "HTTP/2";
+  if (/^http\/1\.1$/i.test(s)) return "HTTP/1.1";
+  return s;
+}
+
+/** Why a name answered over another HTTP version than its row's (HTTP/1.1 or HTTP/2). */
+function mismatch(want: Http, got: string): string {
+  if (got === "HTTP/3") return "this name offers HTTP/3 (Alt-Svc)";
+  return want === "http2" ? "this name doesn't offer HTTP/2" : "this name offers HTTP/2 too";
+}
+
 // "address : port", spaced so the port can't be read as part of an IPv4 or IPv6 address.
 const hostPort = (ip: string | null | undefined, port: number | null | undefined) => (!ip ? "—" : port ? `${ip} : ${port}` : ip);
-const seconds = (msecs: number) => `${Math.max(1, Math.round(msecs / 1000))}\u00a0s`; // never wrapped apart
+const seconds = (msecs: number) => `${Math.max(1, Math.round(msecs / 1000))} s`; // never wrapped apart
+const famName = (fam: Fam | "Auto") => (fam === "Auto" ? "This address" : fam);
 
 /** One way of reaching the server, with what its answers have shown. */
 abstract class Method {
   tone: Tone = "trying";
   reason = ""; // why it isn't offered
   detail = ""; // what the latest answer said
+  warn = false; // the detail tells of a fault in how the server is set up
+  waiting = ""; // the badge while trying, where "No answer yet" isn't the whole story
+  fellBack = false; // the HTTP/3 row: lately answered, but over TCP
   port = "";
+  server = ""; // the server's address that answered
   samples: Sample[] = [];
   lostRun = 0;
   downSince = 0;
@@ -77,7 +99,7 @@ abstract class Method {
     const r = this.row;
     r.code.addEventListener("click", () => void this.view.enterCode(this.ep));
     r.root.append(
-      h("div", { class: "diag-what" }, h("strong", {}, this.fam === "Auto" ? "This address" : this.fam), h("span", {}, KINDS[kind]), port),
+      h("div", { class: "diag-what" }, h("strong", {}, KINDS[kind]), port),
       this.lane.el,
       h("div", { class: "diag-state" }, h("div", {}, r.badge, r.figs), h("div", { class: "diag-detail" }, r.detail, r.code)),
       timeline,
@@ -89,7 +111,7 @@ abstract class Method {
   }
 
   get label(): string {
-    return `${this.fam === "Auto" ? "This address" : this.fam} ${KINDS[this.kind]}`;
+    return `${famName(this.fam)} ${KINDS[this.kind]}`;
   }
 
   /** Its address refused a request for want of the access code, which isn't in yet. */
@@ -155,8 +177,9 @@ abstract class Method {
     this.lane.setTone("off");
   }
 
-  /** An attempt's outcome. Once a method has answered, a miss counts as loss. */
-  record(ok: boolean, rtt: number | null): void {
+  /** An attempt's outcome. Once a method has answered, a miss counts as loss; `why` is
+   * what the log says when answers stop. */
+  record(ok: boolean, rtt: number | null, why = "no answer"): void {
     if (this.stopped || this.tone === "off") return;
     const now = Date.now();
     const up = this.tone === "up" || this.tone === "loss";
@@ -172,7 +195,7 @@ abstract class Method {
       this.tone = "loss";
       this.downSince = now;
       this.lostRun = 1;
-      this.view.log(this, "no answer");
+      this.view.log(this, why);
     } else if (this.tone === "loss") {
       this.lostRun++;
     }
@@ -189,37 +212,50 @@ abstract class Method {
     const got = recent.filter((s) => s.ok && s.rtt !== null).map((s) => s.rtt!);
     const lost = recent.filter((s) => !s.ok && s.up).length;
     const latest = this.samples[this.samples.length - 1];
+    r.detail.classList.toggle("diag-warn", this.warn && !this.refused && this.tone !== "off");
     if (this.refused) {
       setText(r.badge, "Restricted");
-      setText(r.figs, this.kind === "https" ? `checking every ${seconds(CODE_RETRY_MS)}` : "");
+      setText(r.figs, this.kind.startsWith("http") ? `checking every ${seconds(CODE_RETRY_MS)}` : "");
       setText(r.detail, "access code required");
     } else if (this.tone === "off") {
       setText(r.badge, "Not offered");
       setText(r.figs, "");
       setText(r.detail, this.reason);
     } else if (this.tone === "trying") {
-      setText(r.badge, "No answer yet");
+      setText(r.badge, this.waiting || "No answer yet");
       setText(r.figs, this.retryMs > 1000 ? `retrying every ${seconds(this.retryMs)}` : "retrying every second");
       setText(r.detail, this.detail);
     } else {
-      setText(r.badge, this.tone === "up" ? "Answering" : `No answer for ${seconds(Date.now() - this.downSince)}`);
+      setText(r.badge, this.tone === "up" ? "Answering" : `${this.fellBack ? "Over TCP" : "No answer"} for ${seconds(Date.now() - this.downSince)}`);
       const now = latest?.ok && latest.rtt !== null ? text(ms(latest.rtt)) : "—";
       const median = got.length ? text(ms(percentile(got, 50))) : "—";
-      setText(r.figs, [this.tone === "up" ? now : "", `median ${median}`, `${lost} of ${recent.length} lost in 1\u00a0min`].filter(Boolean).join(" · "));
+      setText(r.figs, [this.tone === "up" ? now : "", `median ${median}`, `${lost} of ${recent.length} lost in 1 min`].filter(Boolean).join(" · "));
       setText(r.detail, this.detail);
     }
     drawTimeline(r.timeline, this.samples, r.width);
   }
 }
 
-/** A small HTTPS request a second, on the browser's open connection to that address. */
+/**
+ * A small HTTPS request a second, on the browser's open connection to that name. The name
+ * holds it to one HTTP version: its row counts answers over another version as answers
+ * (HTTP/1.1, HTTP/2) and says so, except HTTP/3's, where the version is the path tested.
+ */
 class HttpsMethod extends Method {
   private seq = 0;
   private recheck = 0; // while its address asks for the code, the next try
+  private tcpSince = 0; // the HTTP/3 row, not yet answering: its first answer over TCP
+  private tcpLogged = false;
 
-  constructor(fam: Fam | "Auto", view: DiagView, ep: Endpoint) {
-    super(fam, "https", view, ep, 1000);
-    this.port = `TCP ${new URL(ep.base).port || (ep.base.startsWith("https") ? "443" : "80")}`;
+  constructor(
+    fam: Fam | "Auto",
+    private readonly want: Http,
+    view: DiagView,
+    ep: Endpoint,
+  ) {
+    super(fam, want, view, ep, 1000);
+    const port = new URL(ep.base).port || (ep.base.startsWith("https") ? "443" : "80");
+    this.port = `${want === "http3" ? "UDP" : "TCP"} ${port}`;
   }
 
   tick(): void {
@@ -244,22 +280,64 @@ class HttpsMethod extends Method {
       .then((d) => {
         if (!d) return;
         const rtt = performance.now() - t0;
-        // The browser's own word on the HTTP version (the server reports nginx's too).
+        // The browser's own word on the HTTP version, else the server's (nginx's).
         const timing = performance.getEntriesByName(url).pop() as PerformanceResourceTiming | undefined;
         performance.clearResourceTimings();
         const http = httpName(timing?.nextHopProtocol) || httpName(d.http_version) || "HTTP";
-        if (d.server.port) this.port = `TCP ${d.server.port}`;
-        const parts = [http, d.tls ? `${d.tls.protocol} ${d.tls.cipher}` : "", d.server.ip ? `to ${d.server.ip}` : ""];
+        const quic = http === "HTTP/3";
+        this.view.answered(d, http, this.want, rtt, wall);
+        if (d.server.ip) this.server = d.server.ip;
+        const parts = [d.tls ? `${d.tls.protocol} ${d.tls.cipher}` : "", d.server.ip ? `to ${d.server.ip}` : ""];
         if (d.tcp_rtt_ms !== null) parts.push(`server's TCP RTT ${text(ms(d.tcp_rtt_ms))}`);
-        this.detail = parts.filter(Boolean).join(" · ");
+        if (this.want === "http3" && !quic) return this.overTcp(http, parts, done);
+        if (d.server.port) this.port = `${quic ? "UDP" : "TCP"} ${d.server.port}`;
+        const want = KINDS[this.want];
+        this.warn = http !== "HTTP" && http !== want;
+        this.detail = [this.warn ? `answered over ${http}, not ${want}: ${mismatch(this.want, http)}` : "", ...parts].filter(Boolean).join(" · ");
+        this.waiting = "";
+        this.fellBack = false;
+        this.tcpSince = 0;
+        this.tcpLogged = false;
         done(true);
-        this.view.answered(d, http, rtt, wall);
         this.record(true, rtt);
       })
       .catch(() => {
+        this.fellBack = false;
         done(false);
         this.record(false, null);
       });
+  }
+
+  /** The HTTP/3 row's name answered, but over TCP: no answer over HTTP/3. */
+  private overTcp(http: string, parts: string[], done: (ok: boolean) => void): void {
+    done(false);
+    this.warn = false;
+    if (this.tone === "trying") {
+      this.tcpSince ||= Date.now();
+      const staying = Date.now() - this.tcpSince >= H3_WAIT_MS;
+      this.waiting = staying ? "Only over TCP" : "Not over HTTP/3 yet";
+      this.detail = [
+        staying
+          ? `answers over ${http} only: ${this.port} may be blocked on the way, or this browser doesn't use HTTP/3`
+          : `answered over ${http}: browsers move to HTTP/3 once the server says it offers it`,
+        ...parts,
+      ].join(" · ");
+      if (staying && !this.tcpLogged) this.view.log(this, `only over ${http} so far: ${this.port} may be blocked, or this browser doesn't use HTTP/3`);
+      this.tcpLogged ||= staying;
+      this.record(false, null);
+    } else {
+      this.fellBack = true;
+      this.detail = [`answered over ${http} instead: the browser fell back to TCP, and waits minutes before trying HTTP/3 again`, ...parts].join(" · ");
+      this.record(false, null, `fell back to ${http} over TCP`);
+    }
+  }
+
+  override resume(phase: number): void {
+    this.waiting = "";
+    this.fellBack = false;
+    this.tcpSince = 0;
+    this.tcpLogged = false;
+    super.resume(phase);
   }
 }
 
@@ -319,7 +397,7 @@ class UdpMethod extends Method {
   private next = 0;
   private connecting = false;
   private seq = 0;
-  private waiting = new Map<number, (rtt: number | null) => void>();
+  private waitingFor = new Map<number, (rtt: number | null) => void>();
 
   constructor(
     fam: Fam,
@@ -340,12 +418,12 @@ class UdpMethod extends Method {
       const seq = this.seq++ >>> 0;
       const finish = (rtt: number | null) => {
         clearTimeout(timer);
-        this.waiting.delete(seq);
+        this.waitingFor.delete(seq);
         done(rtt !== null);
         this.record(rtt !== null, rtt);
       };
       const timer = setTimeout(() => finish(null), 1500);
-      this.waiting.set(seq, finish);
+      this.waitingFor.set(seq, finish);
       rtc.send(seq, 64);
       return;
     }
@@ -361,11 +439,13 @@ class UdpMethod extends Method {
     RtcProbe.connect(this.ep, this.ice, 8000)
       .then(async (probe) => {
         if (this.stopped) return probe.close();
-        probe.onEcho = (seq, rtt) => this.waiting.get(seq)?.(rtt);
+        probe.onEcho = (seq, rtt) => this.waitingFor.get(seq)?.(rtt);
         this.rtc = probe;
         const [path, seen] = await Promise.all([probe.path(), probe.address()]);
         if (path?.port) this.port = `UDP ${path.port}`;
-        this.detail = [path ? `to ${path.address}` : "", seen?.ip ? `seen from ${hostPort(seen.ip, seen.port)}` : ""].filter(Boolean).join(" · ") || "WebRTC data channel, no retransmits";
+        if (path) this.server = path.address;
+        const dtls = path?.dtls ? [path.dtls.version, path.dtls.cipher].filter(Boolean).join(" ") : "";
+        this.detail = [dtls, path ? `to ${path.address}` : "", seen?.ip ? `seen from ${hostPort(seen.ip, seen.port)}` : ""].filter(Boolean).join(" · ") || "WebRTC data channel, no retransmits";
         this.view.udpPath(this.fam as Fam, path?.address ?? null, path?.port ?? null, seen, path?.local ?? null);
       })
       .catch((err: unknown) => {
@@ -391,6 +471,13 @@ class UdpMethod extends Method {
   }
 }
 
+/** One address family's rows, or this address's, under a heading with the server's addresses. */
+interface Group {
+  fam: Fam | "Auto";
+  methods: Method[];
+  server: HTMLElement;
+}
+
 interface Event {
   t: number;
   who: string;
@@ -399,9 +486,12 @@ interface Event {
 
 export class DiagView implements View {
   private methods: Method[] = [];
+  private groups: Group[] = [];
+  private families = new Set<Fam>(); // the families the rows can reach
   private timer = 0;
   private off: (() => void) | null = null;
-  private https: Partial<Record<Fam, DiagHttp>> = {};
+  // Each HTTP row's latest answer, by the family the server saw it from.
+  private answers: Partial<Record<Fam, Partial<Record<Http, { d: DiagHttp; http: string }>>>> = {};
   private udp: Partial<Record<Fam, { ip: string | null; port: number | null; seen: UdpAddress | null; local: string | null }>> = {};
   private offsets: number[] = [];
   private offsetSpread: number[] = [];
@@ -410,7 +500,7 @@ export class DiagView implements View {
   private away = false; // another page is shown
   private stale = false; // the server was changed while away
   private awakeOpt: ReturnType<typeof awakeSwitch> = null; // Keep screen on
-  private els!: { you: HTMLElement; server: HTMLElement; clock: HTMLElement; rows: HTMLElement; egress: HTMLElement; log: HTMLElement };
+  private els!: { you: HTMLElement; clock: HTMLElement; rows: HTMLElement; egress: HTMLElement; log: HTMLElement };
   private readonly onVisibility = () => this.log(null, document.hidden ? "tab hidden: browsers slow down timers in background tabs, so gaps may follow" : "tab visible again");
 
   constructor(private readonly app: App) {}
@@ -427,7 +517,6 @@ export class DiagView implements View {
     });
     this.els = {
       you: h("div", { class: "diag-you" }),
-      server: h("div", { class: "diag-server" }),
       clock: h("div", { class: "diag-clock" }),
       rows: h("div", { class: "diag-rows" }),
       egress: h("div", { class: "egress" }),
@@ -440,10 +529,15 @@ export class DiagView implements View {
       h(
         "section",
         { class: "page-head" },
-        h("div", {}, h("h1", {}, "Diag"), h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second while this page is shown: HTTPS, WebSocket and UDP, over IPv4 and IPv6.")),
+        h(
+          "div",
+          {},
+          h("h1", {}, "Diag"),
+          h("p", { class: "lede wide" }, "Every way this browser can reach the server, tried once a second while this page is shown: HTTP/1.1, HTTP/2 and HTTP/3, WebSocket and UDP, over IPv4 and IPv6, as this server offers them."),
+        ),
         this.awakeOpt ? h("div", { class: "head-actions" }, this.awakeOpt.el) : null,
       ),
-      h("section", { class: "card diag-card diag-addresses" }, this.els.you, this.els.server, this.els.clock),
+      h("section", { class: "card diag-card diag-addresses" }, this.els.you, this.els.clock),
       card(
         "Connection methods",
         "Each ping leaves on the left and its pong comes back from the server on the right. Green: answering. Red: answered before, not now. Grey: no answer yet, or not offered. Amber: restricted, access code required.",
@@ -451,7 +545,12 @@ export class DiagView implements View {
         h(
           "p",
           { class: "diag-note" },
-          "HTTP/2 carries every request to a server over one TCP connection, as streams inside it; HTTP/1.1 opens a connection for each request in flight, up to six per server. So the Test page's parallel streams are separate TCP connections only over HTTP/1.1. A WebSocket always opens its own connection. Each second's HTTPS attempt is a request on the browser's open connection, so a path that breaks shows as requests without answers.",
+          "HTTP/2 carries every request to a server over one TCP connection, as streams inside it, and HTTP/3 does the same over one QUIC connection on UDP; HTTP/1.1 opens a connection for each request in flight, up to six per server. So the Test page's parallel streams are separate TCP connections only over HTTP/1.1. A WebSocket always opens its own TCP connection. Each second's HTTP attempt is a request on the browser's open connection, so a path that breaks shows as requests without answers.",
+        ),
+        h(
+          "p",
+          { class: "diag-note" },
+          "The HTTP/3 row counts only answers over HTTP/3. A browser asks over TCP first, and moves to HTTP/3 once the server says it offers it, so the row starts grey. If it stays on TCP, UDP is blocked on the way, or the browser doesn't use HTTP/3; a browser that falls back to TCP waits minutes before trying HTTP/3 again.",
         ),
       ),
       h(
@@ -512,11 +611,18 @@ export class DiagView implements View {
 
   // ---- Methods -------------------------------------------------------------------
 
-  /** Build the methods for the selected server: on first load and when it changes. */
+  /**
+   * Build the methods for the selected server: on first load and when it changes. A row is
+   * listed only where the server offers it: each HTTP row needs its single-family name, the
+   * WebSocket row the HTTP/2 row's, and the UDP rows WebRTC. A family without names isn't
+   * listed, except that a server without any lists its UDP rows for both.
+   */
   private restart(): void {
     for (const m of this.methods) m.stop();
     this.methods = [];
-    this.https = {};
+    this.groups = [];
+    this.families.clear();
+    this.answers = {};
     this.udp = {};
     this.offsets = [];
     this.offsetSpread = [];
@@ -529,44 +635,47 @@ export class DiagView implements View {
     }
     this.log(null, `checking ${loc?.name ?? info.server.name}`);
     const main = new Endpoint(loc?.url ?? "");
-    const single = { IPv4: loc?.url_v4 ? new Endpoint(loc.url_v4, "ipv4") : null, IPv6: loc?.url_v6 ? new Endpoint(loc.url_v6, "ipv6") : null };
+    const ws = (fam: Fam | "Auto", ep: Endpoint) => (info.capabilities.websocket ? [new WsMethod(fam, this, ep)] : []);
     // UDP signals over this page's own address; the probe itself is held to one family.
-    const udp = (fam: Fam) => {
-      const m = new UdpMethod(fam, this, new Endpoint(loc?.url ?? "", fam === "IPv4" ? "ipv4" : "ipv6"), info.ice_servers);
-      if (!info.capabilities.webrtc) m.off("WebRTC is turned off on this server (webrtc_enabled)");
-      return m;
-    };
-    const ws = (fam: Fam | "Auto", ep: Endpoint) => {
-      const m = new WsMethod(fam, this, ep);
-      if (!info.capabilities.websocket) m.off("WebSockets are turned off on this server");
-      return m;
-    };
-    if (single.IPv4 || single.IPv6) {
-      for (const fam of ["IPv4", "IPv6"] as const) {
-        const ep = single[fam];
-        const group = [new HttpsMethod(fam, this, ep ?? main), ws(fam, ep ?? main), udp(fam)];
-        if (!ep) {
-          const why = `this server has no ${fam}-only address (server_url_${fam === "IPv4" ? "v4" : "v6"})`;
-          for (const m of group.slice(0, 2)) m.off(why);
-        }
-        this.methods.push(...group);
+    const udp = (fam: Fam) => (info.capabilities.webrtc ? [new UdpMethod(fam, this, new Endpoint(loc?.url ?? "", fam === "IPv4" ? "ipv4" : "ipv6"), info.ice_servers)] : []);
+    const named = (["IPv4", "IPv6"] as const).map((fam) => ({ fam, names: names(loc, fam) }));
+    const listed = named.filter((n) => Object.values(n.names).some(Boolean));
+    // Without a family's HTTP/2 name, HTTP goes wherever the browser takes this address.
+    if (!listed.some((n) => n.names.http2)) this.groups.push(this.group("Auto", [new HttpsMethod("Auto", "http2", this, main), ...ws("Auto", main)]));
+    for (const { fam, names: n } of listed.length ? listed : named) {
+      const methods: Method[] = [];
+      for (const http of ["http1", "http2", "http3"] as const) {
+        const ep = n[http];
+        if (ep) methods.push(new HttpsMethod(fam, http, this, ep));
       }
-    } else {
-      // Without single-family names, HTTP goes wherever the browser takes this address.
-      this.methods.push(new HttpsMethod("Auto", this, main), ws("Auto", main), udp("IPv4"), udp("IPv6"));
+      if (n.http2) methods.push(...ws(fam, n.http2));
+      methods.push(...udp(fam));
+      if (methods.length) this.groups.push(this.group(fam, methods));
     }
-    for (const [i, m] of this.methods.entries()) {
-      this.els.rows.append(m.row.root);
-      m.start((i * 1000) / this.methods.length);
+    // Each group's rows are in the same order: HTTP/1.1, HTTP/2, HTTP/3, WebSocket, UDP.
+    for (const g of this.groups) {
+      for (const fam of g.fam === "Auto" ? (["IPv4", "IPv6"] as const) : [g.fam]) this.families.add(fam);
+      this.methods.push(...g.methods);
     }
+    if (this.groups.length) {
+      this.els.rows.append(h("div", { class: "diag-cols", "aria-hidden": "true" }, h("span", {}, "Method"), h("span", {}, "Pings"), h("span", {}, "State"), h("span", {}, "Last 5 minutes")));
+    }
+    for (const g of this.groups) {
+      this.els.rows.append(h("div", { class: "diag-group" }, h("h3", {}, famName(g.fam)), g.server), ...g.methods.map((m) => m.row.root));
+    }
+    for (const [i, m] of this.methods.entries()) m.start((i * 1000) / this.methods.length);
     this.render();
+  }
+
+  private group(fam: Fam | "Auto", methods: Method[]): Group {
+    return { fam, methods, server: h("span", { class: "diag-group-server" }) };
   }
 
   // ---- What the answers say ------------------------------------------------------
 
-  answered(d: DiagHttp, _http: string, rtt: number, sentAt: number): void {
+  answered(d: DiagHttp, http: string, kind: Http, rtt: number, sentAt: number): void {
     const fam = d.client.family;
-    if (fam) this.https[fam] = d;
+    if (fam) (this.answers[fam] ??= {})[kind] = { d, http };
     // The server's clock against this browser's, from the middle of the round trip.
     this.offsets.push(d.time_ms - (sentAt + rtt / 2));
     this.offsetSpread.push(rtt / 2);
@@ -574,6 +683,13 @@ export class DiagView implements View {
       this.offsets.shift();
       this.offsetSpread.shift();
     }
+  }
+
+  /** The latest answer from that family over TCP, or over HTTP/3: the HTTP/2 row's first. */
+  private seen(fam: Fam, quic: boolean): DiagHttp | undefined {
+    const rows = this.answers[fam] ?? {};
+    const order: Http[] = quic ? ["http3", "http2", "http1"] : ["http2", "http1", "http3"];
+    return order.map((k) => rows[k]).find((a) => a && (a.http === "HTTP/3") === quic)?.d;
   }
 
   udpPath(fam: Fam, ip: string | null, port: number | null, seen: UdpAddress | null, local: string | null): void {
@@ -600,29 +716,25 @@ export class DiagView implements View {
       if (button) offered.add(m.ep.base);
       m.render(button);
     }
+    // Each group's server addresses, in its rows' order: one per name, where names differ.
+    for (const g of this.groups) {
+      const ips = [...new Set(g.methods.map((m) => m.server).filter(Boolean))];
+      setText(g.server, ips.length ? `Server ${ips.join(", ")}` : "");
+    }
     this.renderAddresses();
     this.renderEgress();
     this.renderLog();
   }
 
   private renderAddresses(): void {
-    const { you, server, clock } = this.els;
+    const { you, clock } = this.els;
     clear(you);
     for (const fam of ["IPv4", "IPv6"] as const) {
-      const ip = this.https[fam]?.client.ip ?? this.udp[fam]?.seen?.ip ?? null;
-      you.append(h("div", { class: "diag-addr" }, h("span", { class: "diag-fam" }, `Your ${fam}`), h("span", { class: `diag-ip ${fam === "IPv4" ? "v4" : "v6"}${ip ? "" : " none"}` }, ip ?? `no answer over ${fam} yet`)));
+      const ip = this.seen(fam, false)?.client.ip ?? this.seen(fam, true)?.client.ip ?? this.udp[fam]?.seen?.ip ?? null;
+      // Before the server answers, no rows are built: the families aren't known yet.
+      const none = !this.groups.length || this.families.has(fam) ? `no answer over ${fam} yet` : "not offered by this server";
+      you.append(h("div", { class: "diag-addr" }, h("span", { class: "diag-fam" }, `Your ${fam}`), h("span", { class: `diag-ip ${fam === "IPv4" ? "v4" : "v6"}${ip ? "" : " none"}` }, ip ?? none)));
     }
-    const servers = (["IPv4", "IPv6"] as const)
-      .map((fam) => {
-        const httpsIp = this.https[fam]?.server.ip;
-        const udp = this.udp[fam];
-        const ip = httpsIp ?? udp?.ip;
-        if (!ip) return "";
-        const via = [this.https[fam]?.server.port ? `TCP ${this.https[fam]!.server.port}` : "", udp?.port ? `UDP ${udp.port}` : ""].filter(Boolean).join(", ");
-        return `${fam} ${ip}${via ? ` (${via})` : ""}`;
-      })
-      .filter(Boolean);
-    setText(server, servers.length ? `Server: ${servers.join(" · ")}` : "Server: —");
     if (this.offsets.length) {
       const offset = percentile(this.offsets, 50);
       const spread = percentile(this.offsetSpread, 50);
@@ -636,7 +748,9 @@ export class DiagView implements View {
   private renderEgress(): void {
     clear(this.els.egress);
     for (const fam of ["IPv4", "IPv6"] as const) {
-      const tcp = this.https[fam]?.client;
+      if (!this.families.has(fam)) continue;
+      const tcp = this.seen(fam, false)?.client;
+      const quic = this.seen(fam, true)?.client;
       const udp = this.udp[fam]?.seen;
       // This computer's own address on the UDP path: only where the browser reveals it.
       const local = this.udp[fam]?.local ?? null;
@@ -647,7 +761,7 @@ export class DiagView implements View {
         else verdict = "Same address";
       }
       const outside = udp?.ip ?? tcp?.ip;
-      const mac = fam === "IPv6" ? [local, tcp?.ip, udp?.ip].map(eui64Mac).find(Boolean) : null;
+      const mac = fam === "IPv6" ? [local, tcp?.ip, quic?.ip, udp?.ip].map(eui64Mac).find(Boolean) : null;
       const row = (term: string, value: string | HTMLElement, mono = true) => [h("dt", {}, term), h("dd", mono ? { class: "mono" } : {}, value)];
       this.els.egress.append(
         h(
@@ -659,7 +773,8 @@ export class DiagView implements View {
             {},
             ...(local ? row("This computer", local) : []),
             ...row("Over HTTPS (TCP)", hostPort(tcp?.ip, tcp?.port)),
-            ...row("Over UDP", hostPort(udp?.ip, udp?.port)),
+            ...(quic ? row("Over HTTP/3 (UDP)", hostPort(quic.ip, quic.port)) : []),
+            ...row("Over UDP (WebRTC)", hostPort(udp?.ip, udp?.port)),
             ...row("Compared", verdict, false),
             ...(local && outside ? row("NAT", local === outside ? "none: same address" : `${local} → ${outside}`) : []),
             ...(mac ? row("MAC", h("span", {}, mac, h("span", { class: "egress-note" }, "read from the IPv6 address (EUI-64)"))) : []),
@@ -678,4 +793,12 @@ export class DiagView implements View {
     }
     if (!this.events.length) this.els.log.append(h("li", { class: "none" }, "Nothing yet."));
   }
+}
+
+/** A server's single-family names in one family, by the HTTP version each serves. */
+function names(loc: Location | null, fam: Fam): Record<Http, Endpoint | null> {
+  const family = fam === "IPv4" ? "ipv4" : "ipv6";
+  const v = fam === "IPv4" ? "v4" : "v6";
+  const ep = (url: string | undefined) => (url ? new Endpoint(url, family) : null);
+  return { http1: ep(loc?.[`url_${v}_http1` as const]), http2: ep(loc?.[`url_${v}` as const]), http3: ep(loc?.[`url_${v}_http3` as const]) };
 }

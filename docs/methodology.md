@@ -347,16 +347,29 @@ the client's own link, and both would read low.
 ## Diag
 
 The Diag page tries each way of reaching the server once a second while the page is
-shown: HTTPS, WebSocket and UDP, over IPv4 and IPv6. Going to another page pauses it
-and closes its connections. Its rows and events stay, and the timelines show the gap.
+shown: HTTP/1.1, HTTP/2 and HTTP/3, WebSocket and UDP, over IPv4 and IPv6, as the server
+offers them ([HTTP versions](configuration.md#http-versions) says which rows are
+listed). The rows are grouped by family, each group headed by the server addresses its
+rows reached. Going to another page pauses it and closes its connections. Its rows and
+events stay, and the timelines show the gap.
 
-* **HTTPS** is a small request to `/api/v1/diag/http` on the server's IPv4-only or
-  IPv6-only address ([IPv4 and IPv6](configuration.md#ipv4-and-ipv6)). The answer gives
-  the client's address and port as the server saw them, the server's own address and
-  port, the TLS version and cipher, the server kernel's TCP round trip for that
-  connection (nginx's `$tcpinfo_rtt`), and the server's clock. The browser reports the
-  HTTP version it used (Resource Timing's `nextHopProtocol`). Browsers keep connections
-  open, so each attempt is a request on an existing connection, not a new one.
+* **HTTP/1.1, HTTP/2 and HTTP/3** are each a small request to `/api/v1/diag/http` on a
+  name of the server's that serves that version in one family. The answer gives the
+  client's address and port as the server saw them, the server's own address and port,
+  the TLS version and cipher, the server kernel's TCP round trip for that connection
+  (nginx's `$tcpinfo_rtt`, none over HTTP/3), and the server's clock. The browser
+  reports the HTTP version it used (Resource Timing's `nextHopProtocol`), else the
+  server does. Browsers keep connections open, so each attempt is a request on an
+  existing connection, not a new one. An HTTP/1.1 or HTTP/2 row whose answer came over
+  another version still counts it, and its detail says what's wrong with the name.
+* **HTTP/3** counts only answers that came over HTTP/3, on UDP. A browser's first
+  requests to the name go over TCP, and it moves to HTTP/3 once the `Alt-Svc` header in
+  their answers says the server offers it: in Chrome and Firefox, within the first few
+  seconds. Until then the row is grey, **Not over HTTP/3 yet**. Still on TCP after 10 s,
+  it says **Only over TCP**: UDP is blocked on the way, or the browser doesn't use
+  HTTP/3, as when an organization turns it off. Once answering, answers that come over
+  TCP again count as lost (**Over TCP**, red): the browser fell back, and browsers wait
+  minutes before trying HTTP/3 again after a failure, so recovery shows late.
 * **WebSocket** opens its own TCP connection by an HTTP/1.1 upgrade and echoes a probe
   a second. A closed socket is opened again every 2 s.
 * **UDP** is a WebRTC data channel held to one family (the server's candidates of the
@@ -364,13 +377,16 @@ and closes its connections. Its rows and events stay, and the timelines show the
   tried again every 10 s, since opening one takes seconds and uses one of the server's
   ports. The server reports the client's address and port on the chosen path (`addr` on
   the control channel), which is how the NAT and egress table compares UDP with TCP.
+  The row shows the DTLS version and cipher where the browser reports them (its
+  `transport` statistics).
 
 An attempt not answered within 2 s (1.5 s for WebSocket and UDP) counts as missed. A
 method that has answered before shows a miss as loss (red). One that hasn't answered
-yet stays grey and keeps trying. One the server doesn't offer is grey and isn't tried.
+yet stays grey and keeps trying. One the server turns out not to offer, such as UDP in
+a family it has no address in, is grey and isn't tried again.
 One whose address asks for the access code, as a server's IPv4-only name can for a
 visitor inside on IPv6 only, says **Restricted** (amber) and doesn't count as loss:
-its HTTPS is tried every 10 s until the code is in, and no WebSocket is opened there
+its HTTP rows are tried every 10 s until the code is in, and no WebSocket is opened there
 meanwhile ([Inside on one address family](access.md#inside-on-one-address-family)).
 The clock offset is the server's time minus the browser's at the middle of the round
 trip, ± half the round trip.

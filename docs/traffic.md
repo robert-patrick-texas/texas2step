@@ -162,10 +162,11 @@ profiles. The bill also has:
   |---|---|---|---|
   | Monitor, 10 probes a second (its default) | 257 MB | 174 MB | 431 MB |
   | Monitor, 50 probes a second | 1.26 GB | 839 MB | 2.1 GB |
-  | Diag | 219 MB | 128 MB | 347 MB |
+  | Diag, six rows (HTTP/2, WebSocket and UDP over both families) | 219 MB | 128 MB | 347 MB |
 
   So a month of one Monitor tab at its default rate costs the server about 7.7 GB sent,
-  and a Diag tab 6.6 GB. A Monitor comparing two servers costs each the same.
+  and a Diag tab 6.6 GB. A Monitor comparing two servers costs each the same. Diag's
+  HTTP/1.1 and HTTP/3 rows add a request a second each, as its HTTP/2 rows make.
 * **Anything else on the server**: operating system updates, other sites behind the same
   nginx.
 

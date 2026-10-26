@@ -2559,13 +2559,6 @@ a.brand-org:hover,
   color: var(--muted);
 }
 
-.diag-server {
-  color: var(--ink-2);
-  font-family: var(--mono);
-  font-size: 15px;
-  overflow-wrap: anywhere;
-}
-
 .diag-clock {
   color: var(--ink-2);
   font-size: 13px;
@@ -2583,9 +2576,51 @@ a.brand-org:hover,
   max-width: none;
 }
 
+/* The rows and their column headings share one grid. */
+.diag-rows {
+  --diag-cols: 150px minmax(120px, 1fr) minmax(240px, 1.5fr) minmax(150px, 300px);
+}
+
+.diag-cols {
+  display: grid;
+  grid-template-columns: var(--diag-cols);
+  gap: 14px;
+  padding: 0 2px 6px;
+  border-bottom: 1px solid var(--grid);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* A family's heading, with the server's addresses its rows reached: a band, so it reads
+   as the start of a group where the rows stack, on phones. */
+.diag-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+  margin-top: 12px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.diag-group h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.diag-group-server {
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
 .diag-row {
   display: grid;
-  grid-template-columns: 150px minmax(120px, 1fr) minmax(240px, 1.5fr) minmax(150px, 300px);
+  grid-template-columns: var(--diag-cols);
   align-items: center;
   gap: 14px;
   padding: 7px 2px;
@@ -2678,6 +2713,12 @@ a.brand-org:hover,
   overflow-wrap: anywhere;
 }
 
+/* The server answers, but isn't set up as its row expects, e.g. no HTTP/2 on that name. */
+.diag-detail .diag-warn {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 .diag-note {
   margin: 12px 0 0;
   color: var(--ink-2);
@@ -2754,6 +2795,10 @@ a.brand-org:hover,
     grid-template-columns: 1fr 1.6fr;
   }
 
+  .diag-cols {
+    display: none;
+  }
+
   .diag-row .lane,
   .diag-timeline {
     grid-column: 1 / -1;
@@ -2772,18 +2817,13 @@ a.brand-org:hover,
     gap: 0;
   }
 
-  /* An IPv6 address must fit 39 characters; IPv4, at most 15, can stay large. The
-     server's line sits just below the IPv6 size, so the client's addresses lead. */
+  /* An IPv6 address must fit 39 characters; IPv4, at most 15, can stay large. */
   .diag-ip.v6:not(.none) {
     font-size: clamp(11px, calc((100vw - 72px) / 24), 18px);
   }
 
   .diag-ip.v4:not(.none) {
     font-size: clamp(18px, calc((100vw - 72px) / 11), 24px);
-  }
-
-  .diag-server {
-    font-size: clamp(10.5px, calc((100vw - 72px) / 25.5), 15px);
   }
 }
 

@@ -45,6 +45,21 @@ export interface UdpAddress {
   server_port: number | null;
 }
 
+/** The UDP path ICE chose, as this browser's own statistics describe it. */
+export interface UdpPath {
+  address: string;
+  port: number | null;
+  family: "IPv4" | "IPv6";
+  local: string | null;
+  dtls: { version: string; cipher: string | null } | null;
+}
+
+/** RTCTransportStats.tlsVersion, the record version in hex, by name: FEFD is DTLS 1.2. */
+function dtlsName(hex: string | undefined): string {
+  const names: Record<string, string> = { FEFF: "DTLS 1.0", FEFD: "DTLS 1.2", FEFC: "DTLS 1.3" };
+  return names[(hex ?? "").toUpperCase()] ?? (hex ? `DTLS ${hex}` : "DTLS");
+}
+
 type ControlReply = Record<string, unknown>;
 
 /** The server's answer to a profile asked for: allowed, or why not, with a traffic limit's
@@ -130,14 +145,17 @@ export class RtcProbe {
   }
 
   /**
-   * The UDP path ICE chose: the server's address and port, and this computer's own address
-   * on it where the browser reveals it (`local`; see revealed()).
+   * The UDP path ICE chose: the server's address and port, this computer's own address on
+   * it where the browser reveals it (`local`; see revealed()), and the DTLS version and
+   * cipher protecting it where the browser reports them.
    */
-  async path(): Promise<{ address: string; port: number | null; family: "IPv4" | "IPv6"; local: string | null } | null> {
+  async path(): Promise<UdpPath | null> {
     const stats = await this.pc.getStats();
     let pair: { remoteCandidateId?: string; localCandidateId?: string } | undefined;
+    let dtls: UdpPath["dtls"] = null;
     stats.forEach((s) => {
       if (s.type === "transport" && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId);
+      if (s.type === "transport" && (s.tlsVersion || s.dtlsCipher)) dtls = { version: dtlsName(s.tlsVersion), cipher: s.dtlsCipher || null };
     });
     stats.forEach((s) => {
       if (!pair && s.type === "candidate-pair" && s.nominated && s.state === "succeeded") pair = s;
@@ -148,7 +166,7 @@ export class RtcProbe {
     // A host candidate is the interface's own address; a reflexive or relayed one is based on it.
     const mine = pair?.localCandidateId ? stats.get(pair.localCandidateId) : undefined;
     const local = revealed(mine?.candidateType === "host" ? (mine.address ?? mine.ip) : mine?.relatedAddress);
-    return { address, port: typeof remote?.port === "number" ? remote.port : null, family: address.includes(":") ? "IPv6" : "IPv4", local };
+    return { address, port: typeof remote?.port === "number" ? remote.port : null, family: address.includes(":") ? "IPv6" : "IPv4", local, dtls };
   }
 
   /** Sends probe `seq`, `size` bytes long; when it was sent. On a channel that has closed,

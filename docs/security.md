@@ -196,6 +196,7 @@ encrypted:
 | Traffic | Protection |
 |---|---|
 | Pages, API requests, downloads and uploads | HTTPS: TLS 1.3, ended by nginx |
+| Diag's HTTP/3 row | QUIC, which carries its own TLS 1.3, ended by nginx |
 | WebSocket probes, and Monitor's TCP fallback | `wss://`: TLS, as HTTPS |
 | UDP probes: the Test page's packet loss, Monitor and Diag | A WebRTC data channel: SCTP inside DTLS 1.2, with ECDHE keys made for each session and AES-128-GCM or ChaCha20-Poly1305 |
 

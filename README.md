@@ -37,8 +37,8 @@ to the people using a connection: [docs/experience.md](docs/experience.md).
 The UI has five views: **Test** (gauge, live link animation, charts, exportable and
 shareable results), **Monitor** (continuous UDP probing with a scrolling RTT and loss
 trace, to one server or to two at once for a side-by-side comparison, or a voice or video
-call's packets scored every 10 seconds), **Diag** (HTTPS,
-WebSocket and UDP over IPv4 and IPv6, tried once a second, with your addresses, NAT,
+call's packets scored every 10 seconds), **Diag** (HTTP/1.1,
+HTTP/2 and HTTP/3, WebSocket and UDP over IPv4 and IPv6, tried once a second, with your addresses, NAT,
 TLS and an event log), **History** (saved runs and trend), and **API** (copy-ready
 examples). A site can hide any of them (`page_test`, `page_monitor`, `page_diag`,
 `page_history`, `page_api`). Every

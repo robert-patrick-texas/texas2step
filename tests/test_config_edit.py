@@ -189,12 +189,13 @@ def test_cli_add_location_asks_the_server_who_it_is(settings_file, monkeypatch, 
         "https://v4.houston.example.net/texas2step",
         "https://v6.houston.example.net/texas2step",
     )
+    h3 = "https://h3-6.houston.example.net/texas2step"
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/texas2step/api/v1/locations":
             # Its own entry carries its single-family URLs; the other one isn't it.
             other = {"id": "austin", "url": "https://austin.example.net/texas2step"}
-            own = {**me, "url": "", "url_v4": v4, "url_v6": v6}
+            own = {**me, "url": "", "url_v4": v4, "url_v6": v6, "url_v6_http3": h3}
             return httpx.Response(200, json={"locations": [own, other]})
         assert request.url.path == "/texas2step/api/v1/info"
         return httpx.Response(200, json={"server": me})
@@ -206,7 +207,7 @@ def test_cli_add_location_asks_the_server_who_it_is(settings_file, monkeypatch, 
     url = "https://houston.example.net/texas2step"
     main(["config", "add-location", url, "--config", str(settings_file), "--write"])
     got = tomllib.loads(settings_file.read_text())["locations"]
-    assert got == [{**me, "url": url, "url_v4": v4, "url_v6": v6}]
+    assert got == [{**me, "url": url, "url_v4": v4, "url_v6": v6, "url_v6_http3": h3}]
 
     main(["config", "add-location", url, "--config", str(settings_file), "--write"])
     assert "already listed" in capsys.readouterr().out

@@ -77,10 +77,10 @@ INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.S |
 
 def server_origins(settings: Settings) -> list[str]:
     """The other servers the page reaches, for its Content-Security-Policy: each in the
-    picker and this server's own IPv4-only and IPv6-only names, over HTTP and WebSocket."""
-    urls = [settings.server_url_v4, settings.server_url_v6]
+    picker and this server's own single-family names, over HTTP and WebSocket."""
+    urls = settings.all_locations()[0].urls()
     for loc in settings.locations:
-        urls += [loc.url, loc.url_v4, loc.url_v6]
+        urls += loc.urls()
     origins: list[str] = []
     for url in filter(None, urls):
         parts = urlsplit(url)

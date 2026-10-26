@@ -291,11 +291,13 @@ def test_pages_say_which_scripts_and_servers_they_may_use(tmp_path):
         "dallas.example.net",
         "https://dallas.example.net/texas2step",
         url_v4="https://v4.dallas.example.net:8443/texas2step",
+        url_v6_http3="https://h3-6.dallas.example.net/texas2step",
     )
     settings = Settings(
         results_path=str(tmp_path / "r.db"),
         locations=[peer],
         server_url_v6="http://v6.houston.example.net/texas2step",
+        server_url_v4_http1="https://h1-4.houston.example.net/texas2step",
     )
     with TestClient(create_app(settings)) as c:
         r = c.get("/monitor")
@@ -309,10 +311,14 @@ def test_pages_say_which_scripts_and_servers_they_may_use(tmp_path):
         "'self'",
         "http://v6.houston.example.net",
         "ws://v6.houston.example.net",
+        "https://h1-4.houston.example.net",
+        "wss://h1-4.houston.example.net",
         "https://dallas.example.net",
         "wss://dallas.example.net",
         "https://v4.dallas.example.net:8443",
         "wss://v4.dallas.example.net:8443",
+        "https://h3-6.dallas.example.net",
+        "wss://h3-6.dallas.example.net",
     ]
     assert policy["object-src"] == "'none'" and policy["base-uri"] == "'self'"
     # The API explorer's own inline script, by its hash too.

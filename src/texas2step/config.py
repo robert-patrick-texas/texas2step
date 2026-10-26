@@ -46,9 +46,22 @@ class Location:
     location: str = ""  # free text, e.g. "Dallas, TX"
     url_v4: str = ""  # optional IPv4-only hostname for forcing the address family
     url_v6: str = ""  # optional IPv6-only hostname
+    # Optional single-family names that each serve one HTTP version, for Diag's HTTP/1.1
+    # and HTTP/3 rows; url_v4 and url_v6 are its HTTP/2 rows.
+    url_v4_http1: str = ""
+    url_v4_http3: str = ""
+    url_v6_http1: str = ""
+    url_v6_http3: str = ""
 
     def public(self) -> dict[str, str]:
         return dataclasses.asdict(self)
+
+    def urls(self) -> list[str]:
+        """Every base URL it may be reached at, empty where it isn't set."""
+        return [self.url, self.url_v4, self.url_v6, *(getattr(self, k) for k in PROTOCOL_URLS)]
+
+
+PROTOCOL_URLS = ("url_v4_http1", "url_v4_http3", "url_v6_http1", "url_v6_http3")
 
 
 @dataclass(frozen=True)
@@ -83,6 +96,11 @@ class Settings:
     # Optional single-family hostnames for this server (enables the IPv4/IPv6 switch).
     server_url_v4: str = ""
     server_url_v6: str = ""
+    # Optional single-family hostnames that each serve one HTTP version (Diag's rows).
+    server_url_v4_http1: str = ""
+    server_url_v4_http3: str = ""
+    server_url_v6_http1: str = ""
+    server_url_v6_http3: str = ""
 
     # Wire endpoint limits.
     max_download_bytes: int = 1 << 30
@@ -338,6 +356,7 @@ class Settings:
             location=self.server_location,
             url_v4=self.server_url_v4,
             url_v6=self.server_url_v6,
+            **{key: getattr(self, f"server_{key}") for key in PROTOCOL_URLS},
         )
         return [me, *[loc for loc in self.locations if loc.id != self.server_id]]
 

@@ -214,6 +214,11 @@ export interface Location {
   location: string;
   url_v4: string;
   url_v6: string;
+  // Single-family names that each serve one HTTP version, for Diag's rows; "" if not set.
+  url_v4_http1: string;
+  url_v4_http3: string;
+  url_v6_http1: string;
+  url_v6_http3: string;
 }
 
 export interface ResultSummary {
