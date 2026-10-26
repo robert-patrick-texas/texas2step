@@ -46,11 +46,14 @@ export class HistoryView implements View {
 
   /** The visitors' access code, where this server asks for one (docs/access.md). */
   private async code(desk: HTMLElement): Promise<void> {
+    // The server tells it only where codes are on, to a visitor who needs none; asking
+    // anywhere else gets a 404, which its journal logs as a warning.
+    if (!this.app.access?.codes || this.app.access.required) return;
     let code: AccessCode;
     try {
       code = await this.app.origin.json<AccessCode>("/access/code");
     } catch {
-      return; // no access codes here, or not for this client
+      return; // not for this client after all
     }
     const at = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: code.timezone, timeZoneName: "short" });
     const changes = code.changes_at ? `changes ${at(code.changes_at)}` : "fixed";
