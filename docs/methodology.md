@@ -280,8 +280,12 @@ the nearest one offered.
 | Profile | Sends | Each way, as the network carries it |
 |---|---|---|
 | **Path** | Small probes, 64 bytes, 5 to 50 a second (10 by default): a running record of the path's round trip, jitter and loss | about 25 kb/s at 10 a second |
-| **Voice call** | A voice call's packets: 200 bytes every 20 ms | about 150 kb/s |
-| **Video call** | The voice packets, and 30 video frames a second, each a burst of 1,100-byte packets (4 for 1 Mb/s of video) | about 1.4 Mb/s |
+| **Voice call** | A voice call's packets: 200 bytes every 20 ms | about 160 kb/s |
+| **Video call** | The voice packets, and 30 video frames a second, each a burst of 1,100-byte packets (4 for 1 Mb/s of video) | about 1.5 Mb/s |
+
+The call figures, as the page states them, count each packet's headers, encryption and a
+VPN's wrapping. Options change them: 0.8 Mb/s for 0.5 Mb/s of video, 3.0 Mb/s for 2.5 Mb/s.
+Comparing two servers sends the same to each, so twice as much in all.
 
 Video packets are 1,100 bytes so that each travels as a single UDP packet: a browser
 splits a data-channel message much larger than that, and one lost piece would lose the

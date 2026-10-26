@@ -934,17 +934,24 @@ export class MonitorView implements View {
   }
 }
 
+const WIRE_BYTES = 200; // a call packet's headers, encryption and VPN wrapping, roughly
+
 /** What the page says each profile sends, and what that costs. */
 function lede(c: Choice, two: boolean): string {
   if (c.profile === "path") {
     return two ? "UDP probes to two servers at the same moments from this browser, compared on one chart." : "A steady stream of small UDP probes, echoed by the server. Watch round-trip time, jitter and loss as they happen: useful while reproducing a problem or moving around a building.";
   }
-  const kbps = (bytes: number, perSecond: number) => (bytes * 8 * perSecond) / 1000;
-  const total = kbps(c.voiceSize, 1000 / c.every) + (c.profile === "video" ? kbps(VIDEO_BYTES, framePackets(c.video) * VIDEO_FPS) : 0);
-  const rate = total >= 1000 ? `${(total / 1000).toFixed(1)} Mb/s` : `${Math.round(total)} kb/s`;
-  const what = c.profile === "video" ? `A video call's packets, voice and ${VIDEO_FPS} frames a second of video` : "A voice call's packets";
-  if (two) return `A ${c.profile} call to two servers at once: about ${rate} each way, scored every 10 s.`;
-  return `${what}, about ${rate} each way, echoed by the server. Each 10 seconds is scored as the call would sound, to catch the moments it breaks up.`;
+  // As the network carries it, each way: each packet with its headers, encryption and a
+  // VPN's wrapping, taken as WIRE_BYTES more, and rounded up.
+  const bits = (bytes: number, perSecond: number) => (bytes + WIRE_BYTES) * 8 * perSecond;
+  const total = bits(c.voiceSize, 1000 / c.every) + (c.profile === "video" ? bits(VIDEO_BYTES, framePackets(c.video) * VIDEO_FPS) : 0);
+  const video = c.profile === "video";
+  const step = video ? 100_000 : 10_000; // video to 0.1 Mb/s, voice to 10 kb/s
+  const each = Math.ceil(Math.round(total) / step) * step;
+  const rate = (b: number) => (video ? `${(b / 1e6).toFixed(1)} Mb/s` : `${b / 1000} kb/s`);
+  const what = video ? `A video call's packets, voice and ${VIDEO_FPS} frames a second of video` : "A voice call's packets";
+  if (two) return `A ${c.profile} call to two servers at once: about ${rate(each)} each way per server on the network, ${rate(2 * each)} in all, scored every 10 s.`;
+  return `${what}, about ${rate(each)} each way on the network, echoed by the server. Each 10 seconds is scored as the call would sound, to catch the moments it breaks up.`;
 }
 
 /** How long before `now`, as "40 s ago" or "3 min ago". */
