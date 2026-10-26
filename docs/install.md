@@ -335,6 +335,9 @@ sudo systemctl restart texas2step
 ```
 
 Diag then shows each row's version, and says so when a name answers over another one.
+The setup tool and `texas2step update` still report and check the site's own name: of
+several blocks that include texas2step, they pass over those named in a `server_url_`
+setting, then take the one that listens on every address, then nginx's `default_server`.
 
 ## 3. Configure
 

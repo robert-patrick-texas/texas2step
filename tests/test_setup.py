@@ -173,17 +173,20 @@ def test_upstream_conf_must_be_loaded():
 
 
 @pytest.mark.parametrize(
-    ("args", "port", "addr"),
+    ("args", "port", "addr", "everywhere"),
     [
-        (["443", "ssl"], 443, "127.0.0.1"),
-        (["[::]:443", "ssl"], 443, "127.0.0.1"),
-        (["10.0.0.5:8443", "ssl"], 8443, "10.0.0.5"),
-        (["127.0.0.1"], 80, "127.0.0.1"),
-        (["*:80"], 80, "127.0.0.1"),
+        (["443", "ssl"], 443, "127.0.0.1", True),
+        (["[::]:443", "ssl"], 443, "127.0.0.1", True),
+        (["10.0.0.5:8443", "ssl"], 8443, "10.0.0.5", False),
+        (["127.0.0.1"], 80, "127.0.0.1", False),
+        (["*:80"], 80, "127.0.0.1", True),
+        (["0.0.0.0:443", "ssl"], 443, "0.0.0.0", True),
+        (["[2001:db8::2]:443", "ssl"], 443, "127.0.0.1", False),
     ],
 )
-def test_listen_directives(args, port, addr):
+def test_listen_directives(args, port, addr, everywhere):
     assert (setup._listen_port(args), setup._listen_addr(args)) == (port, addr)
+    assert setup._listen_everywhere(args) is everywhere
 
 
 def test_port_ranges():
@@ -350,6 +353,62 @@ def test_an_already_published_host_is_left_alone():
     assert p.nginx.file == "/etc/nginx/sites-enabled/www.example.net"
     p = setup.plan(both, setup.Options(site="/etc/nginx/sites-enabled/dev.example.net"))
     assert p.nginx is None and p.public == "https://dev.example.net/speedtest/"
+
+
+SNIPPET_FILE = PUBLISHED[PUBLISHED.index("# configuration file /etc/nginx/snippets/") :]
+
+
+def test_the_main_site_is_named_where_several_blocks_publish_it():
+    # Names for one HTTP version on their own addresses, above the main site.
+    sites = """\
+# configuration file /etc/nginx/sites-enabled/houston.example.net:
+server {
+    listen [2001:db8::2]:443 ssl;
+    http2 off;
+    server_name houston-6-h1.example.net;
+    include snippets/speedtest.conf;
+}
+server {
+    listen [2001:db8::3]:443 ssl;
+    listen [2001:db8::3]:443 quic reuseport;
+    server_name houston-6-h3.example.net;
+    include snippets/speedtest.conf;
+}
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name houston.example.net;
+    include snippets/speedtest.conf;
+}
+
+"""
+    for opts, kw in ((setup.Options(), {}), (setup.Options(update=True), UPGRADE)):
+        p = setup.plan(host(NGINX_CONF, sites, SNIPPET_FILE, **kw), opts)
+        assert p.public == "https://houston.example.net/speedtest/"
+        assert any("by houston.example.net in" in t for t in levels(p, setup.OK))
+
+    # A certificate for each version instead: all on every address, the names in the settings.
+    sites = """\
+# configuration file /etc/nginx/sites-enabled/houston.example.net:
+server {
+    listen 443 ssl;
+    server_name houston-h1.example.net;
+    include snippets/speedtest.conf;
+}
+server {
+    listen 443 ssl;
+    server_name houston.example.net;
+    include snippets/speedtest.conf;
+}
+
+"""
+    p = setup.plan(host(NGINX_CONF, sites, SNIPPET_FILE), setup.Options())
+    assert p.public == "https://houston-h1.example.net/speedtest/"  # nothing says otherwise
+    config = TEMPLATE.replace(
+        '# server_url_v4_http1 = ""', 'server_url_v4_http1 = "https://houston-h1.example.net/x"'
+    )
+    p = setup.plan(host(NGINX_CONF, sites, SNIPPET_FILE, config=config), setup.Options())
+    assert p.public == "https://houston.example.net/speedtest/"
 
 
 @pytest.mark.parametrize(

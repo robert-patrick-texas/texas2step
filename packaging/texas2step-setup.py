@@ -197,6 +197,8 @@ class Server:
     locations: list[str] = field(default_factory=list)  # paths, including from includes
     published: list[str] = field(default_factory=list)  # locations proxied to texas2step
     published_in: dict[str, str] = field(default_factory=dict)  # location -> its file
+    everywhere: bool = False  # listens on every address, not only on given ones
+    default: bool = False  # nginx's default_server for its port
 
     def label(self) -> str:
         names = " ".join(self.names) or "(no server_name)"
@@ -213,6 +215,16 @@ def _listen_addr(args: list[str]) -> str:
     """An IPv4 address the listen directive binds, or 127.0.0.1 for a wildcard."""
     host = args[0].rpartition(":")[0] if args and ":" in args[0] else ""
     return host if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", host) else "127.0.0.1"
+
+
+def _listen_everywhere(args: list[str]) -> bool:
+    """Whether the listen directive binds every address: 443, *:443, [::]:443, 0.0.0.0:443."""
+    addr = args[0] if args else "80"
+    if addr.startswith("["):
+        host = addr[: addr.find("]") + 1]
+    else:
+        host = addr.rpartition(":")[0] if ":" in addr else ("" if addr.isdigit() else addr)
+    return host in {"", "*", "0.0.0.0", "[::]"}
 
 
 def _resolve(pattern: str, files: dict[str, str]) -> list[str]:
@@ -273,6 +285,8 @@ def servers(files: dict[str, str]) -> list[Server]:
                 port = _listen_port(mine[0]) if mine else 80
                 addr = _listen_addr(mine[0]) if mine else "127.0.0.1"
                 server = Server(f, d.line, names, https, port, addr, after, indent)
+                server.everywhere = any(_listen_everywhere(a) for a in mine)
+                server.default = any("default_server" in a for a in mine)
                 for path, proxied, where in _walk_locations(d.block, files, trees, {f}, f):
                     server.locations.append(path)
                     if proxied:
@@ -812,9 +826,9 @@ def _check_nginx(host: Host, opts: Options, p: Plan) -> None:
         return
 
     # Already published: leave nginx alone, unless --site names another site for it.
-    published = [(s, loc) for s in found for loc in s.published]
-    if published and not opts.site:
-        s, loc = published[0]
+    main = _main_published(found, host.config)
+    if main and not opts.site:
+        s, loc = main
         _published(host, p, files, s, loc)
         if opts.path and loc.rstrip("/") != path:
             p.add(NOTE, f"--path {opts.path} not used: texas2step is already published at {loc}")
@@ -892,9 +906,9 @@ def _check_nginx_update(host: Host, p: Plan) -> None:
         return
     p.add(OK, "nginx is running")
     files = split_dump(host.nginx_dump)
-    published = [(s, loc) for s in servers(files) for loc in s.published]
-    if published:
-        _published(host, p, files, *published[0])
+    main = _main_published(servers(files), host.config)
+    if main:
+        _published(host, p, files, *main)
     else:
         p.add(
             NOTE,
@@ -918,6 +932,26 @@ def _check_nginx_files(host: Host, p: Plan) -> None:
                 f"{path} was edited here, so dpkg keeps it and saves the new package's "
                 f"version as {path}.dpkg-dist; compare the two",
             )
+
+
+def _main_published(found: list[Server], config: str | None) -> tuple[Server, str] | None:
+    """A server block that publishes texas2step, and where. Of several, the main site's: over
+    HTTPS, listening on every address, nginx's default_server, and not a name kept for one
+    address family or HTTP version (server_url_v4, server_url_v6_http1 and so on)."""
+    current = toml_settings(config)
+    kept = {
+        urlsplit(str(url)).hostname for key, url in current.items() if key.startswith("server_url_")
+    }
+    published = [(s, loc) for s in found for loc in s.published]
+    published.sort(
+        key=lambda x: (
+            not x[0].https,
+            bool(x[0].names) and set(x[0].names) <= kept,
+            not x[0].everywhere,
+            not x[0].default,
+        )
+    )
+    return published[0] if published else None
 
 
 def _published(host: Host, p: Plan, files: dict[str, str], s: Server, loc: str) -> None:
