@@ -122,6 +122,11 @@ links and footer credit. Three places still say texas2step:
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.4.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.1) (2026-10-26)
+
+- [x] A UDP session closed while it connects stops its connection checks, which logged
+  errors when the service stopped.
+
 ### [2.4.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.0) (2026-10-26)
 
 - [x] **HTTP/3 (QUIC)** and the other HTTP versions in Diag: with a name for each, rows
