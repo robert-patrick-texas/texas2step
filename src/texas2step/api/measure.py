@@ -28,7 +28,10 @@ _slots = asyncio.Semaphore(2)
 
 class Target(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
-    target: str = Field(description="Base URL of a texas2step server, e.g. https://peer.example")
+    target: str = Field(
+        description="Base URL of the server to measure toward, e.g. https://peer.example: "
+        "one in [[locations]], unless allow_any_target is set"
+    )
 
 
 class LatencyRequest(Target):

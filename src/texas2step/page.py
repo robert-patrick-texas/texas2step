@@ -65,6 +65,12 @@ class Shell:
     def __init__(self, settings: Settings, logo: Path | None) -> None:
         self.settings = settings
         self.logo_version = hashlib.sha256(logo.read_bytes()).hexdigest()[:10] if logo else None
+        self.logo_type = LOGO_TYPES[logo.suffix.lower()] if logo else None
+
+    @property
+    def icon(self) -> str:
+        """The browser tab's icon, relative to the site: the logo, or texas2step's star."""
+        return f"brand/logo?v={self.logo_version}" if self.logo_version else "favicon.svg"
 
     def render(
         self, template: str, root_path: str, version: str, hide: frozenset[str] = frozenset()
@@ -106,6 +112,11 @@ class Shell:
         if self.logo_version:
             mark = f'<img class="brand-mark" src="brand/logo?v={self.logo_version}" alt="" />'
             page = _fill(page, "mark", mark)
+            page = page.replace(
+                '<link rel="icon" href="favicon.svg" type="image/svg+xml" />',
+                f'<link rel="icon" href="{self.icon}" type="{self.logo_type}" />',
+                1,
+            )
         if s.brand_notice:
             notice = f'<div class="notice" role="note">{escape(s.brand_notice)}</div>'
             page = _fill(page, "notice", notice)

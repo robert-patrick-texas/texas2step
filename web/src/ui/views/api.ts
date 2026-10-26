@@ -25,7 +25,7 @@ const GROUPS: { title: string; about: string; items: Endpoint[] }[] = [
   },
   {
     title: "Server-side measurements",
-    about: "This server measures toward another texas2step endpoint and returns the result. Targets must be configured locations.",
+    about: "This server measures toward another one like it and returns the result. Targets must be configured locations.",
     items: [
       { method: "POST", path: "/api/v1/measure/latency", title: "Latency", about: "Idle HTTP round-trip time and jitter.", example: (o) => `curl -s -X POST ${o}/api/v1/measure/latency -H 'content-type: application/json' -d '{"target":"https://peer.example","count":20}'` },
       { method: "POST", path: "/api/v1/measure/download", title: "Download", about: "Multi-stream download from the target, with latency under load.", example: (o) => `curl -s -X POST ${o}/api/v1/measure/download -H 'content-type: application/json' -d '{"target":"https://peer.example","seconds":10,"streams":4}'` },
@@ -68,7 +68,7 @@ export class ApiView implements View {
         { class: "card cli-card" },
         h("h2", {}, "Command line"),
         h("p", {}, "The Python package ships the same engine as a CLI. Results are comparable with browser runs."),
-        code(`pip install .                       # from a texas2step checkout\ntexas2step run ${origin}            # full test\ntexas2step latency ${origin} --count 50\ntexas2step download ${origin} --streams 8 --seconds 15\ntexas2step loss ${origin} --packets 1000 --json`),
+        code(`uv tool install texas2step          # or: pipx install texas2step\ntexas2step run ${origin}            # full test\ntexas2step latency ${origin} --count 50\ntexas2step download ${origin} --streams 8 --seconds 15\ntexas2step loss ${origin} --packets 1000 --json`),
       ),
       ...GROUPS.map((g) =>
         h(

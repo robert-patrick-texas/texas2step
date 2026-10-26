@@ -167,11 +167,15 @@ url = "https://www.acme.example/accessibility"
   paragraph. The text is plain, but `[label](url)` makes a link of the label, by the same
   rules as the other links below. A URL ends at the first `)`. HTML isn't allowed, so it
   shows as typed. In TOML, `"""` lets the text run over several lines. The API explorer
-  (`/api/docs`) is a separate page and has no footer of yours.
+  (`/api/docs`) is a separate page and has no footer of yours; it takes the name, as
+  "NetCheck API", and the logo as its icon.
 * **Logo.** SVG, PNG, JPEG, WebP or GIF, about 30 px tall on screen; wide logos keep their
-  shape, up to 180 px wide. The `texas2step` service user must be able to read the file
-  (`/etc/texas2step/` is a good place). If the file is missing or unreadable, the server
-  logs a warning and keeps the star.
+  shape, up to 180 px wide. It is the browser tab's icon too, which browsers draw in a
+  small square, where a square logo works best. The `texas2step` service user must be
+  able to read the file (`/etc/texas2step/` is a good place). If the file is missing or
+  unreadable, the server logs a warning and keeps the star.
+* **The command line.** The API tab's examples and History's hint name the `texas2step`
+  command, as it must be typed, on renamed sites too.
 * **Links** must start with `https://`, `http://`, `mailto:` or `tel:`, in
   `[[brand_links]]`, `[[brand_footer_links]]` and `brand_footer` alike. Anything else
   stops the server at startup with an error naming the setting. `[[brand_links]]` and

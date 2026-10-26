@@ -10,6 +10,7 @@ import logging
 import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urlsplit
@@ -512,6 +513,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # FastAPI would record the first prefix it sees in "servers" for good. Set it per
         # request instead, so "Try it out" targets the address the explorer was opened at.
         spec = {**app.openapi(), "servers": [{"url": request.scope.get("root_path", "") or "/"}]}
+        spec["info"] = {**spec["info"], "title": settings.brand_name}  # the explorer's heading
         if not shows_version(request):  # as the page has it: not for visitors who need a code
             spec["info"] = {**spec["info"], "version": ""}
         return JSONResponse(spec)
@@ -524,10 +526,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         assets = f"{root}/assets/swagger"
         explorer = get_swagger_ui_html(
             openapi_url=root + "/api/openapi.json",
-            title=f"{app.title} - Swagger UI",
+            title=escape(f"{settings.brand_name} API"),  # FastAPI writes it in as it is
             swagger_js_url=f"{assets}/swagger-ui-bundle.js?v={stamps.get('swagger-ui-bundle.js')}",
             swagger_css_url=f"{assets}/swagger-ui.css?v={stamps.get('swagger-ui.css')}",
-            swagger_favicon_url=f"{root}/favicon.svg",
+            swagger_favicon_url=f"{root}/{shell.icon}",
         )
         explorer.headers["Content-Security-Policy"] = content_policy(
             bytes(explorer.body).decode(), []

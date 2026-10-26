@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import re
 import time
 
@@ -473,6 +474,15 @@ def test_branding_is_written_into_the_page(tmp_path):
         assert r.headers["content-type"].startswith("image/svg+xml")
         assert r.headers["x-content-type-options"] == "nosniff"
         assert "default-src 'none'" in r.headers["content-security-policy"]
+        # The logo is the browser tab's icon too, here and in the API explorer, which
+        # takes the name; the explorer's heading comes from the spec.
+        assert f'<link rel="icon" href="{src}" type="image/svg+xml" />' in page
+        explorer = c.get("/api/docs").text
+        assert "<title>Acme &lt;Net&gt; Check API</title>" in explorer
+        assert f'<link rel="shortcut icon" href="/{src}">' in explorer
+        spec = c.get("/api/openapi.json").json()
+        assert spec["info"]["title"] == "Acme <Net> Check"
+        assert "texas2step" not in explorer and "texas2step" not in json.dumps(spec)
 
 
 def test_own_footer_is_written_into_the_page(tmp_path):
@@ -512,6 +522,10 @@ def test_own_footer_is_written_into_the_page(tmp_path):
 def test_missing_logo_falls_back_to_the_star(tmp_path, caplog):
     settings = Settings(results_path=str(tmp_path / "r.db"), brand_logo=str(tmp_path / "x.svg"))
     with TestClient(create_app(settings)) as c:
-        assert 'class="bm-star"' in c.get("/").text
+        page = c.get("/").text
+        assert 'class="bm-star"' in page
+        assert '<link rel="icon" href="favicon.svg" type="image/svg+xml" />' in page
+        assert '<link rel="shortcut icon" href="/favicon.svg">' in c.get("/api/docs").text
+        assert "<title>texas2step API</title>" in c.get("/api/docs").text
         assert c.get("/brand/logo").status_code == 404
     assert "no such file" in caplog.text

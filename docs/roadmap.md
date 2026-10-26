@@ -51,16 +51,6 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
   name that shares its IP address and is covered by the same certificate, and a wildcard
   certificate makes that likely.
 
-### Branding
-
-The [branding settings](configuration.md#branding-and-themes) replace the name, logo,
-links and footer credit. Three places still say texas2step:
-
-- [ ] **The browser tab's icon** is the texas2step star, even with `brand_logo` set. It
-  could use that logo.
-- [ ] **The API explorer** (`/api/docs`) is titled "texas2step - Swagger UI".
-- [ ] **The API tab's command-line examples** name the `texas2step` CLI.
-
 ### Security
 
 - [ ] **DTLS 1.3 for the UDP probe.** The probe's data channel uses DTLS 1.2
