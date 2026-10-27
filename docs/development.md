@@ -51,8 +51,8 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make deb` | Build `dist/texas2step-<version>-1-amd64.deb` and `dist/texas2step-setup` |
 | `make version` | Print the version |
 | `make upgrade` | Move every Python, npm and Go dependency to its newest release, then rebuild the UI |
-| `make t2s` | Build t2s for Linux and Windows (amd64, arm64) into `dist/` |
-| `make t2s-test` | gofmt, go vet (for Linux and Windows) and go test for t2s |
+| `make t2s` | Build t2s for Linux, macOS and Windows (amd64, arm64) into `dist/` |
+| `make t2s-test` | gofmt, go vet (for Linux, macOS and Windows) and go test for t2s |
 
 ## Project layout
 
@@ -136,12 +136,16 @@ Its version is the project's: `make t2s` stamps `make version` into each build
 (`-X main.version=`), so `__init__.py` stays the one place it is written; a plain
 `go build` says `dev`.
 
-* `make t2s` builds every platform's file into `dist/`, fully static (no cgo), with
-  `-trimpath`: `t2s-linux-amd64`, `t2s-linux-arm64`, `t2s-windows-amd64.exe` and
-  `t2s-windows-arm64.exe`. The names carry no version, so
+* `make t2s` builds every platform's file into `dist/` with no cgo and `-trimpath`:
+  `t2s-linux-amd64`, `t2s-linux-arm64`, `t2s-macos-amd64`, `t2s-macos-arm64`,
+  `t2s-windows-amd64.exe` and `t2s-windows-arm64.exe`. They are fully static, but for
+  macOS's, which link only the system library every Mac has, as every Mac program must;
+  Go's linker signs the Apple silicon one ad hoc, as macOS requires there, even from
+  Linux. Go calls macOS `darwin`; the files say `macos`. The names carry no version, so
   `releases/latest/download/<name>` always gives the newest, and `t2s update` finds its
   own by name.
-* `make t2s-test` runs gofmt, go vet (for Linux, and for Windows' own files) and go test.
+* `make t2s-test` runs gofmt, go vet (for Linux, and for macOS's and Windows' own files)
+  and go test. The t2s workflow runs the tests on Linux, macOS and Windows.
 * `tests/methodology-cases.json` is the Python engine's answers to a set of inputs:
   percentiles, summaries, throughput, the loss summary, one-way delays, call quality,
   responsiveness and bufferbloat. t2s's tests check its own answers against them, and
@@ -260,7 +264,8 @@ nftables output.
 v=$(make -s version)
 git commit -am "Release $v" && git tag "v$v" && git push origin main "v$v"
 gh release create "v$v" "dist/texas2step-$v-1-amd64.deb" dist/texas2step-setup \
-    dist/t2s-linux-amd64 dist/t2s-linux-arm64 dist/t2s-windows-amd64.exe dist/t2s-windows-arm64.exe \
+    dist/t2s-linux-amd64 dist/t2s-linux-arm64 dist/t2s-macos-amd64 dist/t2s-macos-arm64 \
+    dist/t2s-windows-amd64.exe dist/t2s-windows-arm64.exe \
     --title "texas2step $v" --generate-notes
 ```
 

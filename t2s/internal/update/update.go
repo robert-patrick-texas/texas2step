@@ -41,9 +41,17 @@ const Releases = "https://api.github.com/repos/robert-patrick-texas/texas2step"
 const Available = 100
 
 // AssetName is this platform's executable in a release.
-func AssetName() string {
-	name := "t2s-" + runtime.GOOS + "-" + runtime.GOARCH
-	if runtime.GOOS == "windows" {
+func AssetName() string { return assetName(runtime.GOOS, runtime.GOARCH) }
+
+// assetName is a platform's executable: t2s-linux-amd64, t2s-macos-arm64,
+// t2s-windows-amd64.exe and the like, as make t2s names them.
+func assetName(goos, goarch string) string {
+	system := goos
+	if goos == "darwin" {
+		system = "macos" // as people call it; Go calls it darwin
+	}
+	name := "t2s-" + system + "-" + goarch
+	if goos == "windows" {
 		name += ".exe"
 	}
 	return name

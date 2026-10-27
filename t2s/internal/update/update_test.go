@@ -95,3 +95,18 @@ func TestCompareOrdersVersionsByTheirNumbers(t *testing.T) {
 		}
 	}
 }
+
+func TestEachPlatformHasTheFileMakeT2sBuilds(t *testing.T) {
+	for _, c := range [][3]string{
+		{"linux", "amd64", "t2s-linux-amd64"},
+		{"linux", "arm64", "t2s-linux-arm64"},
+		{"darwin", "amd64", "t2s-macos-amd64"},
+		{"darwin", "arm64", "t2s-macos-arm64"},
+		{"windows", "amd64", "t2s-windows-amd64.exe"},
+		{"windows", "arm64", "t2s-windows-arm64.exe"},
+	} {
+		if got := assetName(c[0], c[1]); got != c[2] {
+			t.Errorf("%s/%s: got %s, want %s", c[0], c[1], got, c[2])
+		}
+	}
+}

@@ -1,5 +1,6 @@
-# t2s, the Go client: its tests on Linux and Windows, every platform's build, and a run of
-# it against a real texas2step server, whose result must have the Python engine's shape.
+# t2s, the Go client: its tests on Linux, macOS and Windows, every platform's build, and a
+# run of it against a real texas2step server, whose result must have the Python engine's
+# shape.
 name: t2s
 
 on:
@@ -16,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -51,6 +52,16 @@ jobs:
           go build -o t2s.exe .
           ./t2s.exe version
           ./t2s.exe run --help
+
+      - name: The macOS build runs
+        if: runner.os == 'macOS'
+        working-directory: t2s
+        env:
+          CGO_ENABLED: "0" # as make t2s builds it
+        run: |
+          go build -o t2s .
+          ./t2s version
+          ./t2s run --help
 
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         if: runner.os == 'Linux'

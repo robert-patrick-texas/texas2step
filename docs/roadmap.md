@@ -122,7 +122,7 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 ### Command line
 
-[t2s](t2s.md), the Go client for Linux and Windows, could also:
+[t2s](t2s.md), the Go client for Linux, macOS and Windows, could also:
 
 - [ ] **Come with the server's package**, once it has a stable baseline: the package
   would carry every platform's t2s, so each server can offer it for download from its own
@@ -130,14 +130,16 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
   GitHub. Until then the releases list it beside the package.
 - [ ] **Be built by GitHub Actions**, with signed attestations of where each file was
   built, as the PyPI release is, so `gh attestation verify` can check a download.
-- [ ] **Run on macOS.** It builds for macOS as it is; an unsigned download there needs
-  Gatekeeper's quarantine taken off by hand, and Apple's signing and notarization to
-  avoid that.
+- [ ] **Be signed and notarized for macOS.** The macOS files aren't signed with an Apple
+  Developer ID, so one downloaded with a browser needs `xattr -d com.apple.quarantine`
+  before macOS opens it. Signing and notarizing each release's with a Developer ID, from
+  Apple's Developer Program, would end that; `rcodesign` does both from Linux or GitHub
+  Actions, with no Mac.
 
 - [ ] **MAC address on macOS and Windows for `texas2step run`.** The Python command line
   reports the MAC address of the NIC its connection leaves by on Linux, from iproute2's
   `ip` (see [This computer's address](methodology.md#this-computers-address)); t2s reports
-  it on Linux and Windows, from the interface that holds the local address. The `psutil`
+  it on each platform, from the interface that holds the local address. The `psutil`
   library could do the same for the Python one: `psutil.net_if_addrs()` lists each
   interface's link-layer address.
 

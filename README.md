@@ -90,8 +90,8 @@ Building, testing, the docs site and packaging are covered in
 ## Command line
 
 **t2s** is the command-line client to copy onto any workstation or server: one file for
-Linux or Windows, with nothing to install, that runs the Test page's full test or any
-part of it, Monitor and Diag ([t2s](docs/t2s.md)):
+Linux, macOS or Windows, with nothing to install, that runs the Test page's full test or
+any part of it, Monitor and Diag ([t2s](docs/t2s.md)):
 
 ```bash
 curl -fLo t2s https://github.com/robert-patrick-texas/texas2step/releases/latest/download/t2s-linux-amd64
@@ -155,8 +155,8 @@ For servers open to the Internet, see [Access codes](docs/access.md).
 ## Documentation
 
 * [Install](docs/install.md): the Ubuntu package, nginx, firewall, upgrades.
-* [t2s](docs/t2s.md): the command-line client for Linux and Windows: tests, Monitor and
-  Diag from any computer, and how it updates itself.
+* [t2s](docs/t2s.md): the command-line client for Linux, macOS and Windows: tests,
+  Monitor and Diag from any computer, and how it updates itself.
 * [Configuration](docs/configuration.md): every setting.
 * [Access codes](docs/access.md): servers open to the Internet, a code from the service
   desk, and the desk's tools kept to your networks.

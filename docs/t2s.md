@@ -4,7 +4,7 @@
 server's pages do: the Test page's full test or any part of it, Monitor's continuous
 probing, and Diag's every way of reaching the server. It is one file, with nothing to
 install: copy it onto a workstation or a server, run it, and delete it when you're done.
-It runs on Linux and Windows, on x86-64 and on ARM.
+It runs on Linux, macOS and Windows, on x86-64 and on ARM.
 
 Its results are the ones `texas2step run` gives (the Python command line in the server's
 package): the same methodology, the same report and the same JSON, which History and the
@@ -20,6 +20,8 @@ files beside the server's package:
 |---|---|
 | `t2s-linux-amd64` | Linux on x86-64 |
 | `t2s-linux-arm64` | Linux on ARM, such as a Raspberry Pi 4 or 5 with a 64-bit system |
+| `t2s-macos-arm64` | macOS on Apple silicon (M1 and later) |
+| `t2s-macos-amd64` | macOS on Intel |
 | `t2s-windows-amd64.exe` | Windows 10 and 11 on x86-64 |
 | `t2s-windows-arm64.exe` | Windows 11 on ARM |
 
@@ -33,7 +35,26 @@ sudo chmod 755 /usr/local/bin/t2s
 t2s version
 ```
 
-Without `sudo`, put it in `~/.local/bin` instead. On Windows, in PowerShell:
+Without `sudo`, put it in `~/.local/bin` instead. On macOS, in Terminal, the same way
+(`t2s-macos-amd64` on an Intel Mac):
+
+```bash
+sudo mkdir -p /usr/local/bin
+sudo curl -fLo /usr/local/bin/t2s \
+    https://github.com/robert-patrick-texas/texas2step/releases/latest/download/t2s-macos-arm64
+sudo chmod 755 /usr/local/bin/t2s
+t2s version
+```
+
+The files aren't signed with an Apple Developer ID. One downloaded with `curl`, as above,
+runs as it is; one downloaded with a browser is marked as coming from the internet, and
+macOS won't open it until the mark is taken off, once:
+
+```bash
+xattr -d com.apple.quarantine t2s
+```
+
+On Windows, in PowerShell:
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\t2s" | Out-Null
@@ -55,14 +76,16 @@ The release notes list each file's SHA-256, and GitHub shows it beside each file
 release page. Compare it with the file you have:
 
 ```bash
-sha256sum /usr/local/bin/t2s
+sha256sum /usr/local/bin/t2s          # Linux
+shasum -a 256 /usr/local/bin/t2s      # macOS
 ```
 
 ```powershell
 Get-FileHash "$env:LOCALAPPDATA\t2s\t2s.exe"
 ```
 
-The files aren't code-signed, so Windows may warn about one downloaded with a browser.
+The files aren't code-signed, so Windows may warn about one downloaded with a browser,
+and macOS asks for the mark above to be taken off.
 
 ## A test
 
@@ -312,9 +335,9 @@ schtasks /Create /SC WEEKLY /D MON /ST 04:00 /TN "t2s update" `
 ## Proxies and certificates
 
 Certificates are checked against the computer's own trust store: Windows' certificate
-store, and on Linux the system's CA bundle (or `SSL_CERT_FILE` and `SSL_CERT_DIR`). A
-firewall that inspects TLS with the organization's own CA works once that CA is installed
-there, as browsers need it.
+store, the macOS keychain, and on Linux the system's CA bundle (or `SSL_CERT_FILE` and
+`SSL_CERT_DIR`). A firewall that inspects TLS with the organization's own CA works once
+that CA is installed there, as browsers need it.
 
 HTTP requests and WebSockets go through the proxy that `https_proxy`, `http_proxy` and
 `no_proxy` name, as the Python command line's do. A test through a proxy measures the
@@ -335,7 +358,7 @@ only with `--save`, and `--no-local` leaves them out.
 From a clone of the repository, with [Go](https://go.dev/dl/):
 
 ```bash
-make t2s          # dist/t2s-linux-amd64, dist/t2s-windows-amd64.exe, ...
+make t2s          # dist/t2s-linux-amd64, dist/t2s-macos-arm64, dist/t2s-windows-amd64.exe, ...
 cd t2s && go build -o t2s .   # this computer's only
 ```
 
