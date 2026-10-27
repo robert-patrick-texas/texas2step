@@ -164,7 +164,7 @@ panel stays on the terminal, with the totals since it started.
 | `--voice-size BYTES`, `--every MS` | a voice packet's size and spacing (default 200 bytes every 20 ms) |
 | `--video KBPS` | the video call's rate (default 1000) |
 | `--window SECONDS` | what the figures cover, up to 900 (default 60) |
-| `--seconds N` | stop after this long (default: until Ctrl-C) |
+| `--seconds N` | stop after this long, from the first probe: the last probes get 1.5 seconds to come back, so a call's last 10 seconds are scored too (default: until Ctrl-C) |
 | `--code`, `--json` | as for a test |
 
 A server that stops answering is asked over HTTPS every 2 seconds until it answers, then
@@ -195,11 +195,11 @@ Your IPv4 203.0.113.9 · Your IPv6 2001:db8:5::9
 Clocks: this computer is 3.2 ms behind the server (± 9.2 ms)
 
 IPv4 · server 192.0.2.10
-  HTTP/1.1    TCP 443    ····················   Answering   18.6 ms · median 18.4 ms · 0 of 35 lost in 1 min   TLSv1.3 TLS_AES_256_GCM_SHA384 · to 192.0.2.10 · server's TCP RTT 18.1 ms
-  HTTP/2      TCP 443    ····················   Answering   18.5 ms · median 18.4 ms · 0 of 35 lost in 1 min   TLSv1.3 TLS_AES_256_GCM_SHA384 · to 192.0.2.10 · server's TCP RTT 18.0 ms
-  HTTP/3      UDP 443    ····················   Answering   18.9 ms · median 18.7 ms · 0 of 35 lost in 1 min   TLSv1.3 TLS_AES_128_GCM_SHA256 · to 192.0.2.10
-  WebSocket   TCP 443    ····················   Answering   18.3 ms · median 18.2 ms · 0 of 35 lost in 1 min   its own TCP connection, opened by an HTTP/1.1 upgrade
-  UDP         UDP 61042  ·················x··   Answering   18.8 ms · median 18.6 ms · 1 of 34 lost in 1 min   DTLS 1.2 TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 · to 192.0.2.10 · seen from 203.0.113.9 : 51877
+  HTTP/1.1    TCP 443     ····················   Answering   18.6 ms · median 18.4 ms · 0 of 35 lost in 1 min   TLSv1.3 TLS_AES_256_GCM_SHA384 · to 192.0.2.10 · server's TCP RTT 18.1 ms
+  HTTP/2      TCP 443     ····················   Answering   18.5 ms · median 18.4 ms · 0 of 35 lost in 1 min   TLSv1.3 TLS_AES_256_GCM_SHA384 · to 192.0.2.10 · server's TCP RTT 18.0 ms
+  HTTP/3      UDP 443     ····················   Answering   18.9 ms · median 18.7 ms · 0 of 35 lost in 1 min   TLSv1.3 TLS_AES_128_GCM_SHA256 · to 192.0.2.10
+  WebSocket   TCP 443     ····················   Answering   18.3 ms · median 18.2 ms · 0 of 35 lost in 1 min   its own TCP connection, opened by an HTTP/1.1 upgrade
+  UDP         UDP 61042   ·················x··   Answering   18.8 ms · median 18.6 ms · 1 of 34 lost in 1 min   DTLS 1.2 TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 · to 192.0.2.10 · seen from 203.0.113.9 : 51877
 
 IPv6 · server 2001:db8::10
   ...

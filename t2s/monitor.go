@@ -70,7 +70,6 @@ func cmdMonitor(ctx context.Context, args []string) error {
 	if err := m.Start(ctx); err != nil {
 		return err
 	}
-	started := time.Now()
 	if panel {
 		fmt.Print(term.Alternate)
 	} else if !o.json {
@@ -115,8 +114,8 @@ loop:
 		}
 	}
 	m.Stop()
-	stopped := time.Now()
 	s := m.Snapshot()
+	started, stopped := time.UnixMicro(int64(s.Started*1000)), time.UnixMicro(int64(s.Now*1000))
 	totals := m.Totals()
 	why := m.Ended()
 	if panel {

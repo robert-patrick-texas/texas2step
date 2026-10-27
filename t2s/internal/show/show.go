@@ -135,7 +135,7 @@ func Pad(s string, width int) string {
 	return s
 }
 
-// Table lays rows out in columns, each as wide as its widest cell and two spaces apart.
+// Table lays rows out in columns, each as wide as its widest cell and three spaces apart.
 func Table(rows [][]string, indent string) []string {
 	widths := map[int]int{}
 	for _, r := range rows {

@@ -74,20 +74,13 @@ func Table(s Snapshot, width, events int, live bool) []string {
 	if live && s.Running {
 		right += " · Ctrl-C stops"
 	}
-	head := show.Bold("t2s diag") + " → " + s.Name + "  " + show.Dim(s.URL)
-	lines := []string{head + strings.Repeat(" ", max(2, width-show.Width(head)-show.Width(right))) + show.Dim(right)}
-	var you []string
-	for _, fam := range s.Families {
-		you = append(you, "Your "+fam+" "+show.Bold(s.You[fam]))
-	}
-	lines = append(lines, strings.Join(you, " · "))
-	if s.Clock != "" {
-		lines = append(lines, show.Dim(s.Clock))
-	}
+	var rows [][]string
+	var titles []string
+	var starts []int
 	for _, fam := range s.Families {
 		servers := []string{}
 		seen := map[string]bool{}
-		var rows [][]string
+		starts = append(starts, len(rows))
 		for _, r := range s.Rows {
 			if r.Fam != fam {
 				continue
@@ -108,8 +101,31 @@ func Table(s Snapshot, width, events int, live bool) []string {
 		if len(servers) > 0 {
 			title += " · server " + strings.Join(servers, ", ")
 		}
+		titles = append(titles, title)
+	}
+	table := show.Table(rows, "  ") // every family's rows in one, so their columns line up
+	head := show.Bold("t2s diag") + " → " + s.Name + "  " + show.Dim(s.URL)
+	edge := show.Width(head) + 2 + show.Width(right)
+	for _, l := range table {
+		edge = max(edge, show.Width(l))
+	}
+	edge = min(edge, width) // "ran" at the window's edge, or the table's where the window is wider
+	lines := []string{head + strings.Repeat(" ", max(2, edge-show.Width(head)-show.Width(right))) + show.Dim(right)}
+	var you []string
+	for _, fam := range s.Families {
+		you = append(you, "Your "+fam+" "+show.Bold(s.You[fam]))
+	}
+	lines = append(lines, strings.Join(you, " · "))
+	if s.Clock != "" {
+		lines = append(lines, show.Dim(s.Clock))
+	}
+	for i, title := range titles {
+		end := len(table)
+		if i+1 < len(starts) {
+			end = starts[i+1]
+		}
 		lines = append(lines, "", show.Bold(title))
-		lines = append(lines, show.Table(rows, "  ")...)
+		lines = append(lines, table[starts[i]:end]...)
 	}
 	lines = append(lines, "", show.Bold("NAT and egress"))
 	order := []string{"This computer", "Over HTTPS (TCP)", "Over HTTP/3 (UDP)", "Over UDP (WebRTC)", "Compared", "NAT", "MAC"}

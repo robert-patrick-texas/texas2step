@@ -140,6 +140,8 @@ type Monitor struct {
 	stopSend  context.CancelFunc
 	run       int // which session a reconnection belongs to
 	startedAt float64
+	firstSent float64 // wall ms at the first probe: the time limit counts from it, as the call's slices do
+	settling  float64 // wall ms at the time limit, while the last probes come back
 	stopped   float64
 	events    []Event
 	ended     string // why it stopped, where it wasn't Ctrl-C
@@ -433,6 +435,9 @@ func (m *Monitor) schedule() {
 	if m.stopSend != nil {
 		m.stopSend()
 	}
+	if m.settling > 0 {
+		return // past the time limit: no more probes
+	}
 	var ctx context.Context
 	ctx, m.stopSend = context.WithCancel(m.ctx)
 	c := m.cfg
@@ -444,9 +449,17 @@ func (m *Monitor) schedule() {
 	}
 	// One clock for every server, so their packets leave together.
 	send := func(size, frame int, charted bool) {
+		now, at := wall(), engine.Now()
+		if m.firstSent == 0 {
+			m.firstSent = now
+		}
+		// Half a probe early, so the one due at the limit, a slice past it, isn't sent.
+		if m.limit.Ms > 0 && now-m.firstSent >= m.limit.Ms-every/2 {
+			m.atLimit(now)
+			return
+		}
 		seq := m.seq
 		m.seq++
-		now, at := wall(), engine.Now()
 		for _, d := range m.Dests {
 			if frame >= 0 && strings.HasPrefix(d.transport, "TCP") {
 				continue
@@ -520,11 +533,10 @@ func (m *Monitor) every(ctx context.Context, d time.Duration, f func()) {
 // TCP it tries UDP again every udpRetryMs. Called with m.mu held.
 func (m *Monitor) watch() {
 	now := wall()
-	if m.limit.Ms > 0 && now-m.startedAt >= m.limit.Ms {
-		if m.limit.Who == "" {
-			m.end(fmt.Sprintf("Stopped after %s, as --seconds asked.", Span(m.limit.Ms/1000)))
-		} else {
-			m.end(fmt.Sprintf("Stopped after %s, %s's limit.", Span(m.limit.Ms/1000), m.limit.Who))
+	if m.settling > 0 {
+		if now-m.settling >= SettleMs {
+			m.stopLocked()
+			m.cancel()
 		}
 		return
 	}
@@ -705,6 +717,21 @@ func (m *Monitor) end(why string) {
 	m.cancel()
 }
 
+// atLimit stops the probes at the time limit. The last get SettleMs to come back, so the
+// call's last slice is scored; then watch stops Monitor, as of the limit. Called with m.mu held.
+func (m *Monitor) atLimit(now float64) {
+	if m.settling > 0 {
+		return
+	}
+	m.ended = fmt.Sprintf("Stopped after %s, %s's limit.", Span(m.limit.Ms/1000), m.limit.Who)
+	if m.limit.Who == "" {
+		m.ended = fmt.Sprintf("Stopped after %s, as --seconds asked.", Span(m.limit.Ms/1000))
+	}
+	m.event(m.ended)
+	m.settling = max(now, m.firstSent+m.limit.Ms) // the probes sent cover the limit to its end
+	m.stopSend()
+}
+
 // Done is closed once Monitor stops.
 func (m *Monitor) Done() <-chan struct{} { return m.ctx.Done() }
 
@@ -719,6 +746,9 @@ func (m *Monitor) Stop() {
 func (m *Monitor) stopLocked() {
 	if m.running {
 		m.stopped = wall()
+		if m.settling > 0 {
+			m.stopped = m.settling
+		}
 	}
 	m.running = false
 	m.run++
@@ -901,6 +931,9 @@ func (m *Monitor) Snapshot() Snapshot {
 	defer m.mu.Unlock()
 	now := wall()
 	scoreAt := now
+	if m.settling > 0 {
+		now = m.settling // the figures hold at the limit while the last probes come back
+	}
 	if !m.running && m.stopped > 0 {
 		now = m.stopped
 		scoreAt = m.stopped + SettleMs // stopped, the slices that ended by then are scored

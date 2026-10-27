@@ -250,6 +250,9 @@ func (t *Target) Unlock(ctx context.Context, code string) (string, error) {
 		Pass string `json:"pass"`
 	}
 	if _, err := t.PostJSON(ctx, c, "/access", map[string]string{"code": code}, &got); err != nil {
+		if errors.As(err, &se) && se.Status >= 400 && se.Status < 500 && se.Detail != "" {
+			return "", errors.New("refused the code: " + se.Detail) // a wrong code, or too many tries
+		}
 		return "", err
 	}
 	return got.Pass, nil

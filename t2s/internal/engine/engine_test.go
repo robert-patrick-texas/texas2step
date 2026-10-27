@@ -1,7 +1,10 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/cases"
@@ -72,5 +75,25 @@ func TestOnlyFamilyKeepsOneFamilysCandidates(t *testing.T) {
 	want := "v=0\r\na=candidate:2 1 udp 1 2001:db8::7 5001 typ host\r\na=candidate:3 1 udp 1 abc.local 5002 typ host\r\n"
 	if got != want {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestAWrongCodeSaysWhatTheServerSaid(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"detail":"that isn't the current access code"}`))
+			return
+		}
+		w.Write([]byte(`{"required":true}`))
+	}))
+	defer srv.Close()
+	_, err := NewTarget(srv.URL).Unlock(context.Background(), "austin.123")
+	if err == nil || err.Error() != "refused the code: that isn't the current access code" {
+		t.Errorf("got %v", err)
+	}
+	if _, err := NewTarget(srv.URL).Unlock(context.Background(), ""); err != ErrNeedsCode {
+		t.Errorf("no code: got %v", err)
 	}
 }
