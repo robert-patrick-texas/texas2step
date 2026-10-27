@@ -2,7 +2,7 @@
 
 *Washington, Texas, March 17, 1836*
 
-Source: Wikisource, https://en.wikisource.org/wiki/Constitution_of_the_Republic_of_Texas. Public domain.
+Source: Wikisource, https://en.wikisource.org/wiki/Constitution_of_the_Republic_of_Texas. Public domain. Six slips in the signers' names corrected, as the Texas Declaration of Independence spells them.
 
 ## PREAMBLE
 
@@ -273,13 +273,13 @@ In witness whereof we have hereunto subscribed our names.
 - Edwin Waller, Lorenzo de Zavala,
 - A. Brigham, George W. Smyth,
 - John S. D. Byrom, Stephen H. Everett,
-- Francis Ruis, Elijah Stepp,
+- Francis Ruis, Elijah Stapp,
 - J. Antonio Navarro, Claiborne West,
 - William D. Lacy, John S. Roberts,
-- William Menufee, Robert Hamilton,
+- William Menifee, Robert Hamilton,
 - John Fisher, Collin McKinney,
 - A. H. Latimore, Thomas J. Gazley,
-- James Power. R. M. Coleman,
+- James Power, R. M. Coleman,
 - Sam. Houston, Sterling C. Robertson,
 - Edward Conrad, George C. Childress,
 - Martin Palmer, Baily Hardiman,
@@ -291,8 +291,8 @@ In witness whereof we have hereunto subscribed our names.
 - William C. Crawford, David Thomas,
 - John Turner, S. Rhoads Fisher,
 - Benjamin Briggs Goodrich, John W. Bower,
-- Jumes G. Swisher, J. B. Woods,
-- William B. Leates, Andrew Briscoe,
-- M. B.Menard, Thomas Barnett,
+- James G. Swisher, J. B. Woods,
+- William B. Scates, Andrew Briscoe,
+- M. B. Menard, Thomas Barnett,
 - A. B. Hardin, Jesse B. Badgett,
 - John W. Bunton, Stephen W. Blount.
