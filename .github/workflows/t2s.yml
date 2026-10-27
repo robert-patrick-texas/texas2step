@@ -4,9 +4,9 @@ name: t2s
 
 on:
   push:
-    paths: ["t2s/**", "tests/methodology-cases.json", "tests/test_t2s.py", ".github/workflows/t2s.yml"]
+    paths: ["t2s/**", "tests/methodology-cases.json", "tests/test_t2s.py", ".github/workflows/t2s.yml", ".gitattributes"]
   pull_request:
-    paths: ["t2s/**", "tests/methodology-cases.json", "tests/test_t2s.py", ".github/workflows/t2s.yml"]
+    paths: ["t2s/**", "tests/methodology-cases.json", "tests/test_t2s.py", ".github/workflows/t2s.yml", ".gitattributes"]
   workflow_dispatch:
 
 permissions: {}
