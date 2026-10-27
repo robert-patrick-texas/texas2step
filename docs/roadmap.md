@@ -154,6 +154,11 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.7.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.7.0) (2026-10-27)
+
+- [x] `t2s monitor -4` and `-6` hold every server to one address family, so two servers
+  compare over one; t2s's help shows one-letter options with one dash.
+
 ### [2.6.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.6.0) (2026-10-27)
 
 - [x] **[t2s](t2s.md), a command-line client in one file** for Linux and Windows, amd64
