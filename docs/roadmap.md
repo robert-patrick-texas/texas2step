@@ -154,6 +154,18 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.6.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.6.0) (2026-10-27)
+
+- [x] **[t2s](t2s.md), a command-line client in one file** for Linux and Windows, amd64
+  and arm64, with nothing to install: the tests of `texas2step run`, with its report and
+  results; Monitor as a live panel and Diag as a live table, which tries each address
+  family and HTTP version on the server's own name; and `t2s update`, which installs the
+  newest from the release, checked against its SHA-256, only when asked. The release
+  lists it beside the package. Its methodology is checked against the Python engine's,
+  case by case.
+- [x] A ping the server refuses, such as for want of the access code, ends a latency
+  measurement with the server's answer instead of counting as lost.
+
 ### [2.5.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.5.0) (2026-10-27)
 
 - [x] **Active clients**: `texas2step clients` lists each page and command-line run
