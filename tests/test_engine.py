@@ -133,17 +133,31 @@ def test_a_server_with_the_same_key_measures_another_with_a_pass(code_server, tm
             )
 
     def answered(r: httpx.Response) -> int:
-        """How many of the 3 pings the target answered: one it refuses counts as lost."""
-        assert r.status_code == 200
+        """How many of the 3 pings the target answered."""
+        assert r.status_code == 200, r.text
         return r.json()["count"]
+
+    def refused(r: httpx.Response) -> bool:
+        """The target refused the test, and the answer says so: not pings lost."""
+        return r.status_code == 502 and r.json()["detail"].startswith("target answered 401")
 
     here = [Location(id="austin", name="Austin", url=target)]
     # Its own pass gets it in, though the target counts it as outside.
     assert answered(measure(access_code="daily", access_key_file=key, locations=here)) == 3
     assert answered(measure(access_key_file=key, locations=here)) == 3  # codes off here: the key
-    assert answered(measure(access_key_file=str(other_key), locations=here)) == 0  # another key
+    assert refused(measure(access_key_file=str(other_key), locations=here))  # another key
     # Not in [[locations]], only let in by allow_any_target: no pass goes there.
-    assert answered(measure(access_key_file=key, allow_any_target=True)) == 0
+    assert refused(measure(access_key_file=key, allow_any_target=True))
+
+
+async def test_latency_toward_a_server_that_refuses_says_so(code_server):
+    target, _ = code_server
+    with pytest.raises(httpx.HTTPStatusError) as refused:
+        await engine.measure_latency(target, count=3)  # no pass: every ping answered 401
+    assert refused.value.response.status_code == 401
+    unreachable = f"http://{httpx.URL(target).host}:9"  # nothing listens: no answer
+    with pytest.raises(httpx.TransportError):
+        await engine.measure_latency(unreachable, count=3, request_timeout=1)
 
 
 async def test_run_all_shape(live_server):

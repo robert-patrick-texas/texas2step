@@ -125,20 +125,24 @@ async def _emit(progress: Progress | None, phase: str, data: dict[str, Any]) -> 
 async def measure_latency(
     target: str, count: int = 20, request_timeout: float = 2.0, progress: Progress | None = None
 ) -> dict[str, Any]:
-    """Idle round-trip time over HTTP, server processing time removed via Server-Timing."""
+    """Idle round-trip time over HTTP, server processing time removed via Server-Timing.
+
+    A ping without an answer is lost. One the server answers with an error, such as 401
+    for want of an access code, ends the measurement with it (httpx.HTTPStatusError), as a
+    refused download does: a refusal isn't a lost ping."""
     base = _base(target)
     samples: list[float] = []
     lost = 0
     async with _client(timeout=request_timeout) as client:
-        await client.get(f"{base}{API}/ping")  # open + warm the connection
+        (await client.get(f"{base}{API}/ping")).raise_for_status()  # open + warm the connection
         for i in range(count):
             t0 = time.perf_counter()
             try:
                 r = await client.get(f"{base}{API}/ping", params={"r": i})
-                r.raise_for_status()
-            except httpx.HTTPError:
+            except httpx.TransportError:
                 lost += 1
                 continue
+            r.raise_for_status()
             rtt = (time.perf_counter() - t0) * 1000 - server_timing_ms(
                 r.headers.get("server-timing")
             )

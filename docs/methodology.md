@@ -45,7 +45,10 @@ TLS setup are excluded (the first request warms the connection and is discarded)
   client adds a little overhead (tens to hundreds of microseconds).
 
 Reported: median (the headline), min, p25, p75, p90, max, standard deviation and the
-number of probes that timed out (3 s).
+number of probes that timed out (3 s). A probe the server answers with an error, such as
+401 for want of an access code, isn't lost: it ends the test, which says so. The page
+then asks for the code, and `/api/v1/measure/latency` answers `502` with the target's
+refusal, as a refused download does.
 
 ### Jitter
 

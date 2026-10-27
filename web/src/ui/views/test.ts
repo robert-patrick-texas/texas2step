@@ -1,5 +1,5 @@
 // The main view: run a test (or show a saved one) with live instruments and charts.
-import { appPath, Refused, REFUSED } from "../../engine/net";
+import { appPath, NeedsCode, Refused, REFUSED } from "../../engine/net";
 import { callQuality, responsiveness } from "../../engine/quality";
 import { type Phase, PHASES, type RunEvents, TestRun } from "../../engine/runner";
 import type { CallQuality, CallRating, CallSide, Direction, Level, Readiness, Responsiveness, ResponsivenessSide, TestResult, ThroughputResult } from "../../types";
@@ -411,6 +411,11 @@ export class TestView implements View {
     } catch (err) {
       if (err instanceof Refused) {
         this.refused(err.message, err.url);
+      } else if (err instanceof NeedsCode) {
+        // The pass stopped working: on this site's own server the page goes back to the
+        // code screen; another server has the code asked for over the page.
+        void app.ep.refused();
+        this.askingCode();
       } else if (!this.run.aborted) {
         console.error(err);
         setText(this.status, `The test stopped unexpectedly: ${err instanceof Error ? err.message : String(err)}`);

@@ -1,5 +1,5 @@
 // Round-trip measurements: HTTP (idle latency) and WebSocket (latency under load).
-import { type Endpoint, linked, nonce, serverTiming, sleep, timingFor } from "./net";
+import { type Endpoint, linked, NeedsCode, nonce, serverTiming, sleep, timingFor } from "./net";
 
 export interface HttpLatencyResult {
   samples: number[];
@@ -11,6 +11,8 @@ export interface HttpLatencyResult {
  * Sequential GETs of /ping on a warm keep-alive connection. RTT is taken from Resource
  * Timing (requestStart → responseStart) minus the server's own processing time, which
  * removes browser scheduling noise; falls back to wall-clock when timing is unavailable.
+ * A ping without an answer is lost. One the server answers with an error ends it: 401
+ * with NeedsCode, for the page to ask for the access code; a refusal isn't a lost ping.
  */
 export async function measureHttpLatency(
   ep: Endpoint,
@@ -23,7 +25,11 @@ export async function measureHttpLatency(
   let protocol: string | null = null;
 
   const once = async (): Promise<number | null> => {
-    const ping = await pingOnce(ep, signal);
+    const ping = await pingAnswer(ep, signal);
+    if (ping && "status" in ping) {
+      if (ping.status === 401) throw new NeedsCode("401 access code required");
+      throw new Error(`the server answered ${ping.status} to a ping`);
+    }
     if (ping?.protocol) protocol = ping.protocol;
     return ping?.rtt ?? null;
   };
@@ -41,17 +47,28 @@ export async function measureHttpLatency(
   return { samples, lost, protocol };
 }
 
+type Ping = { rtt: number; protocol: string | null };
+
 /**
  * One GET of /ping: its round trip, the server's own time taken out, and the HTTP version
- * it went over; null if it failed. Throws only when `signal` aborts it.
+ * it went over; null if it failed, an error answer (a refusal, say) among the failures.
+ * Throws only when `signal` aborts it.
  */
-export async function pingOnce(ep: Endpoint, signal?: AbortSignal, timeoutMs = 3000): Promise<{ rtt: number; protocol: string | null } | null> {
+export async function pingOnce(ep: Endpoint, signal?: AbortSignal, timeoutMs = 3000): Promise<Ping | null> {
+  const ping = await pingAnswer(ep, signal, timeoutMs);
+  return ping && "rtt" in ping ? ping : null;
+}
+
+/** One GET of /ping, as pingOnce, but an error answer gives its status: the server
+ * answered, so it wasn't lost. */
+async function pingAnswer(ep: Endpoint, signal?: AbortSignal, timeoutMs = 3000): Promise<Ping | { status: number } | null> {
   const url = ep.url("/ping", { r: nonce() });
   const ctrl = linked(signal, timeoutMs);
   const t0 = performance.now();
   try {
     const res = await fetch(url, ep.init({ cache: "no-store", signal: ctrl.signal }));
     await res.arrayBuffer();
+    if (!res.ok) return { status: res.status };
     const t1 = performance.now();
     const entry = await timingFor(url);
     const protocol = entry?.nextHopProtocol || null;
