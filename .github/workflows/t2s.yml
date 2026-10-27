@@ -1,0 +1,60 @@
+# t2s, the Go client: its tests on Linux and Windows, every platform's build, and a run of
+# it against a real texas2step server, whose result must have the Python engine's shape.
+name: t2s
+
+on:
+  push:
+    paths: ["t2s/**", "tests/methodology-cases.json", "tests/test_t2s.py", ".github/workflows/t2s.yml"]
+  pull_request:
+    paths: ["t2s/**", "tests/methodology-cases.json", "tests/test_t2s.py", ".github/workflows/t2s.yml"]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    steps:
+      # Actions are pinned by commit, as pypi.yml's are; the comment is its tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: t2s/go.mod
+          cache-dependency-path: t2s/go.sum
+
+      - name: gofmt, go vet and go test
+        working-directory: t2s
+        shell: bash
+        run: |
+          test -z "$(gofmt -l .)" || { echo "gofmt would change:"; gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
+
+      - name: Build every platform's t2s
+        if: runner.os == 'Linux'
+        run: make t2s
+
+      - name: The Windows build runs
+        if: runner.os == 'Windows'
+        working-directory: t2s
+        shell: bash
+        run: |
+          go build -o t2s.exe .
+          ./t2s.exe version
+          ./t2s.exe run --help
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        if: runner.os == 'Linux'
+
+      - name: t2s against a real server
+        if: runner.os == 'Linux'
+        run: uv run pytest -q tests/test_t2s.py tests/test_methodology_cases.py

@@ -122,13 +122,24 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 ### Command line
 
-- [ ] **MAC address on macOS and Windows.** `texas2step run` reports the MAC address of
-  the NIC its connection leaves by on Linux, from iproute2's `ip` (see
-  [This computer's address](methodology.md#this-computers-address)). On macOS and Windows
-  it reports the local address without a MAC. The `psutil` library could add one there:
-  `psutil.net_if_addrs()` lists each interface's link-layer address. It has no route
-  lookup, so the NIC would be the one that holds the local address. Not needed while
-  Linux is the platform texas2step targets.
+[t2s](t2s.md), the Go client for Linux and Windows, could also:
+
+- [ ] **Come with the server's package**, once it has a stable baseline: the package
+  would carry every platform's t2s, so each server can offer it for download from its own
+  address, and `t2s update` could update from the server it tests, for networks without
+  GitHub. Until then the releases list it beside the package.
+- [ ] **Be built by GitHub Actions**, with signed attestations of where each file was
+  built, as the PyPI release is, so `gh attestation verify` can check a download.
+- [ ] **Run on macOS.** It builds for macOS as it is; an unsigned download there needs
+  Gatekeeper's quarantine taken off by hand, and Apple's signing and notarization to
+  avoid that.
+
+- [ ] **MAC address on macOS and Windows for `texas2step run`.** The Python command line
+  reports the MAC address of the NIC its connection leaves by on Linux, from iproute2's
+  `ip` (see [This computer's address](methodology.md#this-computers-address)); t2s reports
+  it on Linux and Windows, from the interface that holds the local address. The `psutil`
+  library could do the same for the Python one: `psutil.net_if_addrs()` lists each
+  interface's link-layer address.
 
 ### Documentation
 

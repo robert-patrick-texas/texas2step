@@ -8,6 +8,8 @@ install texas2step on a server, see [Install](install.md).
 
 * Python 3.11 or newer, and [uv](https://docs.astral.sh/uv/).
 * Node.js 20 or newer (24 LTS recommended), only to change the web UI.
+* [Go](https://go.dev/dl/) at the version `t2s/go.mod` names or newer, for [t2s](#t2s):
+  `make check` tests it, and a release builds it.
 * For the `.deb`: an Ubuntu 26.04 amd64 host with `dpkg-deb`, `binutils` and,
   optionally, `lintian`.
 
@@ -43,12 +45,14 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make web-watch` | Rebuild the UI on change |
 | `make test` | pytest, including WebRTC round trips on loopback |
 | `make lint` / `make fmt` | ruff and tsc / ruff format and autofix |
-| `make check` | lint and test |
+| `make check` | lint and test, and t2s's tests |
 | `make docs` | Render every `.md` file into the static site in `html/` |
 | `make docs-watch` | Re-render `html/` whenever a `.md` file changes |
 | `make deb` | Build `dist/texas2step-<version>-1-amd64.deb` and `dist/texas2step-setup` |
 | `make version` | Print the version |
-| `make upgrade` | Move every Python and npm dependency to its newest release, then rebuild the UI |
+| `make upgrade` | Move every Python, npm and Go dependency to its newest release, then rebuild the UI |
+| `make t2s` | Build t2s for Linux and Windows (amd64, arm64) into `dist/` |
+| `make t2s-test` | gofmt, go vet (for Linux and Windows) and go test for t2s |
 
 ## Project layout
 
@@ -72,6 +76,13 @@ src/texas2step/        Python package
 web/                   TypeScript client (no runtime dependencies)
   src/engine/          browser measurement engine
   src/ui/              gauge, link animation, charts, views
+t2s/                   t2s, the command-line client, in Go (docs/t2s.md)
+  internal/stats/      the statistics, as stats.py
+  internal/quality/    call quality and responsiveness, as quality.py
+  internal/engine/     latency, transfers, the UDP probe (pion WebRTC), a full test
+  internal/monitor/    Monitor: probing, outages, call slices, the panel
+  internal/diag/       Diag: every row, NAT and egress, the table
+  internal/update/     t2s update
 tests/                 pytest: stats, config, API, store, WebRTC, end-to-end
 docs/                  the documentation, in Markdown
 scripts/build_docs.py  Markdown → html/ (the GitHub Pages site)
@@ -88,7 +99,9 @@ legacy/                the original single-file prototype, kept for reference
   runtime dependencies and no CDN, so the page works on networks without internet
   access.
 * Statistical definitions live in `stats.py` and `web/src/engine/stats.ts` and must
-  stay in step. [Methodology](methodology.md) documents them.
+  stay in step. [Methodology](methodology.md) documents them. t2s has them a third time,
+  in Go; `tests/methodology-cases.json` holds the Python engine's answers to a set of
+  inputs, which pytest and t2s's tests both check (see [t2s](#t2s)).
 * After changing anything under `web/`, run `make web` and commit the regenerated
   `src/texas2step/static/` along with the source.
 * The one piece of browser code that isn't ours is Swagger UI, the OpenAPI explorer at
@@ -108,9 +121,39 @@ legacy/                the original single-file prototype, kept for reference
 * API tests: a FastAPI test client, including the path-prefix handling.
 * End-to-end tests against a real uvicorn server on loopback: HTTP latency,
   multi-stream throughput, and WebRTC packet loss, including the pinned UDP port range.
+* t2s against the same server (`tests/test_t2s.py`, skipped without Go): its result has
+  the Python engine's keys in the same order, a saved one is in History, and Monitor and
+  Diag answer.
 
 The WebRTC tests need a non-loopback address on the host, because WebRTC never offers
 127.0.0.1 as a candidate.
+
+## t2s
+
+t2s, the command-line client ([t2s](t2s.md)), is a Go module in `t2s/`. It measures by
+the methodology of `engine.py` and `quality.py`, and writes the result format they write.
+Its version is the project's: `make t2s` stamps `make version` into each build
+(`-X main.version=`), so `__init__.py` stays the one place it is written; a plain
+`go build` says `dev`.
+
+* `make t2s` builds every platform's file into `dist/`, fully static (no cgo), with
+  `-trimpath`: `t2s-linux-amd64`, `t2s-linux-arm64`, `t2s-windows-amd64.exe` and
+  `t2s-windows-arm64.exe`. The names carry no version, so
+  `releases/latest/download/<name>` always gives the newest, and `t2s update` finds its
+  own by name.
+* `make t2s-test` runs gofmt, go vet (for Linux, and for Windows' own files) and go test.
+* `tests/methodology-cases.json` is the Python engine's answers to a set of inputs:
+  percentiles, summaries, throughput, the loss summary, one-way delays, call quality,
+  responsiveness and bufferbloat. t2s's tests check its own answers against them, and
+  `tests/test_methodology_cases.py` checks the file still says what the Python code does.
+  After changing the methodology, write it again and run both:
+
+  ```bash
+  uv run python scripts/methodology_cases.py && make test t2s-test
+  ```
+
+* `.github/workflows/t2s.yml` runs t2s's tests on Linux and on Windows, builds every
+  platform's file, and runs `tests/test_t2s.py`, on each push that changes t2s.
 
 ## Documentation site
 
@@ -209,14 +252,15 @@ nftables output.
    carry the value across.
 3. Run `make upgrade`, so the release ships every dependency's newest version, with its
    security and bug fixes.
-4. Run `make check` and `make deb`. The package installs exactly the versions in
-   `uv.lock`.
+4. Run `make check`, `make deb` and `make t2s`. The package installs exactly the
+   versions in `uv.lock`, and t2s is built with exactly those in `t2s/go.sum`.
 5. Commit (including the updated lockfiles), tag and publish the package:
 
 ```bash
 v=$(make -s version)
 git commit -am "Release $v" && git tag "v$v" && git push origin main "v$v"
 gh release create "v$v" "dist/texas2step-$v-1-amd64.deb" dist/texas2step-setup \
+    dist/t2s-linux-amd64 dist/t2s-linux-arm64 dist/t2s-windows-amd64.exe dist/t2s-windows-arm64.exe \
     --title "texas2step $v" --generate-notes
 ```
 

@@ -49,6 +49,7 @@ SKIP_DIRS = {"node_modules", "html", "dist", "build", "stage", "staging", "__pyc
 LEADING: list[tuple[str, str | None]] = [
     ("README.md", "Overview"),
     ("docs/install.md", "Install"),
+    ("docs/t2s.md", "t2s client"),
     ("docs/configuration.md", None),
     ("docs/access.md", None),
     ("docs/traffic.md", None),

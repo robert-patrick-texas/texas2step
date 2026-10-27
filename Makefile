@@ -1,4 +1,7 @@
-.PHONY: dev web web-watch test lint fmt check docs docs-watch deb version upgrade
+.PHONY: dev web web-watch test lint fmt check docs docs-watch deb version upgrade t2s t2s-test
+
+# t2s, the Go client: the platforms it is built for, each a file of its own in dist/.
+T2S_TARGETS = linux/amd64 linux/arm64 windows/amd64 windows/arm64
 
 dev:            ## run the server with the current build of the UI
 	TEXAS2STEP_CLIENTS_FILE=texas2step-clients.db uv run texas2step serve --host 127.0.0.1 --port 8080
@@ -21,7 +24,7 @@ fmt:
 	uv run ruff format src tests scripts packaging
 	uv run ruff check --fix src tests scripts packaging
 
-check: lint test
+check: lint test t2s-test
 
 docs:           ## render every .md file into the static site in html/
 	uv run python scripts/build_docs.py
@@ -38,6 +41,20 @@ upgrade:        ## move every dependency to its newest release, then rebuild the
 	cd web && npm install --save-dev --save-exact $$(node -p \
 	    "Object.keys(require('./package.json').devDependencies).map((d) => d + '@latest').join(' ')")
 	$(MAKE) web
+	cd t2s && go get -u ./... && go mod tidy
 
 version:        ## print the version; it is set only in src/texas2step/__init__.py
 	@sed -n 's/^__version__ = "\(.*\)"$$/\1/p' src/texas2step/__init__.py
+
+t2s:            ## build t2s for Linux and Windows into dist/: t2s-linux-amd64, t2s-windows-amd64.exe, ...
+	@v=$$($(MAKE) -s version); cd t2s && for target in $(T2S_TARGETS); do \
+	    os=$${target%/*}; arch=$${target#*/}; ext=; [ $$os = windows ] && ext=.exe; \
+	    echo "t2s $$v for $$os/$$arch"; \
+	    CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath \
+	        -ldflags "-s -w -X main.version=$$v" -o ../dist/t2s-$$os-$$arch$$ext . || exit 1; \
+	done
+
+t2s-test:       ## gofmt, go vet (Linux and Windows) and go test for t2s
+	@cd t2s && test -z "$$(gofmt -l .)" || { echo "gofmt would change:"; gofmt -l .; exit 1; }
+	cd t2s && go vet ./... && GOOS=windows go vet ./...
+	cd t2s && go test ./...

@@ -12,3 +12,5 @@ build/
 web/node_modules/
 .DS_Store
 html/
+/t2s/t2s
+/t2s/t2s.exe

@@ -4,7 +4,7 @@
 browser.** Open the page and press Start. texas2step measures the path between you
 and the server with multi-stream HTTP transfers, latency probes idle and under load,
 and real UDP packet loss over WebRTC, then shows every figure as discrete metrics and
-graphs. The same measurements are available as a REST API, a Python CLI, and
+graphs. The same measurements are available as a REST API, a command-line client, and
 server-to-server functions.
 
 ![Download in progress](docs/images/hero-dark.jpg)
@@ -89,9 +89,21 @@ Building, testing, the docs site and packaging are covered in
 
 ## Command line
 
-The CLI runs the same engine from any host toward a texas2step server. The package
-installs it as `/usr/bin/texas2step`; elsewhere, `uv tool install texas2step` (or
-`pipx install texas2step`) installs it from PyPI.
+**t2s** is the command-line client to copy onto any workstation or server: one file for
+Linux or Windows, with nothing to install, that runs the Test page's full test or any
+part of it, Monitor and Diag ([t2s](docs/t2s.md)):
+
+```bash
+curl -fLo t2s https://github.com/robert-patrick-texas/texas2step/releases/latest/download/t2s-linux-amd64
+chmod +x t2s
+./t2s run https://www.example.net/texas2step
+./t2s monitor https://dallas.example.net/texas2step https://houston.example.net/texas2step
+./t2s diag https://www.example.net/texas2step
+```
+
+The server's package also has a command line in Python, `texas2step`, with the same tests:
+installed as `/usr/bin/texas2step`, or elsewhere from PyPI with `uv tool install texas2step`
+(or `pipx install texas2step`).
 
 ```bash
 texas2step run https://www.example.net/texas2step              # full test, human-readable
@@ -143,6 +155,8 @@ For servers open to the Internet, see [Access codes](docs/access.md).
 ## Documentation
 
 * [Install](docs/install.md): the Ubuntu package, nginx, firewall, upgrades.
+* [t2s](docs/t2s.md): the command-line client for Linux and Windows: tests, Monitor and
+  Diag from any computer, and how it updates itself.
 * [Configuration](docs/configuration.md): every setting.
 * [Access codes](docs/access.md): servers open to the Internet, a code from the service
   desk, and the desk's tools kept to your networks.
