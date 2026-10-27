@@ -156,6 +156,13 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.8.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.8.0) (2026-10-27)
+
+- [x] **t2s for macOS**, on Apple silicon and Intel, unsigned: `curl` downloads run as
+  they are, and a browser's needs its quarantine mark taken off.
+- [x] `texas2step run` leaves the server's version out where the server keeps it, rather
+  than saying "vNone".
+
 ### [2.7.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.7.0) (2026-10-27)
 
 - [x] `t2s monitor -4` and `-6` hold every server to one address family, so two servers
