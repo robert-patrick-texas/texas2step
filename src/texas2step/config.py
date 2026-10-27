@@ -390,8 +390,10 @@ class Settings:
         return [me, *[loc for loc in self.locations if loc.id != self.server_id]]
 
     def is_allowed_target(self, url: str) -> bool:
-        if self.allow_any_target:
-            return True
+        return self.allow_any_target or self.is_location(url)
+
+    def is_location(self, url: str) -> bool:
+        """Whether ``url`` is one of the servers in [[locations]]."""
         wanted = url.rstrip("/")
         return any(
             wanted in {loc.url.rstrip("/"), loc.url_v4.rstrip("/"), loc.url_v6.rstrip("/")}

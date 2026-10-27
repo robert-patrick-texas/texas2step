@@ -81,6 +81,7 @@ async def _run(
         # The target lists this test as a server's, apart from any other (docs/clients.md).
         engine.PAGE.set("server")
         engine.SESSION.set(engine.new_session())
+        engine.PASS.set(await _pass(request, target))
         try:
             result = await job()
         except httpx.HTTPStatusError as exc:
@@ -93,6 +94,19 @@ async def _run(
     if meter is not None and kind is not None:
         _count(meter, kind, result)
     return result
+
+
+async def _pass(request: Request, target: str) -> str:
+    """A pass for this server's test toward another in [[locations]], issued with the
+    access key: a server with the same key lets the test in as it would a visitor who
+    entered its code, and grants nothing more, so this server needn't be in its
+    internal_networks. Only to [[locations]], never to a target allow_any_target alone lets
+    in: a pass works on every server with the key, for access_pass_hours. "" without a key,
+    and a server with another key answers 401 as before."""
+    issuer = request.app.state.issuer
+    if issuer is None or not request.app.state.settings.is_location(target):
+        return ""
+    return issuer.issue(ended=await request.app.state.blocks.ended())[0]
 
 
 async def _whose(target: str, meter: TrafficMeter) -> str:

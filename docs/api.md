@@ -160,6 +160,9 @@ TCP times are `null`. `time_ms` is the server's clock, in milliseconds since the
 
 The server runs the Python engine **toward another texas2step server** and returns the
 result. `target` must be a configured location URL unless `allow_any_target` is set.
+A target that asks for the access code takes a pass this server issues itself, if their
+keys are the same; only targets in `[[locations]]` get one
+([Measuring between servers](access.md#measuring-between-servers)).
 At most two run at once per worker; extra requests get `429`. A
 [traffic limit](traffic.md) refuses download, upload and full ones with `503`, and counts
 this server's side of them.

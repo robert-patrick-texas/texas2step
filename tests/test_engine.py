@@ -1,5 +1,6 @@
 """End-to-end: the Python engine against a real server on loopback (HTTP, WebSocket, WebRTC)."""
 
+import socket
 import threading
 import time
 from collections.abc import Iterator
@@ -7,10 +8,11 @@ from collections.abc import Iterator
 import httpx
 import pytest
 import uvicorn
+from fastapi.testclient import TestClient
 
-from texas2step import engine, payload
+from texas2step import access, engine, payload
 from texas2step.app import create_app
-from texas2step.config import Settings
+from texas2step.config import Location, Settings
 
 
 def test_upload_spans_walk_the_whole_pool():
@@ -57,6 +59,91 @@ async def test_server_side_measure_endpoint(live_server):
         )
     assert r.status_code == 200
     assert r.json()["count"] == 3
+
+
+def _serve(settings: Settings, host: str) -> tuple[uvicorn.Server, threading.Thread, str]:
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(settings), host=host, port=0, log_level="warning")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return server, thread, f"http://{host}:{server.servers[0].sockets[0].getsockname()[1]}"
+
+
+def _own_address() -> str | None:
+    """This computer's address on its way out: a server there sees this computer's own
+    requests come from it, not from loopback, which is always inside."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect(("192.0.2.1", 9))  # chooses the route; sends nothing
+        except OSError:
+            return None
+        return s.getsockname()[0]
+
+
+@pytest.fixture
+def code_server(tmp_path) -> Iterator[tuple[str, str]]:
+    """A server that asks everyone for the access code, this computer included: its
+    address, and its key's file."""
+    host = _own_address()
+    if host is None or host.startswith("127."):
+        pytest.skip("no address but loopback, which needs no code")
+    key = tmp_path / "access.key"
+    access.write_key(key, access.new_key())
+    settings = Settings(
+        access_code="daily",
+        access_key_file=str(key),
+        access_phrases_file=str(tmp_path / "phrases.toml"),
+        access_lockouts_file=str(tmp_path / "access.db"),
+        results_path=str(tmp_path / "r.db"),
+        clients_file=str(tmp_path / "c.db"),
+    )
+    server, thread, url = _serve(settings, host)
+    assert httpx.get(f"{url}/api/v1/ping").status_code == 401  # outside: it asks
+    yield url, str(key)
+    server.should_exit = True
+    thread.join(timeout=10)
+
+
+def test_a_server_with_the_same_key_measures_another_with_a_pass(code_server, tmp_path):
+    target, key = code_server
+    other_key = tmp_path / "other.key"
+    access.write_key(other_key, access.new_key())
+
+    def measure(**settings: object) -> httpx.Response:
+        app = create_app(
+            Settings(
+                results_path=str(tmp_path / "m.db"),
+                clients_file=str(tmp_path / "mc.db"),
+                access_lockouts_file=str(tmp_path / "m-access.db"),
+                access_phrases_file=str(tmp_path / "m-phrases.toml"),
+                internal_networks=["10.0.0.0/8"],
+                trusted_proxies=["testclient"],
+                **settings,  # ty: ignore[invalid-argument-type]
+            )
+        )
+        with TestClient(app) as c:
+            return c.post(
+                "/api/v1/measure/latency",
+                json={"target": target, "count": 3},
+                headers={"X-Forwarded-For": "10.1.2.3"},
+            )
+
+    def answered(r: httpx.Response) -> int:
+        """How many of the 3 pings the target answered: one it refuses counts as lost."""
+        assert r.status_code == 200
+        return r.json()["count"]
+
+    here = [Location(id="austin", name="Austin", url=target)]
+    # Its own pass gets it in, though the target counts it as outside.
+    assert answered(measure(access_code="daily", access_key_file=key, locations=here)) == 3
+    assert answered(measure(access_key_file=key, locations=here)) == 3  # codes off here: the key
+    assert answered(measure(access_key_file=str(other_key), locations=here)) == 0  # another key
+    # Not in [[locations]], only let in by allow_any_target: no pass goes there.
+    assert answered(measure(access_key_file=key, allow_any_target=True)) == 0
 
 
 async def test_run_all_shape(live_server):

@@ -25,7 +25,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
 from . import __version__, clients, page, traffic
-from .access import Codes, is_internal
+from .access import Codes, is_internal, read_key
 from .api import routers
 from .api.access import given_pass
 from .api.meta import client_address, http_version, shows_version
@@ -442,6 +442,25 @@ class RequestLog:
         access.log(level, '%s - "%s" %d', ip, request, status)
 
 
+def key_only(settings: Settings) -> Codes | None:
+    """With access codes off here, the access key all the same, where it can be read, to
+    issue passes and nothing else: the package makes one at install, and servers given
+    the same key take each other's passes. None without one."""
+    try:
+        key = read_key(settings.access_key_file)
+    except (OSError, ValueError):  # AccessError among them
+        return None
+    return Codes(
+        key,
+        "daily",
+        settings.access_timezone,
+        settings.access_digits,
+        [],
+        False,
+        settings.access_pass_hours,
+    )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
 
@@ -481,6 +500,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.codes = Codes.load(settings)
+    app.state.issuer = app.state.codes or key_only(settings)  # passes for /measure (api/measure.py)
     app.state.lockouts = None
     if app.state.codes is not None:  # opened here, so a file that can't be used stops the start
         app.state.lockouts = LockoutStore(

@@ -73,6 +73,37 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
   its family's own name, where the server has one, would check each family on its own, as
   the Test page and Monitor do. The cost: a family whose TCP path is broken couldn't set
   up its UDP row either.
+- [ ] **The desk's tools by key, not only by address.** History, saved results, the
+  current code, blocks, `/api/v1/measure/*`, `/api/v1/clients` and the API explorer go to
+  any address in `internal_networks`. Behind a NAT address shared with people who aren't
+  trusted, that is everyone behind it, and a desk member behind such an address gets none
+  of them. A key would prove who is asking, from wherever. (Servers measuring each other
+  need none: each issues itself a pass, see
+  [Measuring between servers](access.md#measuring-between-servers).)
+  - **Keys the desk issues:** `texas2step access apikey issue --name Wallboard --scope desk`
+    prints one once, such as `t2s_<id>.<scope>.<issued>.<signature>`: when it was issued,
+    not when it runs out, signed with a key derived from the shared access key, as requests
+    between servers are, so every server with the access key takes it without a database.
+    As with passes, how long a key lasts is decided when it is checked, by a setting such
+    as `apikey_days`, so shortening it shortens the keys already given. Scopes: `test`
+    (what a pass allows), `desk` (reading History, results, the code, the clients),
+    `admin` (blocks, ending passes, measurements). The server that issues a key records its
+    id and name, for `apikey list`; checking one needs no record.
+  - **Ending them:** `texas2step access apikey end` refuses every key issued before now, on
+    every server, as `access passes --end` does for passes: one no-earlier-than time, sent
+    to the other servers, in place of a list of keys still within their lifetime.
+    `apikey revoke <id>` for one that leaked, where the others should keep working. The
+    journal names the key at each use of the desk's tools.
+  - **Who carries one:** scripts, dashboards and the command line in an
+    `Authorization: Bearer` header (`TEXAS2STEP_KEY`); a browser has it entered once, as
+    the access code is, and sends it to its own server only, which needs no CORS preflight.
+  - **What the desk's tools ask, a setting:** `desk_access = "network"` (as now), `"key"`,
+    or `"both"`, where the address narrows who may try and the key proves who it is: the
+    fit for mixed networks.
+  - **To decide:** keys for the whole cluster (signed, their end time shared) or each
+    server's own (stored, hashed); the lifetime's default; whether `test` keys replace
+    standing phrases for automation; what the page shows a desk member without a key, and
+    entering one on a phone; whether `"both"` becomes the default.
 
 ### Updates
 

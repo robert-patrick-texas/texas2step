@@ -337,6 +337,21 @@ A pass that hasn't run out but is refused anyway, as from a network blocked by h
 ([lockouts and blocks](#lockouts-and-blocks)), isn't asked for again by itself. To have
 neither family asked, list both of a site's addresses in `internal_networks`.
 
+### Measuring between servers
+
+A server measuring toward another for its `/api/v1/measure/*` gets past the other's code
+as a visitor does, with a pass: it issues itself one with its access key, and the other
+takes it if its key is the same. The pass lets the test in and nothing more, so the
+measuring server needn't be in the other's `internal_networks`, and may leave by a NAT
+address it shares with people who aren't trusted. It works with codes off on the
+measuring server too, from the key the package made at install.
+
+A server whose key differs refuses the test: give both the same key (step 1 of
+[Turn it on](#turn-it-on)), or list the measuring server's outgoing address in the other's
+`internal_networks`. The pass goes only to servers in `[[locations]]`, never to a target
+that only `allow_any_target` lets in: a pass works on every server with the key, for
+`access_pass_hours`.
+
 ## Lockouts and blocks
 
 Wrong codes count against the visitor's network, its IPv4 /24 or IPv6 /48, not its
