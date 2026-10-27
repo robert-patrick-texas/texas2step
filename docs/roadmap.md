@@ -112,6 +112,22 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.4.5](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.5) (2026-10-26)
+
+- [x] **A ? tab**: what the tool does, in a one-minute summary for anyone, then more on
+  Test, Monitor and Diag. It never names the tool, so it reads right on a renamed site;
+  `page_help` hides it.
+- [x] **Time limits** for pages left open: `page_monitor_max_runtime` and
+  `page_diag_max_runtime` stop Monitor and Diag a set time after each start, and
+  `session_max_runtime` has each server end any UDP or WebSocket session that old. A
+  stopped page keeps what it shows and starts again once reloaded; a small Runtime box
+  counts the time against the page's limit.
+- [x] Monitor gives a call's rate as the network carries it, with headers, encryption and
+  a VPN's wrapping: about 160 kb/s for voice and 1.5 Mb/s for video, each way per server.
+- [x] A finished test says **Saved as Result ID**, with the ID in a box that a click
+  copies; History's access code too.
+- [x] Durations in seconds read "10s", so the unit can't wrap onto the next line.
+
 ### [2.4.4](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.4) (2026-10-26)
 
 - [x] **Download JSON** saves a result as `results-<time>.json`, on renamed sites too.
