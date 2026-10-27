@@ -28,6 +28,13 @@ def test_report_names_this_computer():
     assert lines[2] == "this computer 10.0.0.10 · MAC 00:11:22:33:44:55"
 
 
+def test_report_says_the_version_only_where_the_server_does():
+    head = "texas2step → https://www.example.net/texas2step  (dallas.example.net"
+    assert cli._report(RESULT).splitlines()[0] == head + " · v1)"
+    hidden = {**RESULT, "server": {**RESULT["server"], "version": None}}
+    assert cli._report(hidden).splitlines()[0] == head + ")"
+
+
 def test_report_without_this_computer():
     # --no-local, or a run where nothing could be told.
     assert "this computer" not in cli._report(RESULT)

@@ -141,8 +141,10 @@ def _rpm_line(rpm: dict[str, Any] | None) -> str:
 def _report(result: dict[str, Any]) -> str:
     server, client = result.get("server", {}), result.get("client", {})
     idle = (result.get("latency") or {}).get("median")
+    # A server keeps its version from addresses outside internal_networks: then none is said.
+    version = f" · v{server['version']}" if server.get("version") else ""
     lines = [
-        f"texas2step → {server.get('url')}  ({server.get('name')} · v{server.get('version')})",
+        f"texas2step → {server.get('url')}  ({server.get('name')}{version})",
         f"client {client.get('ip')} ({client.get('family')}, {client.get('protocol')})",
         "",
         _latency_line("Latency", result.get("latency")),
