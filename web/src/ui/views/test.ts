@@ -458,9 +458,7 @@ export class TestView implements View {
     try {
       const saved = await this.app.origin.post<{ id: string }>("/results", result);
       result.id = saved.id;
-      // The code the service desk asks for: set apart, and selected whole with one click.
-      const code = h("span", { class: "saved-id", title: "This result's code: the service desk can open the result with it" }, saved.id);
-      this.status.append(" Saved with result id ", code);
+      this.status.append(" Saved with result id ", savedId(saved.id));
       // A visitor without the desk's functions can't open /r/ links; the desk can.
       if (this.app.desk) this.app.setAddress(`/r/${saved.id}`);
     } catch (err) {
@@ -726,7 +724,12 @@ export class TestView implements View {
       this.actions.append(share);
     } else if (r.id) {
       // Read out over the phone: the desk opens it from History.
-      this.actions.append(h("p", { class: "result-id" }, "Result ID ", h("strong", {}, r.id), " · read it to the service desk"));
+      this.actions.append(h("p", { class: "result-id" }, "Result ID ", savedId(r.id), " · read it to the service desk"));
     }
   }
+}
+
+/** A saved result's id, as the service desk asks for it: set apart, and selected whole with one click. */
+function savedId(id: string): HTMLElement {
+  return h("span", { class: "saved-id", title: "This result's id: the service desk can open the result with it" }, id);
 }

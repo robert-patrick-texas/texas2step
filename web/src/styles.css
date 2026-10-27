@@ -1053,7 +1053,8 @@ a.brand-org:hover,
   min-height: 1.5em;
 }
 
-/* A saved result's code in the status line, as on a ticket: easy to find and read out. */
+/* A saved result's id, in the status line and the line for the service desk, as on a ticket:
+   easy to find and read out. */
 .saved-id {
   padding: 1px 7px;
   border-radius: 6px;
@@ -2243,6 +2244,11 @@ a.brand-org:hover,
   background: color-mix(in srgb, var(--urgent) 86%, #000);
 }
 
+.btn.small.urgent {
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: progress;
@@ -2534,7 +2540,6 @@ a.brand-org:hover,
   color: var(--ink-2);
 }
 
-.result-id strong,
 .desk-code strong {
   font-family: var(--mono);
   font-size: 1.08em;
