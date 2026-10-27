@@ -2669,7 +2669,6 @@ a.brand-org:hover,
   font-size: 13px;
 }
 
-.lede.wide,
 /* Monitor's chart: a server gone quiet, or the latest outage, where its description was. */
 .card-head p.chart-status {
   max-width: none;
@@ -2677,6 +2676,7 @@ a.brand-org:hover,
   font-weight: 550;
 }
 
+.lede.wide,
 .card-head p.wide {
   max-width: none;
 }

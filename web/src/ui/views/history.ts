@@ -20,7 +20,7 @@ export class HistoryView implements View {
     this.body = h("div", {}, h("p", { class: "status" }, "Loading…"));
     this.desk = h("div", { class: "desk-tools" });
     root.append(
-      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "History"), h("p", { class: "lede" }, "Tests saved on this server, newest first. Browser runs save automatically; use texas2step run --save from the CLI.")), this.desk),
+      h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "History"), h("p", { class: "lede wide" }, "Tests saved on this server, newest first. Browser runs save automatically; use texas2step run --save from the CLI.")), this.desk),
       this.body,
     );
     if (this.app.pages.has("test")) this.desk.append(this.opener());
@@ -56,7 +56,10 @@ export class HistoryView implements View {
     } catch {
       return; // not for this client after all
     }
-    const at = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit", timeZone: code.timezone, timeZoneName: "short" });
+    // A daily code changes within the day: its weekday says when. A weekly or monthly one
+    // can be a week or weeks off, so its date too.
+    const date: Intl.DateTimeFormatOptions = code.interval === "daily" ? {} : { month: "short", day: "numeric" };
+    const at = (iso: string) => new Date(iso).toLocaleString([], { weekday: "short", ...date, hour: "numeric", minute: "2-digit", timeZone: code.timezone, timeZoneName: "short" });
     const changes = code.changes_at ? `changes ${at(code.changes_at)}` : "fixed";
     const until = code.previous_until === code.changes_at ? "then" : at(code.previous_until ?? "");
     const before = code.previous && code.previous_until ? ` · ${code.previous} still works until ${until}` : "";
