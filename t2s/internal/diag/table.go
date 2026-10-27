@@ -68,13 +68,17 @@ func ran(s Snapshot) string {
 }
 
 // Table is Diag as a table, width columns wide: the rows of each family, the addresses,
-// NAT and egress, and the latest events.
-func Table(s Snapshot, width, events int, live bool) []string {
+// NAT and egress, and the latest events. Where the window is too narrow for a whole row,
+// its detail goes under it, from the lane's column, as the page has it; narrower still,
+// its figures too. A height other than 0 keeps it to the window, a row a line where the
+// lines under them don't fit. events is how many events it lists, or -1 for as many as
+// the height leaves room for, at least 3.
+func Table(s Snapshot, width, height, events int, live bool) []string {
 	right := ran(s)
 	if live && s.Running {
 		right += " · Ctrl-C stops"
 	}
-	var rows [][]string
+	var rows []Row
 	var titles []string
 	var starts []int
 	for _, fam := range s.Families {
@@ -89,13 +93,7 @@ func Table(s Snapshot, width, events int, live bool) []string {
 				seen[r.Server] = true
 				servers = append(servers, r.Server)
 			}
-			detail := r.Detail
-			if r.Warn {
-				detail = show.Yellow(detail)
-			} else {
-				detail = show.Dim(detail)
-			}
-			rows = append(rows, []string{r.Method, r.Port, lane(r), state(r), figures(r), detail})
+			rows = append(rows, r)
 		}
 		title := fam
 		if len(servers) > 0 {
@@ -103,13 +101,99 @@ func Table(s Snapshot, width, events int, live bool) []string {
 		}
 		titles = append(titles, title)
 	}
-	table := show.Table(rows, "  ") // every family's rows in one, so their columns line up
-	head := show.Bold("t2s diag") + " → " + s.Name + "  " + show.Dim(s.URL)
-	edge := show.Width(head) + 2 + show.Width(right)
-	for _, l := range table {
-		edge = max(edge, show.Width(l))
+	tint := func(r Row, text string) string {
+		if r.Warn {
+			return show.Yellow(text)
+		}
+		return show.Dim(text)
 	}
-	edge = min(edge, width) // "ran" at the window's edge, or the table's where the window is wider
+	cells := make([][]string, len(rows))
+	for i, r := range rows {
+		cells[i] = []string{r.Method, r.Port, lane(r), state(r), figures(r), tint(r, r.Detail)}
+	}
+	// layout is every family's rows in one table, so their columns line up: cols of the
+	// cells, gap spaces apart; the rest of each row's cells go under it, wrapped.
+	layout := func(cols, gap int, spread bool) []string {
+		cut := make([][]string, len(cells))
+		for i, c := range cells {
+			cut[i] = c[:cols]
+		}
+		table := show.Columns(cut, "  ", gap)
+		at := 2
+		for col := range 2 {
+			w := 0
+			for _, c := range cells {
+				w = max(w, show.Width(c[col]))
+			}
+			at += w + gap
+		}
+		under := func(text string, style func(string) string) []string {
+			var out []string
+			if spread && text != "" {
+				for _, l := range show.Wrap(strings.Split(text, " · "), " · ", width-at) {
+					out = append(out, strings.Repeat(" ", at)+style(l))
+				}
+			}
+			return out
+		}
+		var lines []string
+		for f, title := range titles {
+			end := len(rows)
+			if f+1 < len(starts) {
+				end = starts[f+1]
+			}
+			lines = append(lines, "", show.Bold(title))
+			for i := starts[f]; i < end; i++ {
+				lines = append(lines, table[i])
+				if cols < 5 {
+					lines = append(lines, under(cells[i][4], func(s string) string { return s })...)
+				}
+				if cols < 6 {
+					lines = append(lines, under(rows[i].Detail, func(s string) string { return tint(rows[i], s) })...)
+				}
+			}
+		}
+		lines = append(lines, "", show.Bold("NAT and egress"))
+		order := []string{"This computer", "Over HTTPS (TCP)", "Over HTTP/3 (UDP)", "Over UDP (WebRTC)", "Compared", "NAT", "MAC"}
+		for _, fam := range s.Families {
+			var parts []string
+			for _, k := range order {
+				if v, ok := s.Egress[fam][k]; ok {
+					parts = append(parts, show.Dim(k)+" "+v)
+				}
+			}
+			lead := "  " + fam + "  "
+			wrapped := []string{strings.Join(parts, " · ")}
+			if spread {
+				wrapped = show.Wrap(parts, " · ", width-show.Width(lead))
+			}
+			for j, l := range wrapped {
+				if j > 0 {
+					lead = strings.Repeat(" ", show.Width(lead))
+				}
+				lines = append(lines, lead+l)
+			}
+		}
+		return lines
+	}
+	widest := func(lines []string) int {
+		w := 0
+		for _, l := range lines {
+			w = max(w, show.Width(l))
+		}
+		return w
+	}
+	wide := widest(layout(6, 3, false))
+	var body []string
+	for _, l := range [][2]int{{6, 3}, {5, 2}, {4, 2}} {
+		body = layout(l[0], l[1], true)
+		if widest(body) <= width {
+			break
+		}
+	}
+
+	head := show.Bold("t2s diag") + " → " + s.Name + "  " + show.Dim(s.URL)
+	edge := min(max(show.Width(head)+2+show.Width(right), wide), width) // "ran" at the window's edge, or the table's where the window is wider
 	lines := []string{head + strings.Repeat(" ", max(2, edge-show.Width(head)-show.Width(right))) + show.Dim(right)}
 	var you []string
 	for _, fam := range s.Families {
@@ -119,24 +203,16 @@ func Table(s Snapshot, width, events int, live bool) []string {
 	if s.Clock != "" {
 		lines = append(lines, show.Dim(s.Clock))
 	}
-	for i, title := range titles {
-		end := len(table)
-		if i+1 < len(starts) {
-			end = starts[i+1]
+	// The window's last line holds the cursor; the events want 2 lines and 3 events.
+	if height > 0 && len(lines)+len(body)+6 > height {
+		body = layout(5, 2, false) // a row a line, cut at the window's edge
+		if wide <= width {
+			body = layout(6, 3, false)
 		}
-		lines = append(lines, "", show.Bold(title))
-		lines = append(lines, table[starts[i]:end]...)
 	}
-	lines = append(lines, "", show.Bold("NAT and egress"))
-	order := []string{"This computer", "Over HTTPS (TCP)", "Over HTTP/3 (UDP)", "Over UDP (WebRTC)", "Compared", "NAT", "MAC"}
-	for _, fam := range s.Families {
-		var parts []string
-		for _, k := range order {
-			if v, ok := s.Egress[fam][k]; ok {
-				parts = append(parts, show.Dim(k)+" "+v)
-			}
-		}
-		lines = append(lines, "  "+fam+"  "+strings.Join(parts, " · "))
+	lines = append(lines, body...)
+	if events < 0 {
+		events = max(3, height-len(lines)-3)
 	}
 	if events > 0 && len(s.Events) > 0 {
 		lines = append(lines, "", show.Bold("Events"))

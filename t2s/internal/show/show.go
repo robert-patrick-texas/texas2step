@@ -135,8 +135,51 @@ func Pad(s string, width int) string {
 	return s
 }
 
+// Wrap joins parts with sep into lines of at most width columns, breaking between parts,
+// and between the words of a part only where it's wider than width on its own.
+func Wrap(parts []string, sep string, width int) []string {
+	var out []string
+	line := ""
+	for _, p := range parts {
+		if Width(p) > width && strings.Contains(p, " ") {
+			if line != "" {
+				out = append(out, line)
+			}
+			line = ""
+			for _, w := range strings.Fields(p) {
+				switch {
+				case line == "":
+					line = w
+				case Width(line)+1+Width(w) <= width:
+					line += " " + w
+				default:
+					out = append(out, line)
+					line = w
+				}
+			}
+			continue
+		}
+		switch {
+		case line == "":
+			line = p
+		case Width(line)+Width(sep)+Width(p) <= width:
+			line += sep + p
+		default:
+			out = append(out, line)
+			line = p
+		}
+	}
+	if line != "" {
+		out = append(out, line)
+	}
+	return out
+}
+
 // Table lays rows out in columns, each as wide as its widest cell and three spaces apart.
-func Table(rows [][]string, indent string) []string {
+func Table(rows [][]string, indent string) []string { return Columns(rows, indent, 3) }
+
+// Columns lays rows out in columns, each as wide as its widest cell and gap spaces apart.
+func Columns(rows [][]string, indent string, gap int) []string {
 	widths := map[int]int{}
 	for _, r := range rows {
 		for i, c := range r {
@@ -151,7 +194,7 @@ func Table(rows [][]string, indent string) []string {
 			if i == len(r)-1 {
 				b.WriteString(c)
 			} else {
-				b.WriteString(Pad(c, widths[i]+3))
+				b.WriteString(Pad(c, widths[i]+gap))
 			}
 		}
 		out[j] = strings.TrimRight(b.String(), " ")

@@ -265,8 +265,13 @@ func Panel(s Snapshot, width int, events int) []string {
 		right += " · stopped"
 	}
 	head := show.Bold("t2s monitor") + " → " + strings.Join(heads, "  ·  ")
-	gap := max(2, width-show.Width(head)-show.Width(right))
-	lines := []string{head + strings.Repeat(" ", gap) + show.Dim(right), show.Dim(About(s.Config, two)), ""}
+	about := show.Dim(About(s.Config, two))
+	if show.Width(head)+2+show.Width(right) > width && show.Width(about)+2+show.Width(right) <= width {
+		about += strings.Repeat(" ", width-show.Width(about)-show.Width(right)) + show.Dim(right) // no room on the first line
+	} else {
+		head += strings.Repeat(" ", max(2, width-show.Width(head)-show.Width(right))) + show.Dim(right)
+	}
+	lines := []string{head, about, ""}
 
 	keys := tiles[s.Profile]
 	window := WindowName(s.Config.Window)

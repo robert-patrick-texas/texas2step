@@ -72,7 +72,7 @@ loop:
 			}
 			s := d.Snapshot()
 			mu.Lock()
-			frame := diag.Table(s, term.Width(os.Stdout), max(3, term.Height(os.Stdout)-24), true)
+			frame := diag.Table(s, term.Width(os.Stdout), term.Height(os.Stdout), -1, true)
 			fmt.Print(term.Home + strings.Join(frame, term.EndLine+"\n") + term.EndLine + "\n" + term.ClearDown)
 			mu.Unlock()
 		}
@@ -86,10 +86,10 @@ loop:
 		diag.JSONSnapshot(os.Stdout, "summary", s)
 	case live:
 		fmt.Print(term.Normal)
-		fmt.Println(strings.Join(diag.Table(s, term.Width(os.Stdout), 10, false), "\n"))
+		fmt.Println(strings.Join(diag.Table(s, term.Width(os.Stdout), 0, 10, false), "\n"))
 	default:
 		fmt.Println()
-		fmt.Println(strings.Join(diag.Table(s, 1000, 0, false), "\n")) // a log keeps every detail
+		fmt.Println(strings.Join(diag.Table(s, 1000, 0, 0, false), "\n")) // a log keeps every detail
 	}
 	return nil
 }

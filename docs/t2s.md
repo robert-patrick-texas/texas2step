@@ -221,6 +221,10 @@ had answered before. A row is **Answering**, **No answer for** a time, **No answ
 the server sees this computer over TCP and over UDP: different addresses mean TCP and UDP
 leave by different routes or NAT pools.
 
+A window too narrow for a whole row has each row's details on the lines under it, as the
+Diag page does, and narrower still its figures too; while Diag runs in a window too short
+for those, each row has a line of its own. The table it leaves when it stops has them all.
+
 Piped, Diag writes the events as lines as they happen, and the whole table once it stops.
 `--json` writes `event` lines, and a `summary` line with every row at the end.
 
