@@ -3,6 +3,7 @@ import { appPath } from "../../engine/net";
 import type { AccessCode, ResultSummary } from "../../types";
 import type { App, View } from "../app";
 import { axisX, gridY, legend, linear, linePath } from "../charts/common";
+import { codeChip } from "../codechip";
 import { clear, h, onResize, pointerIn, s } from "../dom";
 import { bytes, mbpsTick, ms, pct, rate, text, when } from "../format";
 import { hideTip, showTip } from "../tooltip";
@@ -60,7 +61,7 @@ export class HistoryView implements View {
     const until = code.previous_until === code.changes_at ? "then" : at(code.previous_until ?? "");
     const before = code.previous && code.previous_until ? ` · ${code.previous} still works until ${until}` : "";
     desk.querySelector(".desk-code")?.remove();
-    desk.prepend(h("p", { class: "desk-code", title: `The code visitors enter (${code.interval}, ${code.timezone})` }, "Access code ", h("span", { class: "code-chip" }, code.code), h("span", { class: "cell-sub" }, ` ${changes}${before}`)));
+    desk.prepend(h("p", { class: "desk-code", title: `The code visitors enter (${code.interval}, ${code.timezone})` }, "Access code ", codeChip(code.code, "The code visitors enter."), h("span", { class: "cell-sub" }, ` ${changes}${before}`)));
   }
 
   private async load(body: HTMLElement): Promise<void> {

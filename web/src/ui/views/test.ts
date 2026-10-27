@@ -9,6 +9,7 @@ import { LatencyChart } from "../charts/latency";
 import { PacketGrid } from "../charts/packets";
 import { StreamsChart } from "../charts/streams";
 import { ThroughputChart } from "../charts/throughput";
+import { codeChip } from "../codechip";
 import { clear, h, setText } from "../dom";
 import { bytes, type Formatted, ms, pct, rate, text, when } from "../format";
 import { Gauge } from "../gauge";
@@ -458,7 +459,7 @@ export class TestView implements View {
     try {
       const saved = await this.app.origin.post<{ id: string }>("/results", result);
       result.id = saved.id;
-      this.status.append(" Saved with result id ", savedId(saved.id));
+      this.status.append(" Saved as Result ID ", resultId(saved.id));
       // A visitor without the desk's functions can't open /r/ links; the desk can.
       if (this.app.desk) this.app.setAddress(`/r/${saved.id}`);
     } catch (err) {
@@ -724,12 +725,12 @@ export class TestView implements View {
       this.actions.append(share);
     } else if (r.id) {
       // Read out over the phone: the desk opens it from History.
-      this.actions.append(h("p", { class: "result-id" }, "Result ID ", savedId(r.id), " · read it to the service desk"));
+      this.actions.append(h("p", { class: "result-id" }, "Result ID ", resultId(r.id), " · read it to the service desk"));
     }
   }
 }
 
-/** A saved result's id, as the service desk asks for it: set apart, and selected whole with one click. */
-function savedId(id: string): HTMLElement {
-  return h("span", { class: "code-chip", title: "This result's id: the service desk can open the result with it" }, id);
+/** A saved result's ID, as the service desk asks for it: set apart, and copied with a click. */
+function resultId(id: string): HTMLElement {
+  return codeChip(id, "The service desk opens this result by its Result ID.");
 }
