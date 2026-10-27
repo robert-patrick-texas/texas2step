@@ -2353,6 +2353,10 @@ a.brand-org:hover,
   width: fit-content;
 }
 
+.opt[hidden] {
+  display: none;
+}
+
 .runtime-ran {
   margin-right: 0.3em;
   color: var(--ink-2);

@@ -82,6 +82,10 @@ async def info(request: Request) -> dict[str, Any]:
             "max_stream_seconds": s.max_stream_seconds,
             # 0: sessions run until the client closes them, or go idle.
             "max_session_seconds": s.session_max_runtime,
+            # How long Monitor and Diag run; 0 for no limit. A page from another server that
+            # tests this one keeps the stricter of its own site's and these.
+            "max_monitor_seconds": s.page_monitor_max_runtime,
+            "max_diag_seconds": s.page_diag_max_runtime,
         },
         "ice_servers": [{"urls": url} for url in s.ice_servers],
         "defaults": {

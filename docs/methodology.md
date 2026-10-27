@@ -322,7 +322,10 @@ the same way, and the page says so when you come back to it.
 session after a set time (`session_max_runtime`). Either way Monitor stops as Stop does,
 holds its chart and figures, says why, and starts again only once the page is reloaded.
 With a site limit, a small **Runtime** box in the toolbar counts the seconds since Start
-against it ("312s of 900s"); it holds at Stop, and the next Start counts from zero.
+against it ("312s of 900s"); it holds at Stop, and the next Start counts from zero. A page
+monitoring another server, picked at the top of the page or compared, keeps the
+strictest of its own site's limit and each server's, and says whose stopped it
+("Stopped after 15 min, Houston's limit.").
 
 **Outages.** A server that hasn't answered for 3 seconds has gone quiet: when Wi-Fi or
 mobile data drops while you move around, say, or when the server restarts. The line
@@ -402,7 +405,8 @@ can end its WebSocket or UDP session after a set time (`session_max_runtime`). E
 Diag stops as it does for another page, keeps its rows and events, says why, and starts
 again only once the page is reloaded. With a site limit, a small **Runtime** box beside
 Keep screen on counts the seconds since Diag was last shown against it; coming back to
-Diag counts from zero.
+Diag, or picking another server, counts from zero. With another server picked, Diag keeps
+the stricter of its own site's limit and that server's, and says whose stopped it.
 One whose address asks for the access code, as a server's IPv4-only name can for a
 visitor inside on IPv6 only, says **Restricted** (amber) and doesn't count as loss:
 its HTTP rows are tried every 10 s until the code is in, and no WebSocket is opened there

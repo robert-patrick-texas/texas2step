@@ -88,6 +88,15 @@ def test_websocket_echo(client):
         assert ws.receive_text() == "hello"
 
 
+def test_info_says_how_long_monitor_and_diag_run(client, settings):
+    # So a page from another server that tests this one keeps the stricter limit.
+    limits = client.get("/api/v1/info").json()["limits"]
+    assert (limits["max_monitor_seconds"], limits["max_diag_seconds"]) == (0, 0)
+    settings.page_monitor_max_runtime, settings.page_diag_max_runtime = 900, 3600
+    limits = client.get("/api/v1/info").json()["limits"]
+    assert (limits["max_monitor_seconds"], limits["max_diag_seconds"]) == (900, 3600)
+
+
 def test_echo_socket_ends_at_session_max_runtime(client, settings):
     from starlette.websockets import WebSocketDisconnect
 

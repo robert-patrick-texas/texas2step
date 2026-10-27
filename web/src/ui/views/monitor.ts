@@ -13,7 +13,7 @@ import { awakeSwitch } from "../awake";
 import { LiveChart, type LiveSeries } from "../charts/live";
 import { clear, h, save, setText, store } from "../dom";
 import { type Formatted, ms, pct } from "../format";
-import { maxRuntime, reloadButton, type RuntimeCounter, runtimeCounter, sessionEnded, span } from "../runtime";
+import { type Limit, RuntimeCounter, reloadButton, sessionEnded, span, strictest, whose } from "../runtime";
 
 interface Probe {
   send(seq: number, size: number): void;
@@ -164,8 +164,8 @@ export class MonitorView implements View {
   private lastOutage = ""; // what the chart's note said about the latest one
   private leftRunning = false; // stopped by going to another page
   private over = false; // stopped at a time limit: only a reload starts it again
-  private startedAt = 0; // Date.now() at Start, for the site's limit
-  private counter: RuntimeCounter | null = null; // the time counted against it, where it's set
+  private startedAt = 0; // Date.now() at Start, for its time limit
+  private counter: RuntimeCounter | null = null; // the time counted against it, where there is one
   private off: (() => void) | null = null;
   private startBtn!: HTMLButtonElement;
   private transport!: HTMLElement;
@@ -221,7 +221,7 @@ export class MonitorView implements View {
     this.tiles = h("div", { class: "tiles six" });
     this.compare = h("div", { class: "table-wrap compare-wrap" });
     this.chartHead = h("p", { role: "status" });
-    this.counter = runtimeCounter("monitor", (limit) => `Time Monitor has run since Start, counted against this site's ${limit} limit. Each Start counts from zero.`);
+    this.counter = new RuntimeCounter((limit, whose) => `Time Monitor has run since Start, counted against ${whose} ${limit} limit. Each Start counts from zero.`);
 
     root.append(
       h("section", { class: "page-head" }, h("div", {}, h("h1", {}, "Monitor"), this.lede, this.notice), h("div", { class: "head-actions" }, this.profileBox, this.startBtn)),
@@ -639,8 +639,8 @@ export class MonitorView implements View {
    */
   private watch(): void {
     const now = Date.now();
-    const limit = maxRuntime("monitor");
-    if (limit && now - this.startedAt >= limit) return this.end(`Stopped after ${span(limit / 1000)}, this site's limit.`);
+    const limit = this.limit();
+    if (limit.ms && now - this.startedAt >= limit.ms) return this.end(`Stopped after ${span(limit.ms / 1000)}, ${whose(limit)} limit.`);
     for (const [i, d] of this.dests.entries()) {
       if (d.busy) continue;
       const quiet = now - d.lastEcho > SILENT_MS;
@@ -916,7 +916,19 @@ export class MonitorView implements View {
     const figures = this.dests.length ? this.dests.map((_, i) => this.figuresFor(i, slices[i] ?? [])) : [this.figuresFor(0, [])];
     if (this.comparing && this.cells.length) this.refreshCompare(figures);
     else this.refreshTiles(figures[0]!);
+    this.counter?.setLimit(this.limit());
     this.counter?.set(this.ranFor());
+  }
+
+  /**
+   * The strictest limit on Monitor: this site's, and each server's it monitors: those it
+   * connected to, running and once stopped (the box holds still with the chart). Before
+   * Start, the server picked at the top of the page; two servers being compared say theirs
+   * once Monitor connects to them.
+   */
+  private limit(): Limit {
+    if (this.dests.length) return strictest("monitor", this.dests.map((d) => d.info));
+    return strictest("monitor", this.comparing ? [] : [this.app.info]);
   }
 
   /** How long Monitor has run since Start: to now, or to its Stop. */
