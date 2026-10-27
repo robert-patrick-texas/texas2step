@@ -1,0 +1,2 @@
+# Go sources stay LF everywhere: gofmt flags a CRLF checkout, which Windows makes by default.
+*.go text eol=lf
