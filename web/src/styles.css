@@ -1053,6 +1053,20 @@ a.brand-org:hover,
   min-height: 1.5em;
 }
 
+/* A saved result's code in the status line, as on a ticket: easy to find and read out. */
+.saved-id {
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--sun-1) 22%, var(--surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sun-1) 60%, transparent);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  user-select: all;
+}
+
 /* Gauge */
 
 .gauge {

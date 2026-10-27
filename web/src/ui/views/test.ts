@@ -458,7 +458,9 @@ export class TestView implements View {
     try {
       const saved = await this.app.origin.post<{ id: string }>("/results", result);
       result.id = saved.id;
-      setText(this.status, `${this.status.textContent ?? ""} Saved as ${saved.id}.`.trim());
+      // The code the service desk asks for: set apart, and selected whole with one click.
+      const code = h("span", { class: "saved-id", title: "This result's code: the service desk can open the result with it" }, saved.id);
+      this.status.append(" Saved with result id ", code);
       // A visitor without the desk's functions can't open /r/ links; the desk can.
       if (this.app.desk) this.app.setAddress(`/r/${saved.id}`);
     } catch (err) {
