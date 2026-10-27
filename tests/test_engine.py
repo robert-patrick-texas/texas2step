@@ -8,9 +8,19 @@ import httpx
 import pytest
 import uvicorn
 
-from texas2step import engine
+from texas2step import engine, payload
 from texas2step.app import create_app
 from texas2step.config import Settings
+
+
+def test_upload_spans_walk_the_whole_pool():
+    n = payload.CHUNK // 4  # the CLI's upload chunk
+    pool = payload.CHUNK * len(payload._POOL)
+    spans = [payload.span(offset, n) for offset in range(0, pool, n)]
+    assert len(set(spans)) == len(spans)  # no span repeats before the pool's end
+    assert b"".join(spans) == b"".join(payload._POOL)
+    assert payload.span(pool, n) == spans[0]  # then it starts again
+    assert payload.span(payload.CHUNK - 10, 20) == payload._POOL[0][-10:] + payload._POOL[1][:10]
 
 
 async def test_latency(live_server):

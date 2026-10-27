@@ -1,7 +1,7 @@
 .PHONY: dev web web-watch test lint fmt check docs docs-watch deb version upgrade
 
 dev:            ## run the server with the current build of the UI
-	uv run texas2step serve --host 127.0.0.1 --port 8080
+	TEXAS2STEP_CLIENTS_FILE=texas2step-clients.db uv run texas2step serve --host 127.0.0.1 --port 8080
 
 web:            ## typecheck and bundle the TypeScript UI into src/texas2step/static
 	cd web && npm ci && npm run check

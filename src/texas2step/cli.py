@@ -1089,6 +1089,107 @@ def cmd_traffic_allow(args: argparse.Namespace) -> None:
     print(_state(refusal, settings))
 
 
+CLIENTS_ENDED_SHOWN = 20  # ended sessions texas2step clients lists without --history
+
+
+def _table(rows: list[tuple[str, ...]]) -> list[str]:
+    widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]))]
+    return [
+        "  " + "   ".join(f"{c:<{w}}" for c, w in zip(row, widths, strict=True)).rstrip()
+        for row in rows
+    ]
+
+
+def _clients_table(board: Any, now: float, limit: int, everything: bool) -> list[str]:
+    """The active sessions, then the last hour's ended ones, as tables; an address after a
+    session's first gets its own line."""
+    from .clients import HISTORY, IDLE, PAGES, describe, duration, program
+    from .traffic import size
+
+    def session(s: Any, what: str, took: float) -> list[tuple[str, ...]]:
+        addresses = s.addresses or ["unknown"]
+        page = PAGES.get(s.page or "", "-")
+        first = (s.label, addresses[0], program(s.agent), page, what, duration(took))
+        return [(*first, size(s.sent + s.received))] + [
+            ("", ip, "", "", "", "", "") for ip in addresses[1:]
+        ]
+
+    active, ended = board.active, board.ended
+    if active:
+        pages = sum(1 for s in active if s.page not in ("cli", "server"))
+        runs = len(active) - pages
+        parts = [f"{pages} page{'' if pages == 1 else 's'}"] if pages else []
+        parts += [f"{runs} command-line run{'' if runs == 1 else 's'}"] if runs else []
+        lines = [f"{len(active)} active in the last {IDLE:g}s: {', '.join(parts)}."]
+    else:
+        lines = [f"No clients active in the last {IDLE:g}s."]
+    if board.full:
+        lines.append(
+            f"The list is full (clients_max = {limit:,}): new sessions aren't listed. "
+            "The journal has more: journalctl -u texas2step -g clients:"
+        )
+    rows: list[tuple[str, ...]]
+    if active:
+        rows = [("Session", "Address", "Program", "Page", "Doing now", "For", "Moved")]
+        for s in active:
+            rows += session(s, ", ".join(describe(s.doing)) or "-", now - s.first)
+        lines += ["", *_table(rows)]
+    if ended:
+        shown = ended if everything else ended[:CLIENTS_ENDED_SHOWN]
+        hour = "hour" if HISTORY == 3600 else f"{HISTORY:g}s"
+        lines += ["", f"{len(ended)} ended in the last {hour}, the latest first:", ""]
+        rows = [("Session", "Address", "Program", "Page", "Last seen", "For", "Moved")]
+        for s in shown:
+            rows += session(s, f"{duration(now - s.last)} ago", s.last - s.first)
+        lines += _table(rows)
+        if len(shown) < len(ended):
+            lines += ["", f"{len(ended) - len(shown)} more: --history lists them all."]
+    return lines
+
+
+def cmd_clients(args: argparse.Namespace) -> None:
+    import json
+    import sqlite3
+    import time
+
+    from . import clients
+
+    settings = _server_settings(args)
+    path = settings.clients_file
+
+    def show() -> None:
+        now = time.time()
+        try:
+            board = clients.read(path, now)
+        except FileNotFoundError:
+            board = clients.Board([], [], full=False)
+            if not args.json and not Path(path).parent.exists():
+                print(f"No clients: the service makes {Path(path).parent} as it starts.")
+                return
+        except (OSError, sqlite3.Error) as exc:
+            why = str(exc)
+            denied = isinstance(exc, PermissionError) or "readonly" in why or "open" in why
+            sys.exit(f"texas2step: can't read {path}: {why}" + (" (try sudo)" if denied else ""))
+        if args.json:
+            print(json.dumps(board.public(now, settings.clients_max), indent=2), flush=True)
+        else:
+            table = _clients_table(board, now, settings.clients_max, args.history)
+            print("\n".join(table), flush=True)
+
+    if not args.watch:
+        show()
+        return
+    try:
+        while True:
+            if not args.json:
+                print("\x1b[H\x1b[2J", end="")  # to the top, and clear the screen
+                print(f"Every {clients.FLUSH:g}s; Ctrl-C to stop.\n")
+            show()
+            time.sleep(clients.FLUSH)
+    except KeyboardInterrupt:
+        print()
+
+
 def _results(count: int) -> str:
     return f"{count} saved result{'' if count == 1 else 's'}"
 
@@ -1505,6 +1606,25 @@ def build_parser() -> argparse.ArgumentParser:
     settings_file(allow)
     allow.add_argument("gb", type=float, help="gigabytes (10^9 bytes), such as 5")
     allow.set_defaults(func=cmd_traffic_allow)
+
+    cl = sub.add_parser(
+        "clients",
+        help="the pages and command-line runs using this server now",
+        description="List each page and command-line run that sent a request in the last "
+        "minute: its session, address, program, page, what it is doing now, for how long, and "
+        "the bytes it moved; then the latest of those that ended in the last hour "
+        "(docs/clients.md).",
+    )
+    settings_file(cl)
+    cl.add_argument("--json", action="store_true", help="print them as JSON, for scripts")
+    cl.add_argument("--watch", action="store_true", help="show them again every 2 seconds")
+    cl.add_argument(
+        "--history",
+        action="store_true",
+        help=f"list every session that ended in the last hour, not only the latest "
+        f"{CLIENTS_ENDED_SHOWN}",
+    )
+    cl.set_defaults(func=cmd_clients)
 
     def target(p: argparse.ArgumentParser) -> None:
         p.add_argument("url", help="base URL of a texas2step server")

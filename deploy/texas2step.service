@@ -19,6 +19,10 @@ RestartSec=3
 # Saved results live in /var/lib/texas2step.
 StateDirectory=texas2step
 WorkingDirectory=/var/lib/texas2step
+# The active clients (texas2step clients) in /run/texas2step: in memory, kept over a
+# restart or an upgrade, gone at a reboot.
+RuntimeDirectory=texas2step
+RuntimeDirectoryPreserve=yes
 LimitNOFILE=65536
 
 NoNewPrivileges=true

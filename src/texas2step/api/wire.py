@@ -85,7 +85,7 @@ async def _metered(
         meter.add(kind, sent=len(chunk))
 
 
-@router.get("/down", summary="Stream incompressible bytes (download test)")
+@router.get("/down", summary="Stream founding documents, then random bytes (download test)")
 async def down(
     request: Request,
     size: Annotated[
@@ -97,19 +97,24 @@ async def down(
     ] = None,
     test: TestId = None,
 ) -> Response:
-    """``curl -o /dev/null 'https://host/api/v1/down?bytes=1000000000'`` or ``?seconds=10``."""
+    """``curl -o /dev/null 'https://host/api/v1/down?bytes=1000000000'`` or ``?seconds=10``.
+
+    The body starts with five founding documents as UTF-8 text, about 770 KB, then random
+    bytes to the end (``download_documents``; docs/methodology.md#what-the-tests-send).
+    """
     t0 = time.perf_counter()
     settings = request.app.state.settings
     metered = await _admit(request, test)
     headers = {**NO_STORE, "Content-Type": "application/octet-stream"}
+    text = payload.TEXT if settings.download_documents else b""
     if seconds is not None:
-        body = payload.stream_for(min(seconds, settings.max_stream_seconds))
+        body = payload.stream_for(min(seconds, settings.max_stream_seconds), text)
     else:
         n = min(size if size is not None else 100_000_000, settings.max_download_bytes)
         if n == 0:
             headers["Server-Timing"] = _timing(app=(time.perf_counter() - t0) * 1000)
             return Response(b"", headers=headers)
-        body = payload.stream_bytes(n)
+        body = payload.stream_bytes(n, text)
         headers["Content-Length"] = str(n)
     if metered:
         body = _metered(body, *metered)
@@ -221,8 +226,9 @@ async def rtc_offer(offer: Offer, request: Request) -> dict[str, str]:
         # or the passes issued before its own be ended.
         watched = ip if request.app.state.codes is not None else None
         issued = await pass_issued(request)
+        client = request.app.state.clients.key(request, ip)[0]  # whose page or run it is
         rtc = request.app.state.rtc
-        return await rtc.answer(offer.sdp, whose=whose, ip=watched, issued=issued)
+        return await rtc.answer(offer.sdp, whose=whose, ip=watched, issued=issued, client=client)
     except RtcUnavailable as exc:
         raise HTTPException(501, str(exc)) from exc
     except RtcBusy as exc:

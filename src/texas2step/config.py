@@ -102,6 +102,10 @@ class Settings:
     server_url_v6_http1: str = ""
     server_url_v6_http3: str = ""
 
+    # Each download starts with five founding documents, as text, before its random bytes
+    # (docs/methodology.md#what-the-tests-send). Off: random from the first byte, for a
+    # site whose WAN optimizer decrypts and compresses traffic.
+    download_documents: bool = True
     # Wire endpoint limits.
     max_download_bytes: int = 1 << 30
     max_upload_bytes: int = 1 << 30
@@ -222,6 +226,13 @@ class Settings:
     traffic_message: str = "Testing temporarily disabled."
     traffic_url: str = ""  # such as another texas2step server, or the service desk's page
 
+    # The pages and command-line runs active now and in the last hour, for texas2step
+    # clients (docs/clients.md): on the RAM-backed /run, shared by the workers. At most
+    # clients_max of them, active and ended together; past it, new sessions go unlisted
+    # and the journal is warned.
+    clients_file: str = "/run/texas2step/clients.db"
+    clients_max: int = 1000
+
     # Other servers offered in the location picker (this server is always first).
     locations: list[Location] = field(default_factory=list)
 
@@ -289,6 +300,8 @@ class Settings:
             ) from None
         if not 2 <= self.access_digits <= 4:
             raise ValueError("access_digits: expected 2, 3 or 4")
+        if not 10 <= self.clients_max <= 5000:
+            raise ValueError("clients_max: expected 10 to 5000 sessions")
         if not 1 <= self.access_pass_hours <= 168:
             raise ValueError("access_pass_hours: expected 1 to 168 hours")
         if not 1 <= self.access_lockout_after <= 100:

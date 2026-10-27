@@ -24,12 +24,13 @@ from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
-from . import __version__, page, traffic
+from . import __version__, clients, page, traffic
 from .access import Codes, is_internal
 from .api import routers
 from .api.access import given_pass
 from .api.meta import client_address, http_version, shows_version
 from .api.results import MAX_RESULT_BYTES
+from .clients import Clients
 from .config import Settings, load_settings
 from .lockouts import HandBlocks, LockoutStore
 from .rtc import RtcEcho
@@ -196,6 +197,7 @@ class AccessGate:
         "/api/openapi.json",
         "/api/v1/access/code",
         "/api/v1/access/blocks",
+        "/api/v1/clients",
     )
 
     def __init__(self, app: ASGIApp, settings: Settings) -> None:
@@ -338,6 +340,55 @@ class BodyLimit:
         await JSONResponse({"detail": why}, 413)(scope, receive, send)
 
 
+class ClientSeen:
+    """Counts each request to the API as its session's (clients.py): what it is doing
+    while it runs, and the bytes it moves. It sits inside the access gate, so a refused
+    request isn't counted. Raw ASGI, like TimingAllowOrigin."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        tracked: Clients | None = scope["app"].state.clients if "app" in scope else None
+        path, root = scope.get("path", ""), scope.get("root_path", "")
+        if root and path.startswith(root):
+            path = path[len(root) :] or "/"
+        if (
+            tracked is None
+            or scope["type"] not in ("http", "websocket")
+            or not path.startswith("/api/v1/")
+            or clients.untracked(path, scope.get("query_string", b""))
+            or scope.get("method") == "OPTIONS"
+        ):
+            await self.app(scope, receive, send)
+            return
+        conn = HTTPConnection(scope)
+        ip, _ = client_address(conn)
+        activity = clients.ACTIVITIES.get(path) or (
+            "measure" if path.startswith("/api/v1/measure/") else "page"
+        )
+        seen = tracked.begin(*tracked.key(conn, ip), ip, activity)
+        if seen is None:  # the list is full (clients_max): served, not listed
+            await self.app(scope, receive, send)
+            return
+
+        async def counted_receive() -> Message:
+            message = await receive()
+            if body := message.get("body") or message.get("bytes") or message.get("text"):
+                seen.received += len(body)
+            return message
+
+        async def counted_send(message: Message) -> None:
+            if body := message.get("body") or message.get("bytes") or message.get("text"):
+                seen.sent += len(body)
+            await send(message)
+
+        try:
+            await self.app(scope, counted_receive, counted_send)
+        finally:
+            tracked.end(seen, activity)
+
+
 class RequestLog:
     """Logs one line per request, with the client's address as /api/v1/whoami sees it.
 
@@ -401,7 +452,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.store = ResultStore(settings.results_path, settings.results_max_rows)
         meter = app.state.traffic
         flushing = asyncio.create_task(traffic.keep(meter)) if meter is not None else None
+        noting = asyncio.create_task(clients.keep(app.state.clients))
         yield
+        noting.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await noting
+        app.state.clients.close()
         await app.state.rtc.stop()
         if app.state.store is not None:
             app.state.store.close()
@@ -448,12 +504,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.rtc.meter = app.state.traffic
     app.state.rtc.blocks = app.state.blocks
+    app.state.clients = Clients(settings.clients_file, app.state.rtc, settings.clients_max)
 
     @app.exception_handler(traffic.Closed)
     async def closed(request: Request, exc: traffic.Closed) -> JSONResponse:
         # A traffic limit: the site's message and link, and not when tests start again.
         return JSONResponse(exc.notice, 503, headers={"Cache-Control": "no-store"})
 
+    app.add_middleware(ClientSeen)  # inside the gate: a refused request isn't a session's
     app.add_middleware(BodyLimit)  # inside the gate: a refused request is never read
     app.add_middleware(AccessGate, settings=settings)  # inside CORS: its refusals get CORS headers
     app.add_middleware(

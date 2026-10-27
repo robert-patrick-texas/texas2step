@@ -56,6 +56,21 @@ export function whenRefused(fn: (ep: Endpoint) => Promise<boolean>): void {
   refused = fn;
 }
 
+/**
+ * This page load's session, and the page shown, with every request as ?session= and
+ * ?page=, so the server's `texas2step clients` tells pages apart: two browsers on one
+ * computer among them (docs/clients.md). Held only here, never in a cookie or the
+ * browser's storage: a reload starts a new one.
+ */
+const ID_LETTERS = "23456789abcdefghjkmnpqrstwxyz"; // as the server's result ids: easy to read out
+const SESSION = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => ID_LETTERS[b % ID_LETTERS.length]).join("");
+let shownPage = "";
+
+/** Called as each page is shown: test, monitor, diag, history, help or api. */
+export function setPage(name: string): void {
+  shownPage = name;
+}
+
 /** A server refused a request for want of a pass: the access code (docs/access.md). */
 export class NeedsCode extends Error {}
 
@@ -85,6 +100,8 @@ export class Endpoint {
   url(path: string, params: Record<string, string | number> = {}): string {
     const url = new URL(this.base + API + path);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
+    url.searchParams.set("session", SESSION);
+    if (shownPage) url.searchParams.set("page", shownPage);
     if (accessPass && !this.own) url.searchParams.set("pass", accessPass);
     return url.href;
   }

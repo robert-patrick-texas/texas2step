@@ -4,7 +4,8 @@ uvicorn applies :func:`config` in every worker. Lines go to stderr, which system
 to the journal, each with its level as a syslog priority in front for journald to file
 it by. One line per request comes from texas2step (``app.RequestLog``), with the
 client's real address behind nginx: successes at INFO and failures at WARNING, so the
-``texas2step`` logger's level decides which are written.
+``texas2step`` logger's level decides which are written. Each page's or command-line run's
+start, change of page and end (clients.py) is written at INFO either way.
 """
 
 from __future__ import annotations
@@ -109,6 +110,8 @@ def config(debug: bool) -> dict[str, Any]:
             "uvicorn.error": {"level": "INFO", "filters": ["no_websockets"]},
             "texas2step": logger("named", level),
             "texas2step.access": logger("plain"),  # its level is texas2step's
+            # Each session's start, change of page and end (clients.py), with or without debug.
+            "texas2step.clients": logger("plain", "DEBUG" if debug else "INFO"),
             # The UDP probe's libraries. Their DEBUG lines for STUN and SCTP come once per
             # packet, too many even here: debug gets ICE's checks and the DTLS, SCTP and
             # data channel state changes.

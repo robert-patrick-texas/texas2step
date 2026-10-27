@@ -78,6 +78,9 @@ async def _run(
     if _slots.locked():
         raise HTTPException(429, "measurement already in progress, retry shortly")
     async with _slots:
+        # The target lists this test as a server's, apart from any other (docs/clients.md).
+        engine.PAGE.set("server")
+        engine.SESSION.set(engine.new_session())
         try:
             result = await job()
         except httpx.HTTPStatusError as exc:

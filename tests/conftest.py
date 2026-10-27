@@ -20,6 +20,7 @@ def settings(tmp_path) -> Settings:
         server_name="Test One",
         server_location="Testville",
         results_path=str(tmp_path / "results.db"),
+        clients_file=str(tmp_path / "clients.db"),
         locations=[Location(id="peer", name="Peer", url="https://peer.example")],
     )
 
@@ -45,8 +46,9 @@ def free_port() -> int:
 def live_server(tmp_path_factory) -> Iterator[str]:
     """A real uvicorn server on loopback, for engine and WebRTC round trips."""
     port = _free_port()
+    db = tmp_path_factory.mktemp("db")
     settings = Settings(
-        results_path=str(tmp_path_factory.mktemp("db") / "r.db"), allow_any_target=True
+        results_path=str(db / "r.db"), clients_file=str(db / "c.db"), allow_any_target=True
     )
     server = uvicorn.Server(
         uvicorn.Config(create_app(settings), host="127.0.0.1", port=port, log_level="warning")

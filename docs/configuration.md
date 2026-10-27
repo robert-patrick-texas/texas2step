@@ -23,6 +23,7 @@ file up to date with the new version's template and keeps your values; see
 | `server_location` | `""` | Free text, e.g. `Dallas, TX` |
 | `server_url_v4` / `server_url_v6` | `""` | IPv4-only / IPv6-only base URLs for this server; they add the header's IP drop-down. See [IPv4 and IPv6](#ipv4-and-ipv6). |
 | `server_url_v4_http1` / `server_url_v4_http3` / `server_url_v6_http1` / `server_url_v6_http3` | `""` | Single-family base URLs that serve only HTTP/1.1, or offer HTTP/3, for Diag's rows of those versions. See [HTTP versions](#http-versions). |
+| `download_documents` | `true` | Start each download with five founding documents as text, about 770 KB, before its random bytes; `false` sends random bytes from the first byte, for a site whose WAN optimizer decrypts and compresses traffic. See [What the tests send](methodology.md#what-the-tests-send). |
 | `max_download_bytes` | 1 GiB | Largest single `/down` response |
 | `max_upload_bytes` | 1 GiB | Largest single `/up` body |
 | `max_stream_seconds` | 60 | Cap for `/down?seconds=` |
@@ -71,6 +72,8 @@ file up to date with the new version's template and keeps your values; see
 | `traffic_file` | `/var/lib/texas2step/traffic.db` | The figures, shared by the workers and `texas2step traffic`; used only while a limit is set |
 | `traffic_message` | `Testing temporarily disabled.` | What a visitor refused by a traffic limit reads |
 | `traffic_url` | `""` | If set, the message is followed by "Click here to continue.", linking here: another texas2step server, another provider's test, the service desk's page |
+| `clients_file` | `/run/texas2step/clients.db` | The pages and command-line runs active now and in the last hour, shared by the workers, `texas2step clients` and `/api/v1/clients`; in memory, on the tmpfs the service's `/run/texas2step` is. See [Active clients](clients.md). |
+| `clients_max` | 1000 | Sessions listed at most, active and the last hour's ended together: ended ones make room, the oldest first. With this many active, new ones go unlisted and the journal is warned. 10 to 5000; see [How many are listed](clients.md#how-many-are-listed). |
 | `brand_name` | `texas2step` | Name in the header and the browser tab |
 | `brand_organization` | `""` | Organization shown beside the name and in the footer |
 | `brand_url` | `""` | The organization's website; the organization name links to it |

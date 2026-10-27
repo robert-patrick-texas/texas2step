@@ -18,7 +18,7 @@ if [ "$1" = "purge" ]; then
     rm -f /etc/systemd/system/timers.target.wants/texas2step-update.timer
     # Saved results, and downloads of texas2step update. The texas2step system user is
     # kept, as Debian policy advises.
-    rm -rf /var/lib/texas2step /var/cache/texas2step
+    rm -rf /var/lib/texas2step /var/cache/texas2step /run/texas2step
     # The access key and standing phrases, and the dated backups texas2step config set,
     # add-location and merge --write keep beside the settings file, so dpkg can remove
     # /etc/texas2step. A file the operator put there, such as a logo or their own word

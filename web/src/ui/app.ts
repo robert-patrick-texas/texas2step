@@ -1,5 +1,5 @@
 // Application shell: routing, theme, server selection and shared settings.
-import { appPath, Endpoint, type Family, routeOf, whenDenied, whenRefused } from "../engine/net";
+import { appPath, Endpoint, type Family, routeOf, setPage, whenDenied, whenRefused } from "../engine/net";
 import type { AccessStatus, Location, ServerInfo, WhoAmI } from "../types";
 import { Awake } from "./awake";
 import { $, clear, h, save, setText, store } from "./dom";
@@ -167,6 +167,7 @@ export class App {
     }
     const to = this.match(path);
     if (!to) return this.navigate(this.home, true);
+    setPage(to.page); // a hidden page stops sending, so what's sent is the shown page's
     const address = this.address();
     const from = this.current;
     let page = this.kept.get(to.page);

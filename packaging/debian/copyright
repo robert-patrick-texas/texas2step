@@ -26,6 +26,19 @@ Comment: The built-in words for access codes: the EFF's short word list 1
  (https://www.eff.org/dice), without its dice numbers and twelve words that are
  hard to tell apart over the phone, as the file's header lists.
 
+Files: opt/texas2step/venv/lib/python3*/site-packages/texas2step/documents/*
+Copyright: none
+License: public-domain
+Comment: The text each download starts with: the Declaration of Independence and the
+ Constitution of the United States (National Archives transcriptions), the Texas
+ Declaration of Independence and the Constitution of the Republic of Texas (Wikisource
+ transcriptions), and the Texas Constitution as amended (Texas Legislative Council).
+ Each file names its source.
+
+License: public-domain
+ Founding documents and constitutions: the laws and charters of governments, free of
+ copyright, and in the case of the 1776, 1787 and 1836 texts long out of it.
+
 License: Apache-2.0
  Licensed under the Apache License, Version 2.0 (the "License"); you may not
  use this file except in compliance with the License. You may obtain a copy of

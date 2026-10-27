@@ -17,8 +17,8 @@ headers. Measurement endpoints add `Server-Timing` so clients can subtract serve
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/v1/ping` | Minimal response for round-trip timing. `Server-Timing: app;dur=…` |
-| GET | `/api/v1/down?bytes=N` | Exactly N random bytes (≤ `max_download_bytes`) with `Content-Length` |
-| GET | `/api/v1/down?seconds=S` | Stream random bytes for S seconds (chunked, ≤ `max_stream_seconds`) |
+| GET | `/api/v1/down?bytes=N` | Exactly N bytes (≤ `max_download_bytes`) with `Content-Length`: [five founding documents](methodology.md#what-the-tests-send) as text, then random bytes |
+| GET | `/api/v1/down?seconds=S` | The documents, then random bytes for S seconds (chunked, ≤ `max_stream_seconds`) |
 | POST | `/api/v1/up` | Read and discard the body; returns `{"bytes", "rx_ms", "mbps"}` measured server-side |
 | WS | `/api/v1/ws` | Echo every message unchanged; closed with code `4001` once `session_max_runtime` is up |
 | POST | `/api/v1/rtc/offer` | WebRTC signalling for the UDP probe (see below) |
@@ -52,6 +52,12 @@ and `_`) to every request of one test: once the server has let a test in, it let
 rest of it in for up to 10 minutes, so a running test finishes. The browser and the
 command line do this.
 
+Any request may also carry `?session=<id>` (4 to 32 letters, digits, `-` and `_`) and
+`?page=<name>` (`test`, `monitor`, `diag`, `history`, `help`, `api`, `cli` or `server`).
+The server's [active clients](clients.md) list tells sessions apart by them; without one,
+requests go by address and User-Agent. The page makes a new id each time it loads, and
+the command line one for each run. Nothing else changes with them.
+
 ### UDP probe protocol
 
 `POST /api/v1/rtc/offer` with `{"sdp": "<offer>", "type": "offer"}` returns
@@ -60,7 +66,8 @@ sending the offer. The offer must include data channels:
 
 * `probe`: create it with `ordered: false, maxRetransmits: 0`. Every message is echoed,
   verbatim unless stamps are on. texas2step clients send
-  `u32 sequence (LE) | f64 send time ms (LE) | padding`, 200 bytes in all.
+  `u32 sequence (LE) | f64 send time ms (LE) | padding`, 200 bytes in all on the Test
+  page, with random padding, new for each probe.
 * `control` (reliable, optional): send `{"op":"stats"}` to receive
   `{"op":"stats","rx":…,"tx":…,"rx_bytes":…}`, or `{"op":"reset"}` to zero the counters.
   `{"op":"addr"}` returns both ends of the UDP path ICE chose:
@@ -102,6 +109,7 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |
 | GET | `/api/v1/health` | `{"status": "ok", "version": …}`; without the version for clients outside `internal_networks`, or that need an [access code](#access-codes) |
+| GET | `/api/v1/clients` | The pages and command-line runs active now, and in `ended` those of the last hour, as `texas2step clients --json` prints them; only for `internal_networks`, and `404` on a server without them. See [Active clients](clients.md#over-the-api). |
 
 With a traffic limit, `traffic` says whether this client may start a test, and if not,
 what it is told:

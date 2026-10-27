@@ -21,7 +21,9 @@ make dev         # http://127.0.0.1:8080
 ```
 
 The built UI is committed under `src/texas2step/static/`, so the server runs without
-Node. To work on the UI, run `make web-watch` in a second terminal. It rebuilds the
+Node. `make dev` keeps saved results in `texas2step.db` and the active clients in
+`texas2step-clients.db`, both in the working folder; `TEXAS2STEP_CLIENTS_FILE=texas2step-clients.db
+uv run texas2step clients` lists them. To work on the UI, run `make web-watch` in a second terminal. It rebuilds the
 bundle on every change, unminified and with source maps.
 
 To try the server under a path prefix the way nginx publishes it, send the header

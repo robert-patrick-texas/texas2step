@@ -175,6 +175,9 @@ export class RtcProbe {
     const now = performance.now();
     if (this.probe.readyState !== "open" || this.probe.bufferedAmount > MAX_QUEUED) return now;
     const buf = new ArrayBuffer(Math.max(size, HEADER));
+    // Random padding after the header, new for each probe; the echo brings it back.
+    const pad = new Uint8Array(buf, HEADER);
+    for (let at = 0; at < pad.length; at += 65536) crypto.getRandomValues(pad.subarray(at, at + 65536));
     const view = new DataView(buf);
     view.setUint32(0, seq >>> 0, true);
     view.setFloat64(4, now, true);

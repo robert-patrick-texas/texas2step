@@ -228,6 +228,9 @@ class Session:
     rx: int = 0
     tx: int = 0
     rx_bytes: int = 0
+    bytes_in: int = 0  # every probe's bytes each way, which "reset" leaves: for clients.py
+    bytes_out: int = 0
+    client: str | None = None  # the page's or CLI run's session (clients.py)
     stamp: bool = False
     whose: str | None = None  # the client's kind for a traffic limit (traffic.TrafficMeter.kind)
     ip: str | None = None  # with access codes, the client's address: a block set by hand ends it
@@ -340,6 +343,7 @@ class RtcEcho:
         whose: str | None = None,
         ip: str | None = None,
         issued: int | None = None,
+        client: str | None = None,
     ) -> dict[str, str]:
         if not self.enabled:
             raise RtcUnavailable("WebRTC probing is disabled or aiortc is not installed")
@@ -350,7 +354,9 @@ class RtcEcho:
         # STUN server, which an internal deployment should not contact unasked.
         config = RTCConfiguration(iceServers=[RTCIceServer(urls=url) for url in self.ice_servers])
         pc = RTCPeerConnection(configuration=config)
-        session = Session(id=secrets.token_urlsafe(8), pc=pc, whose=whose, ip=ip, issued=issued)
+        session = Session(
+            id=secrets.token_urlsafe(8), pc=pc, whose=whose, ip=ip, issued=issued, client=client
+        )
         self.sessions[session.id] = session
 
         @pc.on("datachannel")
@@ -362,6 +368,7 @@ class RtcEcho:
                     now = time.monotonic()
                     session.rx += 1
                     session.rx_bytes += len(message)
+                    session.bytes_in += len(message)
                     session.last_seen = now
                     counted = session.profile != "path"
                     if session.limited and len(message) > PATH_BYTES:
@@ -372,6 +379,7 @@ class RtcEcho:
                         message = message[:STAMP_AT] + stamp + message[end:]
                     channel.send(message)
                     session.tx += 1
+                    session.bytes_out += len(message)
                     if counted and self.meter is not None and session.whose is not None:
                         n = len(message)
                         self.meter.add(

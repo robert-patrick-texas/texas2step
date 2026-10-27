@@ -105,7 +105,9 @@ server itself), and `404` to everyone else, as if they weren't there:
 * the current access code;
 * lockouts and blocks (`/api/v1/access/blocks`);
 * the API explorer (`/api/docs`, `/api/openapi.json`);
-* the server-side measurements (`/api/v1/measure/*`).
+* the server-side measurements (`/api/v1/measure/*`);
+* the [active clients](clients.md) (`/api/v1/clients`), which a server without
+  `internal_networks` doesn't answer at all.
 
 They also refuse, with `403`, a browser's request made for a page on another site. They
 trust the address a request comes from, and CORS lets any page read the answer, so a
@@ -154,10 +156,17 @@ A speed test exists to move a lot of data, so each part has a cap:
   never their text. nginx logs texas2step's requests without their query strings, so its
   access log never holds a pass. Wrong codes, lockouts, blocks and each use of a phrase
   are warnings in the journal, with the address they came from.
+* **Active clients.** Pages are told apart by a random id each page load makes and keeps
+  in its memory, sent with its requests: no cookie, nothing kept in the browser, nothing
+  that follows a visitor to the next visit. `/run/texas2step/clients.db`, in memory,
+  holds the sessions of the last hour, at most `clients_max` of them, with their
+  addresses and User-Agents; a reboot clears it. The journal keeps a line for each start
+  and end. See [Active clients](clients.md).
 * **Secrets apart from settings.** The access key and standing phrases are in their own
   files, readable by root and the service only; `config.toml` holds no secret.
 * **The service's files** under `/var/lib/texas2step` (saved results, lockouts, traffic
-  figures) belong to the service user. The traffic figures hold no addresses.
+  figures) and `/run/texas2step` (active clients) belong to the service user. The traffic
+  figures hold no addresses.
 * **No third parties.** The web page loads nothing from other sites: no CDN, fonts,
   analytics or telemetry. No public STUN server is used unless listed in `ice_servers`.
 * **A Content-Security-Policy** on the page and the API explorer lets only their own

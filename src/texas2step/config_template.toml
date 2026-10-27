@@ -16,6 +16,8 @@
 # server_url_v6_http3 = ""
 
 # --- Limits --------------------------------------------------------------------------
+# download_documents = true             # downloads start with five founding documents as
+#                                       # text; false: random from the first byte
 # max_download_bytes = 1073741824
 # max_upload_bytes = 1073741824
 # max_stream_seconds = 60.0
@@ -101,6 +103,10 @@ results_path = "/var/lib/texas2step/results.db"
 # traffic_message = "Testing temporarily disabled."  # what refused visitors read
 # traffic_url = ""                      # if set, "Click here to continue." links here, such
 #                                       # as another texas2step server or the desk's page
+
+# --- Active clients (docs/clients.md) ------------------------------------------------------
+# clients_file = "/run/texas2step/clients.db"  # sudo texas2step clients; in memory (tmpfs)
+# clients_max = 1000                    # sessions listed, active and the last hour's ended
 
 # --- Branding and themes -------------------------------------------------------------------
 # brand_name = "texas2step"             # header and browser tab

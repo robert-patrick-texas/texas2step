@@ -7,7 +7,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from texas2step import __version__
+from texas2step import __version__, payload
 from texas2step.app import create_app
 from texas2step.config import Link, Location, Settings
 
@@ -27,21 +27,43 @@ def test_download_exact_size(client):
     assert len(r.content) == 3_000_000
     assert r.headers["content-length"] == "3000000"
     assert r.headers["content-type"] == "application/octet-stream"
-    # Incompressible: not a run of one repeated byte.
+    # The documents first, then incompressible: not a run of one repeated byte.
+    text = payload.TEXT
+    assert r.content.startswith(b"# Declaration of Independence\n")
+    assert r.content[: len(text)] == text
+    assert len(set(r.content[len(text) : len(text) + 4096])) > 200
+
+
+def test_download_documents_are_the_five_in_order():
+    text = payload.TEXT.decode()  # UTF-8 throughout
+    titles = [line for line in text.splitlines() if line.startswith("# ")]
+    assert len(titles) == len(payload.DOCUMENTS) == 5
+    assert titles[0] == "# Declaration of Independence"
+    assert "Texas" in titles[-1]
+    assert 700_000 < len(payload.TEXT) < 900_000
+
+
+def test_download_random_from_the_first_byte_without_documents(client, settings):
+    settings.download_documents = False
+    r = client.get("/api/v1/down", params={"bytes": 100_000})
+    assert len(r.content) == 100_000
     assert len(set(r.content[:4096])) > 200
+    seconds = client.get("/api/v1/down", params={"seconds": 0.1}).content
+    assert not seconds.startswith(b"# ")
 
 
 def test_download_zero_and_cap(client, settings):
     assert client.get("/api/v1/down", params={"bytes": 0}).content == b""
     settings.max_download_bytes = 1000
-    assert len(client.get("/api/v1/down", params={"bytes": 10**9}).content) == 1000
+    assert client.get("/api/v1/down", params={"bytes": 10**9}).content == payload.TEXT[:1000]
     assert client.get("/api/v1/down", params={"bytes": -1}).status_code == 422
 
 
 def test_download_for_seconds(client):
     r = client.get("/api/v1/down", params={"seconds": 0.2})
     assert r.status_code == 200
-    assert len(r.content) > 0
+    assert r.content.startswith(payload.TEXT)
+    assert len(r.content) > len(payload.TEXT)
     assert "content-length" not in r.headers
 
 

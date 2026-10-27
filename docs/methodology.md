@@ -73,8 +73,10 @@ than a fixed number of fixed-size transfers:
   256 KiB and grows until each request takes about a second, which is large enough for
   TCP to reach steady state while still giving many samples. The Python engine streams
   one chunked body per stream instead.
-* Payloads are random bytes generated once and served from memory, so compression
-  cannot inflate results and the server never touches disk.
+* Payloads are served from memory, so the server never touches disk: each download
+  starts with five founding documents as text, about 770 KB, then random bytes made once
+  when the server starts; uploads are random throughout. See
+  [What the tests send](#what-the-tests-send).
 
 From the 100 ms timeline:
 
@@ -163,8 +165,8 @@ retransmits, so a packet the network drops stays dropped.
    `control` (reliable), gathers ICE candidates, and posts the offer to
    `POST /api/v1/rtc/offer`. The server (aiortc) answers.
 2. The client asks the server to **stamp** its echoes, where the server can.
-3. The client sends numbered probes (`u32 sequence | f64 send time | padding`) on a fixed
-   schedule. They are 200 bytes, at least the size of a voice call's packets, so a path
+3. The client sends numbered probes (`u32 sequence | f64 send time | random padding`) on
+   a fixed schedule. They are 200 bytes, at least the size of a voice call's packets, so a path
    that can't carry them can't carry calls. Pacing works against the schedule, not
    `setInterval`, so timer clamping cannot drop probes.
 4. The server echoes each probe and counts what it receives and sends. A stamped echo
@@ -448,6 +450,64 @@ reports the MAC address of the NIC the kernel routes that connection out of
 over loopback and has none. It prints both, `--save` stores them with the result, and
 `--no-local` leaves them out. A server measuring for `/api/v1/measure/*` keeps its own
 to itself.
+
+## What the tests send
+
+What the tests put in their packets. On the wire none of it shows: TLS encrypts every
+HTTPS payload, and DTLS every UDP one, so a capture sees ciphertext either way.
+
+**Downloads** (`GET /api/v1/down`) start with five founding documents, as UTF-8 Markdown
+text, about 770 KB together, in the order they were written:
+
+1. The Declaration of Independence, 1776 (the National Archives' transcription)
+2. The Constitution of the United States, 1787, with its 27 amendments (the National
+   Archives' transcriptions)
+3. The Texas Declaration of Independence, March 2, 1836
+4. The Constitution of the Republic of Texas, March 17, 1836
+5. The Texas Constitution of 1876, as amended (the Texas Legislative Council's text)
+
+They are public domain, and ship with the package in `src/texas2step/documents/`, each
+naming its source at its top. Random bytes follow to the end: 8 MiB from the operating
+system's random source, made when each worker starts and sent in turn, round and round.
+Every response starts with the documents: each stream of a test, and each request a
+stream makes. A download shorter than them is the start of their text. With
+`download_documents = false`, downloads are random from the first byte.
+
+Text compresses and random bytes don't, but nothing between the server and the client
+compresses a test: nginx's gzip is off for texas2step, and TLS and QUIC don't compress.
+Only a device that decrypts and compresses traffic, such as a WAN optimizer doing TLS
+interception, would carry the text faster. Even then, a test's 4 streams carry 3.1 MB of
+text in their first moments, inside the ramp-up window the stable rate leaves out on any
+path faster than about 12 Mb/s. A site behind such a device can turn the documents off.
+
+**Uploads** are random. The browser fills 1 MiB from `crypto.getRandomValues` once and
+sends it over and over, each request cut to its size; the command line sends the 8 MiB
+pool in turn. The server reads and discards them.
+
+**UDP probes** have a 12-byte header, little-endian: the probe's sequence number (`u32`)
+and the sender's clock in milliseconds (`f64`). Random bytes fill the rest, new for each
+probe. The server echoes each one as it came, except that with stamps on, bytes 12 to 23
+of the echo become its own clock when the probe arrived (`f64`) and how many probes it
+had received (`u32`).
+
+| Probes | Bytes each |
+|---|---|
+| Monitor's Path profile; Diag's UDP rows | 64; Path also offers 200 and 1,100 |
+| Packet loss on the Test page; the command line's `loss` | 200 |
+| Monitor's voice packets | 100, 200 or 300 |
+| Monitor's video packets, in a burst for each frame | 1,100 |
+
+A DTLS record and an SCTP chunk carry each probe, so its UDP datagram is 65 bytes longer
+with the cipher browsers and the server agree on (DTLS 1.2, AES-128-GCM): 129 bytes for
+a 64-byte probe, 1,165 for a video packet, under what a browser sends in one packet.
+
+**WebSocket probes** (latency under load, Diag's WebSocket rows, and Monitor where UDP
+can't get through) are the 12-byte header alone, echoed as they came.
+
+**Everything else is small**: `/ping` answers `{"pong":true}`, and the page's other
+requests and answers are JSON. Each request carries its page's session and name as
+`?session=` and `?page=` (see [Active clients](clients.md)), and each of a test's
+downloads and uploads the test's `?test=`.
 
 ## Known limitations
 

@@ -12,6 +12,7 @@ import contextlib
 import contextvars
 import itertools
 import json
+import os
 import secrets
 import ssl
 import struct
@@ -25,6 +26,7 @@ import httpx
 
 from . import __version__, iface, payload, quality
 from .stats import bufferbloat_grade, summarize, summarize_throughput
+from .store import ID_LETTERS
 
 API = "/api/v1"
 BIN_MS = 100
@@ -41,6 +43,24 @@ PASS: contextvars.ContextVar[str] = contextvars.ContextVar("texas2step_pass", de
 TEST: contextvars.ContextVar[str] = contextvars.ContextVar("texas2step_test", default="")
 
 
+# Who is asking, sent as ?session= and ?page= with every request, so the server's
+# texas2step clients can tell runs apart (docs/clients.md): one id for each run of the
+# command line, and "server" with a new id for each test the server runs (/measure).
+def new_session() -> str:
+    return "".join(secrets.choice(ID_LETTERS) for _ in range(8))
+
+
+RUN = new_session()
+SESSION: contextvars.ContextVar[str] = contextvars.ContextVar("texas2step_session", default=RUN)
+PAGE: contextvars.ContextVar[str] = contextvars.ContextVar("texas2step_page", default="cli")
+
+
+def _params() -> dict[str, str]:
+    """What every request carries: the session, and the pass if there is one."""
+    params = {"session": SESSION.get(), "page": PAGE.get()}
+    return params | {"pass": PASS.get()} if PASS.get() else params
+
+
 def _base(url: str) -> str:
     url = url.strip().rstrip("/")
     if "://" not in url:
@@ -49,8 +69,7 @@ def _base(url: str) -> str:
 
 
 def _ws_url(base: str) -> str:
-    url = "ws" + base.removeprefix("http") + f"{API}/ws"
-    return f"{url}?{urlencode({'pass': PASS.get()})}" if PASS.get() else url
+    return "ws" + base.removeprefix("http") + f"{API}/ws?{urlencode(_params())}"
 
 
 def server_timing_ms(header: str | None, metric: str = "app") -> float:
@@ -71,7 +90,7 @@ def _client(streams: int = 1, timeout: float = 10.0) -> httpx.AsyncClient:
         timeout=httpx.Timeout(timeout, read=timeout),
         limits=httpx.Limits(max_connections=streams + 2, max_keepalive_connections=streams + 2),
         headers={"user-agent": USER_AGENT},
-        params={"pass": PASS.get()} if PASS.get() else None,
+        params=_params(),
     )
 
 
@@ -134,9 +153,7 @@ async def new_connection(base: str, limit: float = 5.0) -> dict[str, float] | No
     url = urlsplit(base)
     tls = url.scheme == "https"
     host = url.hostname or ""
-    path = f"{url.path.rstrip('/')}{API}/ping"
-    if PASS.get():
-        path += "?" + urlencode({"pass": PASS.get()})
+    path = f"{url.path.rstrip('/')}{API}/ping?{urlencode(_params())}"
     request = (
         f"GET {path} HTTP/1.1\r\nHost: {url.netloc}\r\nUser-Agent: {USER_AGENT}\r\n"
         "Connection: close\r\n\r\n"
@@ -300,7 +317,7 @@ async def _throughput(
                 if now >= deadline:
                     return
                 n = min(payload.CHUNK // 4, cap - sent)
-                yield payload.chunk(n, sent)
+                yield payload.span(sent, n)
                 # The previous chunk has been accepted by the transport once we resume.
                 bins.add(n, time.perf_counter())
                 per_stream[i] += n
@@ -388,7 +405,6 @@ async def measure_loss(
 
     base = _base(target)
     size = max(size, PROBE.size)
-    pad = bytes(size - PROBE.size)
     sent_at: dict[int, float] = {}
     rtts: list[float | None] = [None] * packets
     server: list[float | None] = [None] * packets
@@ -475,7 +491,7 @@ async def measure_loss(
                 await asyncio.sleep(delay)
             now = time.perf_counter() * 1000
             sent_at[seq] = now
-            probe.send(PROBE.pack(seq, now) + pad)
+            probe.send(PROBE.pack(seq, now) + os.urandom(size - PROBE.size))  # random padding
             if progress and seq % 25 == 0:
                 await _emit(progress, "loss", {"sent": seq + 1})
 
