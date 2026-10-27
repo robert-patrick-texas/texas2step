@@ -330,7 +330,8 @@ func (m *Monitor) connect(d *Dest) error {
 
 // udp is a UDP session to one server, set up for the profile.
 func (m *Monitor) udp(d *Dest) (probe, string, error) {
-	rtc, err := engine.ConnectRtc(m.ctx, d.t, d.info.ICE(), "", 8*time.Second)
+	family := map[string]string{"tcp4": "ipv4", "tcp6": "ipv6"}[d.t.Family] // -4 or -6: UDP holds to it too
+	rtc, err := engine.ConnectRtc(m.ctx, d.t, d.info.ICE(), family, 8*time.Second)
 	if err != nil {
 		return nil, "", err
 	}

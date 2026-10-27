@@ -218,6 +218,22 @@ func do(c *http.Client, req *http.Request, out any) (*http.Response, error) {
 	return r, nil
 }
 
+// HasAddress is whether base's name has an address in fam, "IPv4" or "IPv6": an A or
+// AAAA record, or is one, so it can be reached in that family at all.
+func HasAddress(ctx context.Context, base, fam string) bool {
+	h := base
+	if u, err := url.Parse(base); err == nil {
+		h = u.Hostname()
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return (ip.To4() != nil) == (fam == "IPv4")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ips, err := net.DefaultResolver.LookupIP(ctx, map[string]string{"IPv4": "ip4", "IPv6": "ip6"}[fam], h)
+	return err == nil && len(ips) > 0
+}
+
 // ErrNeedsCode is a server asking for an access code that wasn't given.
 var ErrNeedsCode = errors.New("asks for an access code: add --code, or set TEXAS2STEP_CODE")
 

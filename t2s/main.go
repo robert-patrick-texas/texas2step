@@ -111,10 +111,11 @@ func explain(err error) string {
 // options are a command's flags; parse takes them before and after its arguments.
 type options struct {
 	*flag.FlagSet
-	about string
-	json  bool
-	code  string
-	http2 bool
+	about  string
+	json   bool
+	code   string
+	http2  bool
+	family string // "tcp4" or "tcp6" to hold every connection to one address family
 }
 
 func newOptions(name, args, about string) *options {
@@ -138,6 +139,9 @@ func (o *options) help() string {
 	o.VisitAll(func(fl *flag.Flag) {
 		name, use := flag.UnquoteUsage(fl)
 		left := "  --" + fl.Name
+		if len(fl.Name) == 1 {
+			left = "  -" + fl.Name // -4, -6, -k
+		}
 		if name != "" {
 			left += " " + strings.ToUpper(name)
 		}
@@ -184,7 +188,7 @@ func (o *options) set(name string) bool {
 // unlock makes a target for url, with the pass --code buys where the server asks for one.
 func (o *options) unlock(ctx context.Context, url string) (*engine.Target, error) {
 	t := engine.NewTarget(url)
-	t.HTTP2 = o.http2
+	t.HTTP2, t.Family = o.http2, o.family
 	pass, err := t.Unlock(ctx, strings.TrimSpace(o.code))
 	if err != nil {
 		return nil, fmt.Errorf("%s %w", t.Base, err)

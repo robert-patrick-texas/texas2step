@@ -204,7 +204,7 @@ func (d *Diag) Start(ctx context.Context, families []string) error {
 			m := &Method{Fam: fam, Kind: kind, t: d.t.With(base, network), Tone: "trying"}
 			m.Port = defaultPort(m.t, kind)
 			switch {
-			case kind != "udp" && !hasAddress(ctx, m.t.Base, fam):
+			case kind != "udp" && !engine.HasAddress(ctx, m.t.Base, fam):
 				m.off(fmt.Sprintf("%s has no %s address", host(m.t.Base), fam))
 			case kind == "http2" && !m.t.HTTPS():
 				m.off("HTTP/2 needs https://")
@@ -237,19 +237,6 @@ func host(base string) string {
 		return base
 	}
 	return u.Hostname()
-}
-
-// hasAddress is whether base's name has an address in fam (an A or AAAA record, or is
-// one), so a row in that family can be tried at all.
-func hasAddress(ctx context.Context, base, fam string) bool {
-	h := host(base)
-	if ip := net.ParseIP(h); ip != nil {
-		return (ip.To4() != nil) == (fam == "IPv4")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	ips, err := net.DefaultResolver.LookupIP(ctx, map[string]string{"IPv4": "ip4", "IPv6": "ip6"}[fam], h)
-	return err == nil && len(ips) > 0
 }
 
 func defaultPort(t *engine.Target, kind string) string {

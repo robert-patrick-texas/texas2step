@@ -165,6 +165,7 @@ panel stays on the terminal, with the totals since it started.
 | `--video KBPS` | the video call's rate (default 1000) |
 | `--window SECONDS` | what the figures cover, up to 900 (default 60) |
 | `--seconds N` | stop after this long, from the first probe: the last probes get 1.5 seconds to come back, so a call's last 10 seconds are scored too (default: until Ctrl-C) |
+| `-4`, `-6` | every server over IPv4, or every one over IPv6, so two servers compare over one family (default: each by the address WebRTC finds) |
 | `--code`, `--json` | as for a test |
 
 A server that stops answering is asked over HTTPS every 2 seconds until it answers, then

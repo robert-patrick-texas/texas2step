@@ -26,9 +26,23 @@ func cmdMonitor(ctx context.Context, args []string) error {
 	video := o.Float64("video", 1000, "the video call's kb/s")
 	window := o.Float64("window", 60, "seconds the figures cover, up to 900")
 	seconds := o.Float64("seconds", 0, "stop after this many seconds (default: until Ctrl-C, or a server's limit)")
+	only4 := o.Bool("4", false, "IPv4 only: every server over IPv4, so two compare on one family")
+	only6 := o.Bool("6", false, "IPv6 only: every server over IPv6")
 	found, err := o.parse(args, 1, 2)
 	if err != nil {
 		return err
+	}
+	fam := ""
+	switch {
+	case *only4 && !*only6:
+		o.family, fam = "tcp4", "IPv4"
+	case *only6 && !*only4:
+		o.family, fam = "tcp6", "IPv6"
+	}
+	for _, url := range found {
+		if fam != "" && !engine.HasAddress(ctx, engine.Base(url), fam) {
+			return fmt.Errorf("%s has no %s address", engine.Base(url), fam)
+		}
 	}
 	p := strings.ToLower(strings.TrimSpace(*profile))
 	if p != "" && p != "path" && p != "voice" && p != "video" {

@@ -83,7 +83,7 @@ def test_the_report_reads_as_texas2step_runs(t2s, live_server):
 
 
 def test_monitor_probes_and_sums_up(t2s, live_server):
-    r = run(t2s, "monitor", live_server, "--json", "--seconds", "3", "--rate", "20")
+    r = run(t2s, "monitor", live_server, "--json", "--seconds", "3", "--rate", "20", "-4")
     assert r.returncode == 0, r.stderr
     lines = [json.loads(line) for line in r.stdout.splitlines()]
     kinds = {line["type"] for line in lines}
@@ -91,6 +91,12 @@ def test_monitor_probes_and_sums_up(t2s, live_server):
     total = lines[-1]["servers"][0]
     assert total["sent"] >= 40
     assert total["lost"] <= 2
+
+
+def test_monitor_holds_to_one_family(t2s, live_server):
+    r = run(t2s, "monitor", live_server, "-6", "--seconds", "1", timeout=30)
+    assert r.returncode == 1
+    assert r.stderr.strip() == f"t2s: {live_server} has no IPv6 address"  # 127.0.0.1
 
 
 def test_diag_answers_on_the_servers_own_address(t2s, live_server):
