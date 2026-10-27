@@ -143,6 +143,24 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.5.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.5.0) (2026-10-27)
+
+- [x] **Active clients**: `texas2step clients` lists each page and command-line run
+  using the server, with its page, what it is doing and the bytes it moved, then those
+  that ended in the last hour; `/api/v1/clients` for the desk, and a journal line for
+  each start and end. Pages are told apart by a random id each page load keeps in
+  memory, so two browsers behind one address are two sessions, without a cookie.
+  `clients_max` caps the list, and the journal warns when it is full.
+- [x] **Founding documents in downloads**: each download starts with the Declaration of
+  Independence, the U.S. Constitution, the Texas Declaration of Independence, the
+  Constitution of the Republic of Texas and the Texas Constitution, as text, then random
+  bytes; `download_documents` turns them off. UDP probes carry random padding.
+- [x] **Servers measure each other with a pass** issued with the access key they share,
+  so a measuring server needn't be in the other's `internal_networks`.
+- [x] Monitor and Diag keep the strictest time limit of their own site and each server
+  they test, with its Runtime box.
+- [x] History's line fits on one row; a weekly or monthly code's change shows its date.
+
 ### [2.4.5](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.4.5) (2026-10-26)
 
 - [x] **A ? tab**: what the tool does, in a one-minute summary for anyone, then more on
