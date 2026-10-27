@@ -731,5 +731,5 @@ export class TestView implements View {
 
 /** A saved result's id, as the service desk asks for it: set apart, and selected whole with one click. */
 function savedId(id: string): HTMLElement {
-  return h("span", { class: "saved-id", title: "This result's id: the service desk can open the result with it" }, id);
+  return h("span", { class: "code-chip", title: "This result's id: the service desk can open the result with it" }, id);
 }

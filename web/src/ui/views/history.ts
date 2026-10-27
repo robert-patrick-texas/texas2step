@@ -60,7 +60,7 @@ export class HistoryView implements View {
     const until = code.previous_until === code.changes_at ? "then" : at(code.previous_until ?? "");
     const before = code.previous && code.previous_until ? ` · ${code.previous} still works until ${until}` : "";
     desk.querySelector(".desk-code")?.remove();
-    desk.prepend(h("p", { class: "desk-code", title: `The code visitors enter (${code.interval}, ${code.timezone})` }, "Access code ", h("strong", {}, code.code), h("span", { class: "cell-sub" }, ` ${changes}${before}`)));
+    desk.prepend(h("p", { class: "desk-code", title: `The code visitors enter (${code.interval}, ${code.timezone})` }, "Access code ", h("span", { class: "code-chip" }, code.code), h("span", { class: "cell-sub" }, ` ${changes}${before}`)));
   }
 
   private async load(body: HTMLElement): Promise<void> {

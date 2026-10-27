@@ -1053,9 +1053,9 @@ a.brand-org:hover,
   min-height: 1.5em;
 }
 
-/* A saved result's id, in the status line and the line for the service desk, as on a ticket:
-   easy to find and read out. */
-.saved-id {
+/* A code someone reads out or copies, as on a ticket: a saved result's id on Test, the
+   access code on History. Easy to find, and one click selects all of it. */
+.code-chip {
   padding: 1px 7px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--sun-1) 22%, var(--surface));
@@ -2538,13 +2538,6 @@ a.brand-org:hover,
   align-self: center;
   margin: 0;
   color: var(--ink-2);
-}
-
-.desk-code strong {
-  font-family: var(--mono);
-  font-size: 1.08em;
-  color: var(--ink);
-  letter-spacing: 0.02em;
 }
 
 .desk-tools {
