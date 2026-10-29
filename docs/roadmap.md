@@ -159,6 +159,15 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.9.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.9.0) (2026-10-29)
+
+- [x] **What the header and footer show:** `header_logo`, `header_size` and `header_theme`
+  take the logo, the page size and the theme picker out of the header; `footer_line` the
+  footer's bottom line; `brand_tagline` sets that line's last words, or none.
+- [x] **The code screen alone:** `access_card_only` shows a visitor who needs the access
+  code only the code box, under `brand_notice`, with no header or footer until the code
+  is in.
+
 ### [2.8.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.8.0) (2026-10-27)
 
 - [x] **t2s for macOS**, on Apple silicon and Intel, unsigned: `curl` downloads run as

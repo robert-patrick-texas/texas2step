@@ -6,7 +6,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/pion/ice/v4 v4.4.8
 	github.com/pion/logging v0.2.4
-	github.com/pion/webrtc/v4 v4.2.25
+	github.com/pion/webrtc/v4 v4.2.26
 	github.com/quic-go/quic-go v0.64.1
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
@@ -30,7 +30,7 @@ require (
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 )
