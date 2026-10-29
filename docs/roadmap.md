@@ -31,7 +31,10 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
   makes them fall back to TCP. It needs a listener and firewall rules for each port.
 - [ ] **DNS lookup time.** Slow or overloaded resolvers make every new site slow. A browser
   only looks up a name it hasn't cached, so each test would need a fresh name under a
-  wildcard DNS record.
+  wildcard DNS record. If that zone is signed with DNSSEC, a validating resolver may
+  answer fresh names from the signed wildcard it already holds (RFC 8198), without asking
+  the zone's DNS server, and the test would time only the trip to the resolver. Whether it
+  can depends on how the zone is signed, so check that first.
 
 ### Test page
 
