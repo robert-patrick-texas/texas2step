@@ -479,6 +479,58 @@ def test_brand_credit_is_a_link_text_or_nothing(tmp_path):
     assert "Measurements run in your browser" in none  # the rest of the footer stays
 
 
+def test_the_header_shows_what_the_site_chooses(tmp_path):
+    logo = tmp_path / "logo.svg"
+    logo.write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"/>')
+
+    def page(**kw):
+        with TestClient(create_app(Settings(results_path=str(tmp_path / "r.db"), **kw))) as c:
+            return c.get("/").text
+
+    default = page()
+    assert 'id="size-picker"' in default and 'id="theme-menu"' in default
+    assert "data-fixed" not in default
+    bare = page(header_logo=False, header_size=False, header_theme=False, default_theme="texas")
+    assert 'class="bm-star"' not in bare and "brand-mark" not in bare
+    assert 'class="brand-word">texas<em>2</em>step</span>' in bare  # the name stays
+    assert 'id="size-picker"' not in bare and 'id="theme-menu"' not in bare
+    assert '<html lang="en" data-default-theme="texas" data-fixed-theme data-fixed-size>' in bare
+    # Without the logo in the header, it is still the tab's icon.
+    hidden = page(brand_logo=str(logo), header_logo=False)
+    assert "brand-mark" not in hidden and 'class="bm-star"' not in hidden
+    assert '<link rel="icon" href="brand/logo?v=' in hidden
+
+
+def test_the_footer_line_and_tagline_are_the_sites_to_choose(tmp_path):
+    def footer(**kw):
+        with TestClient(create_app(Settings(results_path=str(tmp_path / "r.db"), **kw))) as c:
+            found = re.search(r'<footer class="footer">.*?</footer>', c.get("/").text, re.S)
+        return found.group(0) if found else ""
+
+    dot = '<span class="dot" aria-hidden="true">·</span>'
+    tagline = (
+        '<span class="footer-tagline">'
+        "Measurements run in your browser against the selected server</span>"
+    )
+    assert footer().endswith(f"texas2step</a>{dot}{tagline}</footer>")
+    mine = footer(brand_tagline="Tests run <here>.", brand_organization="Acme IT")
+    assert mine.startswith(f'<footer class="footer"><span>Acme IT</span>{dot}')
+    assert mine.endswith(
+        f'{dot}<span class="footer-tagline">Tests run &lt;here&gt;.</span></footer>'
+    )
+    # No tagline, no credit: no dot left over.
+    assert footer(brand_tagline="").endswith("texas2step</a></footer>")
+    assert footer(brand_tagline="", brand_credit="none", brand_organization="Acme IT") == (
+        '<footer class="footer"><span>Acme IT</span></footer>'
+    )
+    # Without the line, the organization's own footer stays; with neither, no footer.
+    own = footer(footer_line=False, brand_footer="For official use only.")
+    assert "For official use only." in own and "footer-version" not in own
+    assert "footer-tagline" not in own and dot not in own
+    assert footer(footer_line=False) == ""
+    assert footer(brand_tagline="", brand_credit="none") == ""
+
+
 def test_hidden_pages_lose_their_tabs(tmp_path):
     settings = Settings(results_path=str(tmp_path / "r.db"), page_test=False, page_api=False)
     with TestClient(create_app(settings)) as c:

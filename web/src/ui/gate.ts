@@ -35,14 +35,21 @@ export async function admit(origin: Endpoint): Promise<AccessStatus | null> {
   const saved = store<Pass>(KEY, { pass: "", expires: 0 });
   expires = saved.pass ? saved.expires : 0; // one that ran out: the code is asked for again
   if (passHeld()) setPass(saved.pass);
+  // A site that shows the code screen alone hid the header and footer before first paint,
+  // in case the code is asked for (index.html); they're back unless it is.
+  const root = document.documentElement;
   let status: AccessStatus;
   try {
     status = await origin.json<AccessStatus>("/access");
   } catch {
+    root.classList.remove("gated");
     return null;
   }
   note = status.note ?? "";
-  if (!status.required || status.pass?.valid) return status;
+  if (!status.required || status.pass?.valid) {
+    root.classList.remove("gated");
+    return status;
+  }
   setPass("");
   expires = 0;
   await ask(origin, saved.pass !== "");
@@ -50,7 +57,7 @@ export async function admit(origin: Endpoint): Promise<AccessStatus | null> {
 }
 
 function ask(origin: Endpoint, again: boolean): Promise<void> {
-  document.body.classList.add("gated");
+  document.documentElement.classList.add("gated");
   const view = $("#view");
   clear(view);
   return new Promise((resolve) => {
@@ -58,7 +65,7 @@ function ask(origin: Endpoint, again: boolean): Promise<void> {
       ? "Access expired. Contact the service desk."
       : "Use of this system is limited to authorized users with an assigned access code.";
     const { card, input } = codeCard(origin, "h1", help, () => {
-      document.body.classList.remove("gated");
+      document.documentElement.classList.remove("gated");
       resolve();
     });
     view.append(h("section", { class: "gate" }, card));

@@ -56,6 +56,7 @@ file up to date with the new version's template and keeps your values; see
 | `access_digits` | 2 | The digits that end a code: 2, 3 or 4 |
 | `access_pass_hours` | 12 | How long a pass lasts from when it was issued; applied as passes are used, so a change applies to passes already given. See [Ending every pass](access.md#ending-every-pass). |
 | `access_note` | `Contact the service desk for assistance.` | The line under the code box, such as how to reach the desk; `""` for none |
+| `access_card_only` | `false` | `true`: the code screen shows the code box alone, under `brand_notice` if one is set, with no header or footer; see [What the header and footer show](#what-the-header-and-footer-show) |
 | `access_key_file` | `/etc/texas2step/access.key` | The key codes come from; the same on every server of an organization |
 | `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | Standing phrases that work as codes, if the file exists; see [Standing phrases](access.md#standing-phrases) |
 | `access_lockout_after` | 3 | Wrong codes in a row from one /24 or /48 that lock it out of entering codes; see [Lockouts and blocks](access.md#lockouts-and-blocks) |
@@ -83,7 +84,12 @@ file up to date with the new version's template and keeps your values; see
 | `brand_footer` | `""` | Your own footer's text, near the bottom of every page: each line a line, a blank line a new paragraph, and `[label](url)` a link. See [Branding and themes](#branding-and-themes). |
 | `brand_footer_links` | `[]` | Your own footer's links, beside its text, as `[[brand_footer_links]]` tables (TOML only) |
 | `brand_credit` | `link` | The footer's "texas2step &lt;version&gt;": `link` to the project's site, plain `text`, or `none` to leave the project's name and version out of the footer |
+| `brand_tagline` | `Measurements run in your browser against the selected server` | The words that end the footer's bottom line; `""` for none |
 | `default_theme` | `system` | `system`, `light`, `dark`, `america`, `energy`, `federal`, `military` or `texas` |
+| `header_logo` | `true` | `false`: no logo left of the name (the star, or `brand_logo`). The name stays, and the logo is still the browser tab's icon. |
+| `header_size` | `true` | `false`: no "Aa" page size picker, and every visitor gets 100%, whatever size they chose before |
+| `header_theme` | `true` | `false`: no theme picker, and every visitor gets `default_theme`, whatever theme they chose before |
+| `footer_line` | `true` | `false`: no bottom line (organization, links, "texas2step &lt;version&gt;", tagline). Your own footer (`brand_footer`) still shows. |
 
 ## Changing settings from the command line
 
@@ -164,8 +170,8 @@ url = "https://www.acme.example/accessibility"
   and "Powered by" out of the footer, for sites that carry only their own branding. The
   version is still at `/api/v1/health`.
 * **Your own footer.** `brand_footer` and `[[brand_footer_links]]` add a footer of your
-  own near the bottom of every page, the access-code screen included, above the line with
-  the organization and the credit. texas2step lays it out the same way on every site and
+  own near the bottom of every page, the access-code screen included (unless
+  `access_card_only` is on), above the line with the organization and the credit. texas2step lays it out the same way on every site and
   in every theme. On wide screens your text is on the left and your links are stacked
   on the right. On phones the links follow the text, and with only one of the two it is
   centered. Each line of `brand_footer` starts a new line, and a blank line starts a
@@ -186,9 +192,9 @@ url = "https://www.acme.example/accessibility"
   stops the server at startup with an error naming the setting. `[[brand_links]]` and
   `[[brand_footer_links]]` can only be set in the TOML file, not through environment
   variables.
-* **Themes.** Visitors choose from the palette button in the header. Their choice is
-  remembered in their browser. `default_theme` sets what a first-time visitor sees;
-  `system` follows their light or dark OS setting.
+* **Themes.** Visitors choose from the palette button in the header, unless
+  `header_theme = false`. Their choice is remembered in their browser. `default_theme`
+  sets what a first-time visitor sees; `system` follows their light or dark OS setting.
 
   | Theme | Look |
   |---|---|
@@ -201,6 +207,41 @@ url = "https://www.acme.example/accessibility"
 
   Charts keep the same validated data colours in every theme, so results look the same
   whichever theme took them.
+
+### What the header and footer show
+
+Each part of the header and footer below can be turned off. The tabs, the server picker
+and the name always show.
+
+```toml
+header_logo = false     # no logo left of the name
+header_size = false     # no "Aa" page size picker
+header_theme = false    # no theme picker
+footer_line = false     # no bottom line: organization, links, credit and tagline
+brand_tagline = "Tests run from your browser to Acme's servers."   # or "" for none
+access_card_only = true # the code screen shows the code box alone
+```
+
+* **Logo.** Without it, the name leads the header alone. A `brand_logo` is still the
+  browser tab's icon.
+* **Page size and theme.** Without the size picker, every visitor sees the page at 100%.
+  Without the theme picker, every visitor gets `default_theme`. A size or theme a visitor
+  chose before is ignored while its picker is off, but stays saved in their browser, so
+  it comes back if you turn the picker on again. Phones never show the size picker, as
+  they have pinch-zoom.
+* **The bottom line.** It reads, by default, "texas2step &lt;version&gt; · Measurements run in
+  your browser against the selected server", with the organization and `[[brand_links]]`
+  first once they are set. `brand_tagline` changes its last words or, set to `""`,
+  removes them. `brand_credit` sets what happens to "texas2step &lt;version&gt;".
+  `footer_line = false` removes the whole line. Your own footer (`brand_footer` and
+  `[[brand_footer_links]]`) still shows; leave both empty too for a page with no footer.
+* **The code screen.** With [access codes](access.md) on, a visitor who needs the code
+  sees the header and the footer around the code box, without the tabs or the server
+  picker.
+  `access_card_only = true` removes the header and footer too, leaving the code box under
+  `brand_notice`, if one is set. They return once the code is in. The page is hidden this
+  way from its first paint, unless the visitor's browser holds a pass, so nothing flashes.
+  Visitors from `internal_networks`, who need no code, never see the code screen.
 
 Restart the service after changing any of these: `sudo systemctl restart texas2step`.
 

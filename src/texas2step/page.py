@@ -5,9 +5,10 @@ fills in what only it knows:
 
 - the path prefix it is published under (``<base href>``),
 - the version (read by the UI from a meta tag),
-- the site's default theme, and which pages it shows,
+- the site's default theme, and which pages and header controls it shows,
 - the branding: name, logo, organization, links, notice, the organization's own footer
-  and the footer's credit.
+  and the footer's bottom line (organization, links, credit, tagline),
+- whether this visitor's access code screen shows the code box alone.
 
 Branding is written into the page itself rather than added by script, so a renamed site
 never flashes the default name. Every value is HTML-escaped. Nothing from the request
@@ -27,6 +28,7 @@ from .config import FOOTER_LINK, PAGES, Settings
 log = logging.getLogger(__name__)
 
 DEFAULT_NAME = "texas2step"
+PROJECT_URL = "https://robert-patrick-texas.github.io/texas2step/"
 LOGO_TYPES = {
     ".svg": "image/svg+xml",
     ".png": "image/png",
@@ -73,9 +75,15 @@ class Shell:
         return f"brand/logo?v={self.logo_version}" if self.logo_version else "favicon.svg"
 
     def render(
-        self, template: str, root_path: str, version: str, hide: frozenset[str] = frozenset()
+        self,
+        template: str,
+        root_path: str,
+        version: str,
+        hide: frozenset[str] = frozenset(),
+        gated: bool = False,
     ) -> str:
-        """The page, without the tabs of ``hide`` (the desk's, for visitors from outside)."""
+        """The page, without the tabs of ``hide`` (the desk's, for visitors from outside).
+        ``gated``: this visitor needs the access code, unless their browser holds a pass."""
         s = self.settings
         pages = [p for p in s.pages if p not in hide]
         page = template.replace('<base href="/" />', f'<base href="{escape(root_path)}/" />', 1)
@@ -92,31 +100,32 @@ class Shell:
             root.append(f'data-monitor-max="{s.page_monitor_max_runtime}"')
         if s.page_diag_max_runtime:
             root.append(f'data-diag-max="{s.page_diag_max_runtime}"')
+        # Without its picker, a visitor's saved theme or size no longer applies.
+        if not s.header_theme:
+            root.append("data-fixed-theme")
+            page = _fill(page, "theme", "")
+        if not s.header_size:
+            root.append("data-fixed-size")
+            page = _fill(page, "size", "")
+        if s.access_card_only and gated:
+            root.append("data-card-only")
         if pages != list(PAGES):
             # The tabs of hidden pages go, and the UI is told which pages it has.
             root.append(f'data-pages="{" ".join(pages)}"')
             for hidden in set(PAGES) - set(pages):
                 page = re.sub(rf'\s*<a [^>]*data-page="{hidden}"[^>]*>[^<]*</a>', "", page, count=1)
         page = page.replace('<html lang="en">', f"<html {' '.join(root)}>", 1)
-        # The footer's "texas2step <version>": a link to the project, plain text, or gone.
-        if s.brand_credit == "none":
-            page = _fill(page, "credit", "")
-        elif s.brand_credit == "text":
-            page = re.sub(
-                r'<a id="footer-version"[^>]*>([^<]*)</a>',
-                r'<span id="footer-version">\1</span>',
-                page,
-                count=1,
-            )
         if s.brand_name != DEFAULT_NAME:
             name = escape(s.brand_name)
             page = page.replace("<title>texas2step</title>", f"<title>{name}</title>", 1)
             page = page.replace('aria-label="texas2step home"', f'aria-label="{name} home"', 1)
             page = _fill(page, "name", f'<span class="brand-word">{name}</span>')
-            page = _fill(page, "powered", '<span class="footer-powered">Powered by</span>')
-        if self.logo_version:
+        if not s.header_logo:
+            page = _fill(page, "mark", "")
+        elif self.logo_version:
             mark = f'<img class="brand-mark" src="brand/logo?v={self.logo_version}" alt="" />'
             page = _fill(page, "mark", mark)
+        if self.logo_version:  # the tab's icon, shown in the header or not
             page = page.replace(
                 '<link rel="icon" href="favicon.svg" type="image/svg+xml" />',
                 f'<link rel="icon" href="{self.icon}" type="{self.logo_type}" />',
@@ -131,13 +140,33 @@ class Shell:
         if links:
             nav = f'<nav class="topbar-links" aria-label="Links">{"".join(links)}</nav>'
             page = _fill(page, "links", nav)
-        footer = [x for x in (self._organization(), *links) if x]
-        if footer:
-            dot = '<span class="dot" aria-hidden="true">·</span>'
-            page = _fill(page, "footer", dot.join(footer) + dot)
-        if own := self._own_footer():
-            page = _fill(page, "ownfooter", own)
-        return page
+        return _fill(page, "footer", self._footer(links))
+
+    def _footer(self, links: list[str]) -> str:
+        """The organization's own footer, then the bottom line; nothing when both are off."""
+        s = self.settings
+        line = []
+        if s.footer_line:
+            line = [self._organization(), *links, self._credit()]
+            if s.brand_tagline:
+                line.append(f'<span class="footer-tagline">{escape(s.brand_tagline)}</span>')
+        dot = '<span class="dot" aria-hidden="true">·</span>'
+        body = self._own_footer() + dot.join(x for x in line if x)
+        return f'<footer class="footer">{body}</footer>' if body else ""
+
+    def _credit(self) -> str:
+        """The footer's "texas2step <version>": a link to the project, plain text, or none.
+        The page writes the version in."""
+        s = self.settings
+        if s.brand_credit == "none":
+            return ""
+        powered = (
+            '<span class="footer-powered">Powered by</span>' if s.brand_name != DEFAULT_NAME else ""
+        )
+        if s.brand_credit == "text":
+            return f'{powered}<span id="footer-version">texas2step</span>'
+        new_tab = 'target="_blank" rel="noopener"'
+        return f'{powered}<a id="footer-version" href="{PROJECT_URL}" {new_tab}>texas2step</a>'
 
     def _own_footer(self) -> str:
         """The organization's footer: its text on the left, its links on the right."""

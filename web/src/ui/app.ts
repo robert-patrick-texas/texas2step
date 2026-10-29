@@ -78,8 +78,10 @@ export class App {
   }
 
   async start(): Promise<void> {
-    mountSizePicker($("#size-picker"));
-    mountThemeMenu($("#theme-menu"));
+    // Either picker is left out of the page where the site doesn't offer it.
+    const size = document.getElementById("size-picker");
+    if (size) mountSizePicker(size);
+    mountThemeMenu(document.getElementById("theme-menu"));
     for (const event of ["resize", "t2s:size"]) window.addEventListener(event, () => this.fitHeader());
     void document.fonts?.ready.then(() => this.fitHeader());
     this.fitHeader();

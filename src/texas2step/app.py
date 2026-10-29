@@ -559,14 +559,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Relative URLs in the page resolve against <base href>, which carries the prefix.
         # Visitors from outside internal_networks don't get the desk's tabs.
         ip, _ = client_address(request)
-        outside = settings.internal_networks and not is_internal(ip, settings.internal_networks)
-        hide = page.DESK_PAGES if outside else frozenset()
+        inside = is_internal(ip, settings.internal_networks)
+        hide = page.DESK_PAGES if settings.internal_networks and not inside else frozenset()
+        gated = app.state.codes is not None and not inside
         root = request.scope.get("root_path", "")
         # Not the version for a visitor outside internal_networks, nor, without them, for
         # one who needs the code: it would tell an attacker which flaws to try. Without
         # internal_networks, a visitor who entered the code gets it from /api/v1/info.
         known = shows_version(request)
-        body = shell.render(index.read_text(), root, __version__ if known else "", hide)
+        body = shell.render(index.read_text(), root, __version__ if known else "", hide, gated)
         policy = content_policy(body, origins)
         return HTMLResponse(
             body, headers={"Cache-Control": "no-cache", "Content-Security-Policy": policy}

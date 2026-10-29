@@ -191,6 +191,8 @@ class Settings:
     access_pass_hours: float = 12.0
     # The line under the code box, such as how to reach the desk; "" for none.
     access_note: str = "Contact the service desk for assistance."
+    # The code screen shows the code box and brand_notice alone: no header or footer.
+    access_card_only: bool = False
     access_key_file: str = "/etc/texas2step/access.key"  # the same key on every server
     # Standing phrases that always work as codes (texas2step access phrase); none without it.
     access_phrases_file: str = "/etc/texas2step/access-phrases.toml"
@@ -250,6 +252,15 @@ class Settings:
     default_theme: str = "system"  # one of THEMES; visitors can still pick another
     # The footer's "texas2step <version>": linked to the project's site, plain text, or none.
     brand_credit: str = "link"
+    # The line that ends the footer's bottom line; "" for none.
+    brand_tagline: str = "Measurements run in your browser against the selected server"
+    # What the header and footer show. Without the size or theme picker, every visitor gets
+    # 100% and default_theme, whatever they chose before. footer_line = false leaves out the
+    # bottom line (organization, links, credit, tagline), not the organization's own footer.
+    header_logo: bool = True
+    header_size: bool = True
+    header_theme: bool = True
+    footer_line: bool = True
 
     def __post_init__(self) -> None:
         # However a setting was given (file, environment, `config set`), spaces around its

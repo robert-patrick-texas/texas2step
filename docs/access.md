@@ -91,6 +91,7 @@ To turn codes off again: `sudo texas2step config set access_code=off --write`, t
 | `access_digits` | `2` | The digits that end a code: 2, 3 or 4 |
 | `access_pass_hours` | `12` | How long a pass lasts from when it was issued (1 to 168). Each server applies its own as passes are used, so a change applies to passes already given; use the same on every server. |
 | `access_note` | `Contact the service desk for assistance.` | The line under the code box, such as how to reach the desk; `""` for none |
+| `access_card_only` | `false` | `true`: the code screen shows the code box alone, under `brand_notice` if one is set, with no header or footer. They return once the code is in. |
 | `access_key_file` | `/etc/texas2step/access.key` | The key |
 | `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | [Standing phrases](#standing-phrases), if the file exists |
 | `internal_networks` | `[]` | Your own networks: no code, and the desk's tools. A list of IPv4 and IPv6 addresses and networks in CIDR form, mixed freely: `["192.168.0.0/16", "2001:db8::/32", "203.0.113.7"]`. An address alone is a single host. Bits past the prefix are ignored, so `10.2.1.30/24` means all of `10.2.1.0/24`. Give the addresses as the server sees them: staff who come in through your firewall's NAT arrive from its public address. |

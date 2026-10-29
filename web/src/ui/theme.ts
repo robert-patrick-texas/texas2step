@@ -86,9 +86,13 @@ function swatch(theme: ThemeId): HTMLElement {
 const PALETTE_ICON =
   "M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.9 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z";
 
-/** The theme button and its menu, rendered into `root`. */
-export function mountThemeMenu(root: HTMLElement): void {
+/**
+ * The theme button and its menu, rendered into `root`; with no root (the site offers no
+ * picker), only the change notification, for the OS's light and dark.
+ */
+export function mountThemeMenu(root: HTMLElement | null): void {
   announceChanges();
+  if (!root) return;
 
   const check = () =>
     s("svg", { class: "theme-check", viewBox: "0 0 24 24", "aria-hidden": "true" }, s("path", { d: "M5 12.5l4.5 4.5L19 7.5" }));

@@ -82,6 +82,8 @@ results_path = "/var/lib/texas2step/results.db"
 # access_digits = 2                     # digits at the end of a code: 2, 3 or 4
 # access_pass_hours = 12.0              # how long a pass lasts from when it was issued
 # access_note = "Contact the service desk for assistance."  # under the code box; "" for none
+# access_card_only = false              # true: the code screen shows the code box and
+#                                       # brand_notice alone, no header or footer
 # access_key_file = "/etc/texas2step/access.key"  # copy the same key to every server
 # access_phrases_file = "/etc/texas2step/access-phrases.toml"  # standing phrases:
 #                                       # sudo texas2step access phrase add vip
@@ -117,6 +119,11 @@ results_path = "/var/lib/texas2step/results.db"
 # brand_footer = ""                     # your footer's text: "\n" starts a line, [label](url) is a link
 # default_theme = "system"              # system, light, dark, america, energy, federal, military or texas
 # brand_credit = "link"                 # footer's "texas2step <version>": link, text or none
+# brand_tagline = "Measurements run in your browser against the selected server"  # "" for none
+# header_logo = true                    # the logo left of the name (the star, or brand_logo)
+# header_size = true                    # the "Aa" page size; false: everyone gets 100%
+# header_theme = true                   # the theme picker; false: everyone gets default_theme
+# footer_line = true                    # the bottom line: organization, links, credit, tagline
 # Header and footer links: see [[brand_links]] at the end of this file, and your footer's
 # own links, beside its text, in [[brand_footer_links]].
 

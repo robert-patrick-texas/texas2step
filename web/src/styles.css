@@ -2492,6 +2492,12 @@ a.brand-org:hover,
   visibility: hidden;
 }
 
+/* access_card_only: the code box alone, under the site's notice. */
+[data-card-only].gated .topbar,
+[data-card-only].gated .footer {
+  display: none;
+}
+
 .gate {
   display: grid;
   place-items: center;

@@ -449,6 +449,16 @@ def test_the_code_box_says_the_sites_note(tmp_path, key_file):
         assert c.get("/api/v1/access", headers=OUTSIDE).json()["note"] == ""
 
 
+def test_a_card_only_code_screen_is_marked_for_visitors_who_need_the_code(tmp_path, key_file):
+    with gated(tmp_path, key_file, access_card_only=True, internal_networks=["10.0.0.0/8"]) as c:
+        assert "data-card-only" in c.get("/", headers=OUTSIDE).text
+        assert "data-card-only" not in c.get("/", headers=INSIDE).text
+    with gated(tmp_path, key_file) as c:  # off by default
+        assert "data-card-only" not in c.get("/", headers=OUTSIDE).text
+    with gated(tmp_path, key_file, access_card_only=True, access_code="off") as c:
+        assert "data-card-only" not in c.get("/", headers=OUTSIDE).text
+
+
 def test_loopback_and_internal_networks_need_no_code(tmp_path, key_file):
     with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
         status = c.get("/api/v1/access", headers=INSIDE).json()

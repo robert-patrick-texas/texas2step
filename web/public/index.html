@@ -4,7 +4,8 @@
     <meta charset="utf-8" />
     <!-- A template: the server fills in the path prefix it is published under (e.g.
          /texas2step/), its version, the default theme and the site's branding, including
-         the "t2s:" slot comments below. See src/texas2step/page.py. -->
+         the "t2s:" slot comments below; it writes the footer itself. See
+         src/texas2step/page.py. -->
     <base href="/" />
     <meta name="texas2step-version" content="" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -14,17 +15,23 @@
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/app.css" />
     <script>
-      // Apply the visitor's theme (or the site default) and page size before first paint.
+      // Apply the visitor's theme (or the site default) and page size before first paint,
+      // where the site offers their pickers. A site that shows the access code screen alone
+      // hides the header and footer now, unless a pass is held, so they don't flash.
       (() => {
         const root = document.documentElement;
         let theme = root.dataset.defaultTheme;
         let size = "";
+        let held = false;
         try {
-          theme = localStorage.getItem("t2s.theme") || theme;
-          size = localStorage.getItem("t2s.size") || "";
+          if (!("fixedTheme" in root.dataset)) theme = localStorage.getItem("t2s.theme") || theme;
+          if (!("fixedSize" in root.dataset)) size = localStorage.getItem("t2s.size") || "";
+          const pass = JSON.parse(localStorage.getItem("t2s.pass") || "{}");
+          held = !!pass.pass && pass.expires * 1000 > Date.now();
         } catch {}
         if (/^(light|dark|federal|texas|america|energy|military)$/.test(theme || "")) root.dataset.theme = theme;
         if (/^(0\.[789]|1\.1|1\.25)$/.test(size)) root.style.setProperty("--ui-zoom", size);
+        if ("cardOnly" in root.dataset && !held) root.classList.add("gated");
       })();
     </script>
   </head>
@@ -61,18 +68,18 @@
         <!--t2s:links-->
         <div class="server-picker" id="server-picker"></div>
         <div id="family-picker"></div>
-        <div id="size-picker"></div>
-        <div class="theme-menu" id="theme-menu"></div>
+        <!--t2s:size--><div id="size-picker"></div><!--/t2s:size-->
+        <!--t2s:theme--><div class="theme-menu" id="theme-menu"></div><!--/t2s:theme-->
       </div>
     </header>
     <main id="view" tabindex="-1"></main>
+    <!--t2s:footer-->
     <footer class="footer">
-      <!--t2s:ownfooter-->
-      <!--t2s:footer-->
-      <!--t2s:credit--><!--t2s:powered--><a id="footer-version" href="https://robert-patrick-texas.github.io/texas2step/" target="_blank" rel="noopener">texas2step</a>
-      <span class="dot" aria-hidden="true">·</span><!--/t2s:credit-->
-      <span>Measurements run in your browser against the selected server</span>
+      <a id="footer-version" href="https://robert-patrick-texas.github.io/texas2step/" target="_blank" rel="noopener">texas2step</a>
+      <span class="dot" aria-hidden="true">·</span>
+      <span class="footer-tagline">Measurements run in your browser against the selected server</span>
     </footer>
+    <!--/t2s:footer-->
     <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
     <noscript><p class="noscript">This page needs JavaScript to run measurements.</p></noscript>
     <script type="module" src="assets/app.js"></script>
