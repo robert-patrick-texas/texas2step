@@ -14,6 +14,9 @@ Inspired by [speed.cloudflare.com](https://speed.cloudflare.com)
 Python server, a dependency-free TypeScript client, and no third-party services, so it
 works on air-gapped and internal networks.
 
+New to texas2step? [texas2step at a glance](docs/at-a-glance.md) shows what it does and
+where it helps, on one page.
+
 ## What it measures
 
 | Metric | How | Transport |
@@ -154,6 +157,8 @@ For servers open to the Internet, see [Access codes](docs/access.md).
 
 ## Documentation
 
+* [At a glance](docs/at-a-glance.md): what texas2step does and where it helps, on one
+  page.
 * [Install](docs/install.md): the Ubuntu package, nginx, firewall, upgrades.
 * [t2s](docs/t2s.md): the command-line client for Linux, macOS and Windows: tests,
   Monitor and Diag from any computer, and how it updates itself.
