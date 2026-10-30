@@ -14,7 +14,7 @@ on:
       - "docs/**/*.pdf"
       - "scripts/build_docs.py"
       - "scripts/docs.css"
-      - "scripts/logo.svg"
+      - "web/public/favicon.svg"
       - "pyproject.toml"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
