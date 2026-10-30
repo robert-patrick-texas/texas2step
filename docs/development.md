@@ -179,6 +179,10 @@ Pages on every push to `main` that touches Markdown. It needs Pages enabled once
 repository settings, **Pages → Source: GitHub Actions**. Until then the workflow builds
 the site and skips the deploy with a notice.
 
+The site, the screenshots in `docs/images/` and the printed sheet below wear the Energy
+theme: its blue gradient in `scripts/docs.css`, and its star, `scripts/logo.svg`, as the
+logo and tab icon. Take new screenshots in that theme, at 1366 pixels wide.
+
 Every PDF under `docs/` is published with the site. One is `docs/at-a-glance.pdf`: the
 [at-a-glance](at-a-glance.md) page condensed onto one US Letter page to print. Its source
 is `scripts/at-a-glance.html`, so change it along with the page, then run `make sheet` and

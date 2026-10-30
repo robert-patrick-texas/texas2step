@@ -17,8 +17,8 @@
     --rule: #dcdad4;
     --tint: #f3f2ee;
     --link: #1d63b8;
-    --pink: #e8467c;
-    --brand: linear-gradient(120deg, #f5a524, #e8467c 55%, #7c5cff);
+    --accent: #1f5fe0;
+    --brand: linear-gradient(120deg, #0fb5e6, #1f5fe0 50%, #7440f0);
     --mono: "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, Menlo, Consolas, monospace;
   }
 
@@ -50,7 +50,7 @@
           font-size: 7.4pt; font-weight: 600; white-space: nowrap; }
   .logo { width: 34pt; height: 34pt; flex: none; }
   h1 { margin: 0; font-size: 20pt; line-height: 1.05; font-weight: 750; letter-spacing: -0.02em; }
-  h1 .two { color: var(--pink); }
+  h1 .two { color: var(--accent); }
   h1 .what { color: var(--muted); font-weight: 500; }
   .lede { margin-top: 4pt; font-size: 10pt; line-height: 1.28; font-weight: 600; }
   .sub { margin-top: 3pt; color: var(--ink-2); font-size: 8pt; }
@@ -63,7 +63,7 @@
   .split { display: grid; grid-template-columns: 1fr 2.4in; gap: 15pt; align-items: start; }
   ul { margin: 0; padding-left: 10pt; }
   li { margin: 0 0 2.4pt; }
-  li::marker { color: var(--pink); }
+  li::marker { color: var(--accent); }
   figure { margin: 8pt 0 0; }
   .shot { aspect-ratio: 1366 / 870; overflow: hidden; border: 0.75pt solid var(--rule); border-radius: 5pt; }
   .shot img { width: 100%; display: block; }
@@ -85,7 +85,7 @@
   .start { display: grid; grid-template-columns: 1fr auto; gap: 18pt; align-items: end; }
   .start ol { margin: 0; padding-left: 11pt; }
   .start li { margin-bottom: 2pt; }
-  .start li::marker { color: var(--pink); font-weight: 650; }
+  .start li::marker { color: var(--accent); font-weight: 650; }
   .qr { display: flex; gap: 7pt; align-items: center; }
   .qr svg { width: 0.75in; height: 0.75in; display: block; }
   .qr span { font-size: 7pt; line-height: 1.35; color: var(--ink-2); text-align: right; }
@@ -100,17 +100,7 @@
 <main class="sheet">
 
 <header class="head">
-  <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
-    <defs>
-      <linearGradient id="sun" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#f5a524"/>
-        <stop offset=".55" stop-color="#e8467c"/>
-        <stop offset="1" stop-color="#7c5cff"/>
-      </linearGradient>
-    </defs>
-    <rect width="32" height="32" rx="9" fill="url(#sun)"/>
-    <path d="M16 6.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7z" fill="#fff"/>
-  </svg>
+  <img class="logo" src="logo.svg" alt="">
   <div>
     <div class="title">
       <h1>texas<span class="two">2</span>step <span class="what">at a glance</span></h1>
@@ -141,7 +131,7 @@
     </ul>
   </div>
   <figure>
-    <div class="shot"><img src="../docs/images/upload-light.jpg" alt="The Test page during an upload: the gauge, the phases and the results so far"></div>
+    <div class="shot"><img src="../docs/images/upload-dark.jpg" alt="The Test page during an upload: the gauge, the phases and the results so far"></div>
     <figcaption>The Test page during an upload</figcaption>
   </figure>
 </section>

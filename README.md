@@ -35,7 +35,7 @@ where it helps, on one page.
 Details and definitions: [docs/methodology.md](docs/methodology.md). What the scores mean
 to the people using a connection: [docs/experience.md](docs/experience.md).
 
-![Results](docs/images/results-light.jpg)
+![Results](docs/images/results-dark.jpg)
 
 The UI has six views: **Test** (gauge, live link animation, charts, exportable and
 shareable results), **Monitor** (continuous UDP probing with a scrolling RTT and loss

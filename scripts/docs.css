@@ -23,11 +23,11 @@
   --tok-var: #ad2a60;
   --tok-punct: #4a4f57;
 
-  /* Brand: Texas sunset, decorative only */
-  --sun-1: #f5a524;
-  --sun-2: #e8467c;
-  --sun-3: #7c5cff;
-  --brand: linear-gradient(120deg, var(--sun-1), var(--sun-2) 55%, var(--sun-3));
+  /* Brand: the Energy theme's Cherenkov blue into plasma violet, decorative only */
+  --sun-1: #0fb5e6;
+  --sun-2: #1f5fe0;
+  --sun-3: #7440f0;
+  --brand: linear-gradient(120deg, var(--sun-1), var(--sun-2) 50%, var(--sun-3));
 
   --radius: 18px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

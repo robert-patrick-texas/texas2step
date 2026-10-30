@@ -40,7 +40,8 @@ from pygments.util import ClassNotFound
 
 ROOT = Path(__file__).resolve().parent.parent
 CSS = Path(__file__).with_name("docs.css")
-FAVICON = ROOT / "web" / "public" / "favicon.svg"
+# The star in the Energy theme's colours, as the screenshots show it: the logo and tab icon.
+FAVICON = Path(__file__).with_name("logo.svg")
 BRANCH = "main"
 SKIP_DIRS = {"node_modules", "html", "dist", "build", "stage", "staging", "__pycache__"}
 
