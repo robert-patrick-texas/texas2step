@@ -158,7 +158,7 @@ For servers open to the Internet, see [Access codes](docs/access.md).
 ## Documentation
 
 * [At a glance](docs/at-a-glance.md): what texas2step does and where it helps, on one
-  page.
+  page, also as a [PDF to print](docs/at-a-glance.pdf).
 * [Install](docs/install.md): the Ubuntu package, nginx, firewall, upgrades.
 * [t2s](docs/t2s.md): the command-line client for Linux, macOS and Windows: tests,
   Monitor and Diag from any computer, and how it updates itself.

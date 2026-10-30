@@ -1,0 +1,222 @@
+<!doctype html>
+<!-- texas2step at a glance on one printed page: docs/at-a-glance.md, condensed. Printed to
+     docs/at-a-glance.pdf by scripts/build_sheet.py (make sheet), which fails if it runs over
+     one US Letter page. The QR code holds https://robert-patrick-texas.github.io/texas2step/. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>texas2step at a glance</title>
+<meta name="description" content="A network test you host yourself: what texas2step does and where it helps, on one page.">
+<style>
+  @page { size: letter; margin: 0.4in; }
+
+  :root {
+    --ink: #0e1013;
+    --ink-2: #41464d;
+    --muted: #5d626a;
+    --rule: #dcdad4;
+    --tint: #f3f2ee;
+    --link: #1d63b8;
+    --pink: #e8467c;
+    --brand: linear-gradient(120deg, #f5a524, #e8467c 55%, #7c5cff);
+    --mono: "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  body {
+    margin: 0;
+    background: #fff;
+    color: var(--ink);
+    font: 7.6pt/1.25 Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  .sheet { width: 7.7in; }
+  /* On screen, the page as it prints. */
+  @media screen {
+    body { background: #e7e5df; padding: 24px 0; }
+    .sheet { width: 8.5in; min-height: 11in; margin: 0 auto; padding: 0.4in; background: #fff;
+             box-shadow: 0 8px 32px rgba(20, 22, 40, 0.18); }
+  }
+
+  a { color: inherit; text-decoration: none; }
+  code { font-family: var(--mono); font-size: 0.92em; white-space: nowrap; }
+  p { margin: 0; }
+
+  /* ---- Head ---- */
+  .head { display: flex; gap: 11pt; align-items: flex-start; }
+  .head > div { flex: 1; }
+  .title { display: flex; justify-content: space-between; align-items: center; gap: 12pt; }
+  .free { border: 0.75pt solid var(--rule); border-radius: 99px; padding: 2pt 7pt; color: var(--ink-2);
+          font-size: 7.4pt; font-weight: 600; white-space: nowrap; }
+  .logo { width: 34pt; height: 34pt; flex: none; }
+  h1 { margin: 0; font-size: 20pt; line-height: 1.05; font-weight: 750; letter-spacing: -0.02em; }
+  h1 .two { color: var(--pink); }
+  h1 .what { color: var(--muted); font-weight: 500; }
+  .lede { margin-top: 4pt; font-size: 10pt; line-height: 1.28; font-weight: 600; }
+  .sub { margin-top: 3pt; color: var(--ink-2); font-size: 8pt; }
+  .bar { height: 3pt; border-radius: 3pt; background: var(--brand); margin: 7pt 0 0; }
+
+  /* ---- Sections ---- */
+  h2 { margin: 9pt 0 3.5pt; font-size: 9.6pt; line-height: 1.2; font-weight: 700; }
+  h2::before { content: ""; display: inline-block; width: 6.5pt; height: 6.5pt; border-radius: 2pt;
+               background: var(--brand); margin-right: 5pt; vertical-align: 0.4pt; }
+  .split { display: grid; grid-template-columns: 1fr 2.4in; gap: 15pt; align-items: start; }
+  ul { margin: 0; padding-left: 10pt; }
+  li { margin: 0 0 2.4pt; }
+  li::marker { color: var(--pink); }
+  figure { margin: 8pt 0 0; }
+  .shot { aspect-ratio: 1366 / 870; overflow: hidden; border: 0.75pt solid var(--rule); border-radius: 5pt; }
+  .shot img { width: 100%; display: block; }
+  figcaption { margin-top: 2.5pt; color: var(--muted); font-size: 6.8pt; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 7.1pt; line-height: 1.23; }
+  th { text-align: left; font-weight: 600; color: var(--ink-2); background: var(--tint); padding: 1.8pt 4.5pt;
+       white-space: nowrap; }
+  td { padding: 1.8pt 4.5pt; border-top: 0.6pt solid var(--rule); vertical-align: top; }
+  td:first-child { font-weight: 650; }
+  .matrix td:nth-child(n+3) { color: var(--ink-2); }
+
+  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2.5pt 13pt; font-size: 7.1pt;
+           line-height: 1.23; color: var(--ink-2); }
+  .facts p { border-top: 0.6pt solid var(--rule); padding-top: 2pt; }
+  .nw { white-space: nowrap; }
+  .facts b { color: var(--ink); font-weight: 650; }
+
+  .start { display: grid; grid-template-columns: 1fr auto; gap: 18pt; align-items: end; }
+  .start ol { margin: 0; padding-left: 11pt; }
+  .start li { margin-bottom: 2pt; }
+  .start li::marker { color: var(--pink); font-weight: 650; }
+  .qr { display: flex; gap: 7pt; align-items: center; }
+  .qr svg { width: 0.75in; height: 0.75in; display: block; }
+  .qr span { font-size: 7pt; line-height: 1.35; color: var(--ink-2); text-align: right; }
+  .qr b { display: block; color: var(--ink); font-size: 7.8pt; }
+
+  .foot { margin-top: 9pt; padding-top: 3.5pt; border-top: 0.6pt solid var(--rule); display: flex;
+          justify-content: space-between; gap: 12pt; color: var(--muted); font-size: 6.8pt; }
+  .foot a { color: var(--link); }
+</style>
+</head>
+<body>
+<main class="sheet">
+
+<header class="head">
+  <svg class="logo" viewBox="0 0 32 32" aria-hidden="true">
+    <defs>
+      <linearGradient id="sun" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#f5a524"/>
+        <stop offset=".55" stop-color="#e8467c"/>
+        <stop offset="1" stop-color="#7c5cff"/>
+      </linearGradient>
+    </defs>
+    <rect width="32" height="32" rx="9" fill="url(#sun)"/>
+    <path d="M16 6.5l2.6 5.6 6.1.7-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6-4.5-4.2 6.1-.7z" fill="#fff"/>
+  </svg>
+  <div>
+    <div class="title">
+      <h1>texas<span class="two">2</span>step <span class="what">at a glance</span></h1>
+      <span class="free">Free and open source · Apache License 2.0</span>
+    </div>
+    <p class="lede">A network test you host yourself, measuring what your users experience: from their own
+      browser, phone or command line to your servers.</p>
+    <p class="sub">Throughput, latency, jitter, real UDP packet loss, call quality and responsiveness, with
+      tools for the service desk and for engineers.</p>
+  </div>
+</header>
+<div class="bar"></div>
+
+<section class="split">
+  <div>
+    <h2>Why network teams run it</h2>
+    <ul>
+      <li><b>It tests your paths.</b> Servers in your data centers, branches and cloud regions measure
+        the path your applications take, not the way to a public speed test.</li>
+      <li><b>Nothing to install for the person testing.</b> A browser on a laptop or phone runs every
+        test. t2s, one file for Linux, macOS and Windows, does the same from servers and scripts.</li>
+      <li><b>It finds what a speed figure hides:</b> packet loss each way over real UDP, call quality,
+        latency under load (bufferbloat), and which protocols and address families get through.</li>
+      <li><b>The service desk can act on it.</b> A caller reads out a short Result ID, and History
+        lists every saved test with the address it came from.</li>
+      <li><b>It stays inside your network.</b> No CDN, analytics, telemetry or cookies. It runs on
+        air-gapped networks and updates from a local directory or mirror.</li>
+    </ul>
+  </div>
+  <figure>
+    <div class="shot"><img src="../docs/images/upload-light.jpg" alt="The Test page during an upload: the gauge, the phases and the results so far"></div>
+    <figcaption>The Test page during an upload</figcaption>
+  </figure>
+</section>
+
+<section>
+  <h2>What it does</h2>
+  <table class="matrix">
+    <colgroup><col style="width: 0.92in"><col><col style="width: 0.6in"><col style="width: 1.02in"><col style="width: 1.15in"></colgroup>
+    <thead><tr><th></th><th>What it shows</th><th>Web page</th><th>t2s</th><th>API</th></tr></thead>
+    <tbody>
+      <tr><td>Speed test</td><td>Download and upload, many streams and one; latency and jitter, idle and under load (bufferbloat, A+ to F); UDP loss and call quality (MOS) each way; responsiveness (RPM); readiness for video, calls, VDI and file transfers</td><td>Test</td><td><code>t2s run</code></td><td><code>/api/v1/measure/full</code></td></tr>
+      <tr><td>Monitor</td><td>A continuous UDP trace of round trip and loss over 1, 5 or 15 minutes, or a voice or video call scored every 10 seconds; one server, or two side by side</td><td>Monitor</td><td><code>t2s monitor</code></td><td></td></tr>
+      <tr><td>Diag</td><td>HTTP/1.1, HTTP/2, HTTP/3, WebSocket and UDP over IPv4 and IPv6, tried once a second; your addresses, NAT, TLS and DTLS, and an event log</td><td>Diag</td><td><code>t2s diag</code></td><td><code>/api/v1/diag/http</code></td></tr>
+      <tr><td>IPv4 and IPv6</td><td>Each address family tested on its own</td><td>IP switch</td><td><code>-4</code>, <code>-6</code></td><td>A name per family</td></tr>
+      <tr><td>Several servers</td><td>A server picker; any server measures another on request</td><td>Picker</td><td>The server's URL</td><td><code>/api/v1/measure/*</code></td></tr>
+      <tr><td>Saved results</td><td>Short Result IDs, History, a share link and a JSON download</td><td>History</td><td><code>--save</code></td><td><code>/api/v1/results</code></td></tr>
+      <tr><td>Automation</td><td>JSON output, copy-ready examples and an OpenAPI explorer</td><td>API tab</td><td><code>--json</code></td><td><code>/api/docs</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Where it helps</h2>
+  <table class="cases">
+    <colgroup><col style="width: 1.55in"><col style="width: 2.4in"><col></colgroup>
+    <thead><tr><th>Situation</th><th>Use</th><th>What you learn</th></tr></thead>
+    <tbody>
+      <tr><td>Slow for a remote worker</td><td>The Test page; they read out the Result ID</td><td>Speed, loss and bufferbloat on their own connection. A nearby server and a distant one tell their Wi-Fi or ISP apart from your WAN.</td></tr>
+      <tr><td>Choppy Teams or Zoom calls</td><td>Test page call quality; Monitor's call profiles</td><td>The score each way, and whether loss comes in bursts, late, or one way</td></tr>
+      <tr><td>Wi-Fi dead spots</td><td>Monitor on a phone, walking the building</td><td>Spikes and loss marks show where coverage fails</td></tr>
+      <tr><td>A new circuit or site</td><td><code>t2s run --save</code> on site, or server to server</td><td>Throughput both ways, the one-stream rate and loss, kept as a baseline</td></tr>
+      <tr><td>A firewall or VPN change</td><td>Diag, or <code>t2s diag</code></td><td>HTTP/3 or UDP blocked, IPv6 broken, or an unexpected exit address</td></tr>
+      <tr><td>An IPv6 rollout</td><td>The IP switch; <code>t2s monitor -4</code> and <code>-6</code>; Diag</td><td>Whether IPv6 performs like IPv4, or takes a longer route</td></tr>
+      <tr><td>Two sites or providers</td><td>Monitor with two servers at once</td><td>Which path is worse, moment by moment</td></tr>
+      <tr><td>Scheduled checks</td><td>t2s or the REST API, from cron or monitoring</td><td>JSON results to trend and alert on in your own tools</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Running it</h2>
+  <div class="facts">
+    <p><b>Server.</b> Ubuntu 26.04 LTS with nginx: one <code>.deb</code>, and a setup tool that checks the host first.</p>
+    <p><b>Network.</b> HTTPS on port 443, and a UDP port range for the packet-loss test, Monitor and Diag.</p>
+    <p><b>Clients.</b> A browser on a computer or phone; t2s for Linux, macOS and Windows (<span class="nw">x86-64</span>, ARM64).</p>
+    <p><b>Updates.</b> <code>texas2step update</code>, by hand, on a timer, or offline from a local mirror; each download checked by SHA-256.</p>
+    <p><b>Open to the Internet.</b> Service desk codes that change daily, weekly or monthly; wrong ones lock a network out. Your own networks need none.</p>
+    <p><b>Billed traffic.</b> Daily and monthly caps on what the tests move, and time limits for Monitor and Diag.</p>
+    <p><b>Who is testing.</b> <code>texas2step clients</code> lists the pages and command-line runs in use now.</p>
+    <p><b>Your brand.</b> Your name, logo, notice, links, footer and seven themes; hide any page or header item.</p>
+    <p><b>Security.</b> Sandboxed behind nginx, with a CSP and no cookies or telemetry. TLS 1.3 with post-quantum key exchange recommended.</p>
+  </div>
+</section>
+
+<section class="start">
+  <div>
+    <h2>Get started</h2>
+    <ol>
+      <li>On Ubuntu 26.04 LTS with nginx, download <code>texas2step-setup</code> and the <code>.deb</code> from the latest release.</li>
+      <li><code>sudo ./texas2step-setup --id houston</code> checks the server and writes an install script: read it, then run it.</li>
+      <li>Open the address it gives and press Start, or run <code>t2s run https://houston.example.net/texas2step</code></li>
+    </ol>
+  </div>
+  <a class="qr" href="https://robert-patrick-texas.github.io/texas2step/">
+      <span><b>Docs and downloads</b>robert-patrick-texas<br>.github.io/texas2step</span>
+      <svg viewBox="-2 -2 37 37" role="img" aria-label="QR code: robert-patrick-texas.github.io/texas2step"><path stroke="#0e1013" d="M0 0.5h7m1 0h1m1 0h2m1 0h2m2 0h2m2 0h1m4 0h7m-33 1h1m5 0h1m1 0h3m1 0h3m3 0h2m1 0h1m2 0h1m1 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h2m6 0h4m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m2 0h2m1 0h1m1 0h3m1 0h1m1 0h2m4 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m2 0h2m4 0h2m1 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m2 0h2m2 0h4m1 0h2m3 0h1m2 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-21 1h2m1 0h2m6 0h2m-25 1h1m2 0h8m1 0h1m1 0h1m1 0h3m3 0h1m2 0h1m2 0h1m1 0h3m-33 1h1m3 0h2m2 0h1m1 0h10m2 0h2m4 0h4m-26 1h1m1 0h3m1 0h2m1 0h2m6 0h1m1 0h1m2 0h5m-32 1h1m1 0h3m3 0h1m2 0h2m1 0h2m1 0h1m4 0h1m1 0h3m2 0h1m-31 1h3m1 0h1m1 0h1m1 0h3m2 0h1m1 0h1m1 0h1m2 0h1m2 0h1m2 0h2m3 0h1m-31 1h3m1 0h1m1 0h2m2 0h4m2 0h7m5 0h2m-29 1h1m1 0h4m3 0h5m3 0h1m1 0h1m4 0h1m2 0h2m-31 1h2m1 0h1m1 0h1m2 0h1m1 0h1m2 0h1m2 0h1m3 0h1m3 0h2m1 0h1m1 0h2m1 0h1m-33 1h4m1 0h5m3 0h1m1 0h2m3 0h1m1 0h8m-26 1h2m3 0h3m1 0h1m1 0h1m1 0h1m1 0h2m4 0h2m1 0h1m1 0h1m1 0h1m-32 1h1m1 0h1m2 0h2m3 0h1m3 0h1m1 0h5m1 0h2m1 0h2m1 0h2m1 0h1m-32 1h2m1 0h1m6 0h2m1 0h1m5 0h1m2 0h4m1 0h5m-33 1h1m1 0h1m3 0h1m1 0h1m1 0h1m1 0h2m1 0h2m1 0h2m4 0h1m2 0h1m1 0h1m-30 1h3m1 0h1m2 0h1m2 0h1m1 0h3m5 0h1m1 0h2m3 0h2m1 0h1m-31 1h1m2 0h1m1 0h5m2 0h3m2 0h1m3 0h1m1 0h2m1 0h1m2 0h1m1 0h2m-33 1h1m2 0h2m4 0h1m1 0h2m2 0h1m1 0h4m1 0h3m1 0h1m2 0h2m1 0h1m-33 1h2m1 0h1m2 0h2m2 0h1m2 0h2m1 0h1m7 0h6m1 0h2m-25 1h1m1 0h2m1 0h1m1 0h4m5 0h1m3 0h1m1 0h1m-31 1h7m1 0h2m2 0h1m1 0h4m1 0h1m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1m-31 1h1m5 0h1m1 0h1m1 0h1m5 0h3m4 0h2m3 0h5m-33 1h1m1 0h3m1 0h1m1 0h4m1 0h2m1 0h2m2 0h1m1 0h7m-29 1h1m1 0h3m1 0h1m1 0h1m2 0h2m1 0h1m1 0h4m5 0h1m1 0h1m3 0h2m-33 1h1m1 0h3m1 0h1m5 0h4m1 0h1m1 0h4m2 0h1m1 0h3m1 0h2m-33 1h1m5 0h1m6 0h1m5 0h2m1 0h2m2 0h7m-33 1h7m1 0h1m6 0h1m1 0h1m1 0h2m2 0h2m2 0h2"/></svg>
+  </a>
+</section>
+
+<footer class="foot">
+  <span>Documentation: <a href="https://robert-patrick-texas.github.io/texas2step/">robert-patrick-texas.github.io/texas2step</a>
+    · Releases and source: <a href="https://github.com/robert-patrick-texas/texas2step">github.com/robert-patrick-texas/texas2step</a></span>
+  <span>texas2step <span id="version"></span></span>
+</footer>
+
+</main>
+</body>
+</html>

@@ -6,8 +6,8 @@
 README.md becomes index.html in its directory and every other X.md becomes X.html. Each
 page carries the same left-hand navigation and a link to the GitHub repository. Links
 between Markdown files are rewritten to the matching pages, links to other repository
-files point at GitHub, and images are copied alongside. An internal link or anchor that
-does not resolve fails the build, so CI catches documentation rot.
+files point at GitHub, and images and PDFs are copied alongside. An internal link or anchor
+that does not resolve fails the build, so CI catches documentation rot.
 
 The output uses relative URLs only and no JavaScript, so it works on GitHub Pages, behind
 a web server under any path, and straight from the file system.
@@ -226,7 +226,11 @@ class Site:
         self.pages = {
             src: Page(src, label=labels.get(str(src)) or "") for src in self.lead + self.tail
         }
-        self.assets: set[PurePosixPath] = set()
+        # Images join as pages show them. Every PDF under docs/ is published, linked or not:
+        # other sites link to them by their address on this one.
+        self.assets: set[PurePosixPath] = {
+            PurePosixPath(p.relative_to(root).as_posix()) for p in (root / "docs").rglob("*.pdf")
+        }
         self.anchors: list[tuple[Page, PurePosixPath, str, str]] = []
         self.problems: list[str] = []
 
@@ -288,11 +292,12 @@ class Site:
         on_disk = self.root / target
         suffix = f"#{fragment}" if fragment else ""
 
-        if image:
+        if image or target.suffix == ".pdf":
             if on_disk.is_file():
                 self.assets.add(target)
-                return quote(relative(target, page.out.parent))
-            self.problems.append(f"{page.src}: image {href} does not exist")
+                return quote(relative(target, page.out.parent)) + suffix
+            kind = "image" if image else "file"
+            self.problems.append(f"{page.src}: {kind} {href} does not exist")
             return href
         if on_disk.is_dir() and target / "README.md" in self.pages:
             target = target / "README.md"
@@ -401,7 +406,7 @@ def build(out: Path) -> tuple[bool, set[Path]]:
     site.render()
     site.write(out)
     inputs = {ROOT / src for src in site.pages} | {ROOT / a for a in site.assets}
-    print(f"{out}: {len(site.pages)} pages, {len(site.assets)} images", file=sys.stderr)
+    print(f"{out}: {len(site.pages)} pages, {len(site.assets)} images and PDFs", file=sys.stderr)
     for problem in site.problems:
         print(f"  error: {problem}", file=sys.stderr)
     return not site.problems, inputs | {CSS, FAVICON, ROOT / "pyproject.toml"}

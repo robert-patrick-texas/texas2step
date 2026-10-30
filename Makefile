@@ -1,4 +1,4 @@
-.PHONY: dev web web-watch test lint fmt check docs docs-watch deb version upgrade t2s t2s-test
+.PHONY: dev web web-watch test lint fmt check docs docs-watch sheet deb version upgrade t2s t2s-test
 
 # t2s, the Go client: the platforms it is built for (Go's names; darwin is macOS), each a
 # file of its own in dist/.
@@ -32,6 +32,9 @@ docs:           ## render every .md file into the static site in html/
 
 docs-watch:     ## re-render html/ whenever a .md file changes
 	uv run python scripts/build_docs.py --watch
+
+sheet:          ## print docs/at-a-glance.pdf, the one-page sheet, with Playwright's Chromium
+	uv run --with playwright python scripts/build_sheet.py
 
 deb:            ## build dist/texas2step-<version>-1-amd64.deb and dist/texas2step-setup (Ubuntu 26.04)
 	packaging/build-deb.sh

@@ -11,6 +11,7 @@ on:
     paths:
       - "**/*.md"
       - "docs/images/**"
+      - "docs/**/*.pdf"
       - "scripts/build_docs.py"
       - "scripts/docs.css"
       - "web/public/favicon.svg"

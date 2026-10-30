@@ -48,6 +48,7 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make check` | lint and test, and t2s's tests |
 | `make docs` | Render every `.md` file into the static site in `html/` |
 | `make docs-watch` | Re-render `html/` whenever a `.md` file changes |
+| `make sheet` | Print `docs/at-a-glance.pdf`, the one-page sheet, from `scripts/at-a-glance.html` |
 | `make deb` | Build `dist/texas2step-<version>-1-amd64.deb` and `dist/texas2step-setup` |
 | `make version` | Print the version |
 | `make upgrade` | Move every Python, npm and Go dependency to its newest release, then rebuild the UI |
@@ -177,6 +178,16 @@ On GitHub, `.github/workflows/docs.yml` builds the same site and publishes it to
 Pages on every push to `main` that touches Markdown. It needs Pages enabled once: in the
 repository settings, **Pages → Source: GitHub Actions**. Until then the workflow builds
 the site and skips the deploy with a notice.
+
+Every PDF under `docs/` is published with the site. One is `docs/at-a-glance.pdf`: the
+[at-a-glance](at-a-glance.md) page condensed onto one US Letter page to print. Its source
+is `scripts/at-a-glance.html`, so change it along with the page, then run `make sheet` and
+commit the PDF. `make sheet` prints with Playwright's Chromium, installed once with
+`uv run --with playwright playwright install chromium`, and fails if the sheet runs over
+one page. It wants two fonts installed: JetBrains Mono (`fonts-jetbrains-mono`) and
+Inter's TrueType files, from `extras/ttf/` in an [Inter release](https://github.com/rsms/inter/releases).
+Chromium embeds the OpenType build of Inter that Ubuntu's `fonts-inter` installs as Type 3
+fonts, whose text loses spaces when copied; `make sheet` warns when that happens.
 
 ## Build the Debian package
 
