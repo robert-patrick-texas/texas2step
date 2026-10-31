@@ -183,8 +183,8 @@ panel stays on the terminal, with the totals since it started.
 |---|---|
 | `--profile NAME` | `path` (small probes), `voice` (a voice call's packets) or `video` (a video call's, with its voice); the calls are scored every 10 seconds (default: as the server says) |
 | `--rate N` | path probes a second (default 10) |
-| `--size BYTES` | bytes in a path probe (default 64) |
-| `--voice-size BYTES`, `--every MS` | a voice packet's size and spacing (default 200 bytes every 20 ms) |
+| `--size BYTES` | bytes in a path probe (default 64; at most 64 once a server's traffic limit holds a call to path probes) |
+| `--voice-size BYTES`, `--every MS` | a voice packet's size and spacing (default 200 bytes every 20 ms; at most 300 bytes once a busy server holds a Video call to Voice) |
 | `--video KBPS` | the video call's rate (default 1000) |
 | `--window SECONDS` | what the figures cover, up to 900 (default 60) |
 | `--seconds N` | stop after this long, from the first probe: the last probes get 1.5 seconds to come back, so a call's last 10 seconds are scored too (default: until Ctrl-C) |

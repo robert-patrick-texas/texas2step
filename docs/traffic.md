@@ -141,6 +141,8 @@ acknowledgements the server sends back, as measured over IPv6. A tab left runnin
 
 When the limit is reached, the server holds those sessions to the small probes of the
 Path profile, which aren't counted, and Monitor says so with the site's message and link.
+It echoes only probes of 64 bytes or less there, so Monitor sends those until Stop,
+whatever Probe size says.
 Until the limit opens again, a call profile is refused at its start.
 `monitor_video = false` in the settings withholds the Video call profile altogether, and
 `monitor_voice = false` the Voice call one: the page doesn't offer them, and the server

@@ -90,6 +90,9 @@ const CHECK_SLOW_MS = 10_000; // between them once it has been quiet a minute
 const GRACE_MS = 1500; // after the server answers, for its session to come back by itself
 const WAIT_MS = [5000, 30_000]; // between new sessions that fail: from 5 s, doubling to 30 s
 const UDP_RETRY_MS = 30_000; // over the TCP fallback, between tries of UDP
+// Held to path probes by a traffic limit, a session has only those this size or smaller
+// echoed (rtc.py's PATH_BYTES), whatever Probe size says.
+const HELD_BYTES = 64;
 
 const RATES = [5, 10, 20, 50];
 const WINDOWS: [number, string][] = [
@@ -147,6 +150,7 @@ export class MonitorView implements View {
   private chart = new LiveChart();
   private dests: Dest[] = [];
   private running = false;
+  private held = false; // a traffic limit holds this run to path probes of HELD_BYTES at most
   private stoppedAt: number | null = null; // Date.now() at Stop: the chart and figures hold there
   private timers: number[] = [];
   private seq = 0;
@@ -538,6 +542,7 @@ export class MonitorView implements View {
       return;
     }
     this.running = true;
+    this.held = false;
     this.startedAt = Date.now();
     this.startBtn.textContent = "Stop";
     for (const d of this.dests) d.lastEcho = Date.now();
@@ -799,6 +804,7 @@ export class MonitorView implements View {
     const c = this.choice;
     if (c.profile === "path" || c.profile === to) return;
     c.profile = to;
+    this.held ||= to === "path";
     // Path probes aren't a call's packets: nothing scores them as one (as t2s).
     if (to === "path") for (const d of this.dests) d.stream = null;
     this.say(`${message} Monitor carries on with ${to === "voice" ? "the Voice call" : "small probes"}.`, url);
@@ -837,7 +843,8 @@ export class MonitorView implements View {
         d.probe.send(seq, size);
       }
     };
-    this.timers.push(window.setInterval(() => send(call ? c.voiceSize : c.size, -1, true), call ? c.every : 1000 / c.rate));
+    const size = this.held ? Math.min(c.size, HELD_BYTES) : c.size;
+    this.timers.push(window.setInterval(() => send(call ? c.voiceSize : size, -1, true), call ? c.every : 1000 / c.rate));
     if (c.profile === "video") {
       // A frame at a time: its packets leave together, as a video call sends them.
       const burst = framePackets(c.video);

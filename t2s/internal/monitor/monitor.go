@@ -31,6 +31,11 @@ const (
 	waitMostMs  = 30_000
 	udpRetryMs  = 30_000 // over the TCP fallback, between tries of UDP
 	lostAfterMs = 1000   // a probe not back within a second is lost
+	// A session the server holds has only probes this size or smaller echoed, whatever
+	// --size and --voice-size say: path probes past a traffic limit (rtc.py's PATH_BYTES),
+	// and voice packets while a busy host holds a Video call to Voice (VOICE_BYTES).
+	heldPathBytes  = 64
+	heldVoiceBytes = 300
 )
 
 // Config is what Monitor sends.
@@ -137,6 +142,7 @@ type Monitor struct {
 	seq       uint32
 	frame     int
 	running   bool
+	held      string // "path" or "voice": what a server holds Monitor's call to, until Stop
 	stopSend  context.CancelFunc
 	run       int // which session a reconnection belongs to
 	startedAt float64
@@ -252,7 +258,7 @@ func (m *Monitor) Start(ctx context.Context) error {
 		return fmt.Errorf("%s is unreachable", m.Dests[0].info.Name(m.Dests[0].t))
 	}
 	m.mu.Lock()
-	m.running = true
+	m.running, m.held = true, ""
 	m.startedAt = wall()
 	for _, d := range m.Dests {
 		d.lastEcho = m.startedAt
@@ -447,8 +453,14 @@ func (m *Monitor) schedule() {
 	call := c.Profile != "path"
 	every := 1000 / c.Rate
 	size := c.Size
+	if m.held == "path" {
+		size = min(size, heldPathBytes)
+	}
 	if call {
 		every, size = c.Every, c.VoiceSize
+		if m.held == "voice" {
+			size = min(size, heldVoiceBytes)
+		}
 	}
 	// One clock for every server, so their packets leave together.
 	send := func(size, frame int, charted bool) {
@@ -690,7 +702,7 @@ func (m *Monitor) limited(message, link, to string) {
 	if m.cfg.Profile == "path" || m.cfg.Profile == to {
 		return
 	}
-	m.cfg.Profile = to
+	m.cfg.Profile, m.held = to, to
 	text := message + " Monitor carries on with small probes."
 	if to == "voice" {
 		text = message + " Monitor carries on with the Voice call."
