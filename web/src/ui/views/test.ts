@@ -221,6 +221,7 @@ export class TestView implements View {
   private options!: HTMLElement;
   private refreshOptions: (() => void)[] = [];
   private run: TestRun | null = null;
+  private starting = false; // a test on its way: the server asked, HTTP/3 reached
   private result: TestResult | null = null;
   /** Whether the page shows a saved result (/r/<id>) rather than a test from this visit. */
   private showingSaved = false;
@@ -460,6 +461,17 @@ export class TestView implements View {
       this.run.abort();
       return;
     }
+    // Pressed again before the test began: one test, not two at once.
+    if (this.starting) return;
+    this.starting = true;
+    try {
+      await this.start();
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  private async start(): Promise<void> {
     const app = this.app;
     if (!app.info) await app.refreshFamily();
     if (!app.info) {
@@ -542,13 +554,15 @@ export class TestView implements View {
       partial: (r) => this.renderResult(r, true),
     };
 
-    this.run = new TestRun(ep, app.info, whoami, { streams, seconds, packets, intervalMs, oneStream, ...(ep !== app.ep && http !== "auto" ? { http } : {}) }, events);
+    const run = new TestRun(ep, app.info, whoami, { streams, seconds, packets, intervalMs, oneStream, ...(ep !== app.ep && http !== "auto" ? { http } : {}) }, events);
+    this.run = run;
+    this.starting = false; // from here, a press stops it
     app.awake.hold("test");
     this.gauge.setRunning(true);
     this.gauge.button.setAttribute("aria-label", "Stop test");
     let result: TestResult | null = null;
     try {
-      result = await this.run.run();
+      result = await run.run();
     } catch (err) {
       if (err instanceof Refused) {
         this.refused(err.message, err.url);
@@ -557,12 +571,12 @@ export class TestView implements View {
         // code screen; another server has the code asked for over the page.
         void ep.refused();
         this.askingCode(ep);
-      } else if (!this.run.aborted) {
+      } else if (!run.aborted) {
         console.error(err);
         setText(this.status, `The test stopped unexpectedly: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    const aborted = this.run.aborted;
+    const aborted = run.aborted;
     this.run = null;
     app.awake.hold("test", false);
     this.gauge.setRunning(false, true);
@@ -615,6 +629,8 @@ export class TestView implements View {
     try {
       const saved = await this.app.origin.post<{ id: string }>("/results", result);
       result.id = saved.id;
+      // Another test began while it was saved: the status line and the address are its.
+      if (this.result !== result) return;
       this.status.append(" Saved as Result ID ", resultId(saved.id));
       // A visitor without the desk's functions can't open /r/ links; the desk can.
       if (this.app.desk) this.app.setAddress(`/r/${saved.id}`);
