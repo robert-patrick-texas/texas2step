@@ -188,6 +188,14 @@ def cases() -> dict[str, list[dict]]:
         )
         out["call_quality"].append({"loss": loss, "want": quality.call_quality(loss)})
     out["call_quality"].append({"loss": {"error": "TimeoutError: no answer"}, "want": None})
+    # Every one of the call's packets lost (each other probe at 10 ms): a burst ratio of 0,
+    # scored as random loss, as Python's `ratio or 1.0` does.
+    alternate = {
+        "packets": [None if i % 2 == 0 else 20.0 for i in range(40)],
+        "interval_ms": 10.0,
+        "rtt": {"median": 20.0},
+    }
+    out["call_quality"].append({"loss": alternate, "want": quality.call_quality(alternate)})
 
     for tls, loaded_probes in ((True, False), (False, False), (True, True)):
         result: dict[str, Any] = {"latency": {"setup_ms": 33.25}}

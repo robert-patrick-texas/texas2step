@@ -140,7 +140,8 @@ function judge(seqs: readonly number[], lost: readonly boolean[], late: readonly
   const lateCount = late.filter(Boolean).length;
   const pct = (impaired.filter(Boolean).length / impaired.length) * 100;
   const ratio = burstRatio(view);
-  const r = rFactor(delayMs, pct, ratio ?? 1);
+  // As Python's `ratio or 1.0`: every packet impaired gives a ratio of 0, scored as random.
+  const r = rFactor(delayMs, pct, ratio || 1);
   const score = mos(r);
   const gap = longestRun(view) * intervalMs * step;
   return {
