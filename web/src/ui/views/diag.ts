@@ -600,7 +600,8 @@ export class DiagView implements View {
           ),
           this.els.cpuCard,
         ),
-        h("section", { class: "card" }, h("header", { class: "card-head head-inline diag-log-head" }, h("h2", {}, "Events"), copy), this.els.log),
+        // The log fills the card, which is as tall as the cards beside it, and scrolls.
+        h("section", { class: "card diag-log-card" }, h("header", { class: "card-head head-inline diag-log-head" }, h("h2", {}, "Events"), copy), h("div", { class: "diag-log-box" }, this.els.log)),
       ),
     );
     this.off = this.app.onServer(() => {

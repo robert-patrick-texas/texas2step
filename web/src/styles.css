@@ -3018,8 +3018,28 @@ a.brand-org:hover,
   justify-content: space-between;
 }
 
+/* The Events card is as tall as the cards beside it; its log fills it and scrolls. Held
+   out of the layout, the log can't make the row taller as events come in; alone in a
+   column, as on a phone, it keeps 260 px. */
+.diag-log-card {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Its bottom edge lines up with the cards beside it, as the grid's gap spaces them. */
+.page > .grid > .diag-log-card {
+  margin-bottom: 0;
+}
+
+.diag-log-box {
+  position: relative;
+  flex: 1;
+  min-height: 260px;
+}
+
 .diag-log {
-  max-height: 260px;
+  position: absolute;
+  inset: 0;
   margin: 0;
   padding: 0;
   overflow: auto;
