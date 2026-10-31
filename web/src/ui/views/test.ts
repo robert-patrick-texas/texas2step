@@ -90,16 +90,16 @@ const share = (v: number) => `${Math.round(v * 100)}%`;
 
 /** A transfer the device held back, in its tile's small print: what showed it. */
 function deviceShort(t: ThroughputResult): string {
-  if (t.device_bound === "window") return `${share(t.device_window ?? 0)}\u00a0held back`;
+  if (t.device_bound === "window") return `server\u00a0waited\u00a0${share(t.device_window ?? 0)}`;
   if (t.device_bound === "cpu") return `${share(t.device_cpu ?? 0)}\u00a0of a\u00a0core`;
-  return "page\u00a0fell\u00a0behind";
+  return `page\u00a0behind\u00a0${share(t.device_full_reads ?? 0)}`;
 }
 
 /** The device, not the network, set the rate (docs/methodology.md#when-the-device-is-the-limit). */
 function deviceNote(t: ThroughputResult): string {
-  if (t.device_bound === "window") return `Device-bound: this device held the server back ${share(t.device_window ?? 0)} of the time: it didn't take the data as fast as the server could send it, so the device, not the network, set this rate.`;
+  if (t.device_bound === "window") return `Device-bound: the server waited on this device ${share(t.device_window ?? 0)} of the time, as it didn't take the data as fast as the server could send it, so the device, not the network, set this rate.`;
   if (t.device_bound === "cpu") return `Device-bound: the command line ran at ${share(t.device_cpu ?? 0)} of a core, so the computer, not the network, set this rate.`;
-  return `Device-bound: the page read ${share(t.device_full_reads ?? 0)} of the data in full reads, so the bytes waited for this device, not the other way round: the device, not the network, set this rate.`;
+  return `Device-bound: the page fell behind, with ${share(t.device_full_reads ?? 0)} of the data waiting for it to read it, so the device, not the network, set this rate.`;
 }
 
 /** A transfer the device held back, in its tile's small print, above what it had. */
@@ -118,11 +118,11 @@ function tileNote(t: ThroughputResult, before = ""): string {
 /** What the device did during a transfer, for All measurements. */
 function deviceText(t: ThroughputResult): string | null {
   const parts = [
-    t.device_window !== undefined ? `held the server back ${share(t.device_window)} of the time` : "",
+    t.device_window !== undefined ? `server waited ${share(t.device_window)}` : "",
     t.device_cpu !== undefined ? `the command line at ${share(t.device_cpu)} of a core` : "",
-    t.device_busy !== undefined ? `the page ran late ${share(t.device_busy)} of it (95th percentile ${text(ms(t.device_lag_ms ?? 0))})` : "",
-    t.device_full_reads !== undefined ? `${share(t.device_full_reads)} read in full reads` : "",
-    t.device_long_ms !== undefined ? `long tasks ${Math.round(t.device_long_ms).toLocaleString()} ms` : "",
+    t.device_busy !== undefined ? `browser busy/late ${share(t.device_busy)} (95th percentile ${text(ms(t.device_lag_ms ?? 0))})` : "",
+    t.device_full_reads !== undefined ? `page behind ${share(t.device_full_reads)}` : "",
+    t.device_long_ms !== undefined ? `long stalls ${Math.round(t.device_long_ms).toLocaleString()} ms` : "",
   ].filter(Boolean);
   if (!parts.length) return null;
   return `${t.device_bound && !bound(t) ? "Device-bound: " : ""}${parts.join(" · ")}`;
@@ -868,7 +868,7 @@ export class TestView implements View {
     else if (r.bufferbloat?.withheld) add("Bufferbloat", "no grade: the page's own lateness made most of the rise (device busy)");
     const l = r.loss;
     if (l) add("Packet loss", `${text(pct(l.loss_pct))} (${l.lost}/${l.sent}) over ${l.transport === "webrtc" ? "UDP" : "TCP"}${l.up_loss_pct !== null ? ` · up ${text(pct(l.up_loss_pct))} · down ${text(pct(l.down_loss_pct))}` : ""} · ${l.out_of_order} out of order · RTT ${text(ms(l.rtt.median))} · jitter ${text(ms(l.rtt.jitter))}`);
-    if (l?.device_busy !== undefined) add("Packet loss device", `the page ran late ${share(l.device_busy)} of it (95th percentile ${text(ms(l.device_lag_ms ?? 0))})`);
+    if (l?.device_busy !== undefined) add("Packet loss device", `browser busy/late ${share(l.device_busy)} (95th percentile ${text(ms(l.device_lag_ms ?? 0))})`);
     const call = r.call ?? callQuality(l);
     const side = (c: CallSide) => `${c.mos.toFixed(2)} MOS, ${rated(c)} · R ${c.r.toFixed(1)} · ${text(pct(c.impaired_pct))} lost or late (${c.late} late) · longest gap ${c.longest_gap_ms} ms · burst ratio ${c.burst_ratio?.toFixed(2) ?? "—"}`;
     if (call?.basis === "each way" && call.up && call.down) {
