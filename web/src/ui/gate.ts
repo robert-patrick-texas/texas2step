@@ -33,8 +33,10 @@ export function passHeld(): boolean {
  */
 export async function admit(origin: Endpoint): Promise<AccessStatus | null> {
   const saved = store<Pass>(KEY, { pass: "", expires: 0 });
-  expires = saved.pass ? saved.expires : 0; // one that ran out: the code is asked for again
-  if (passHeld()) setPass(saved.pass);
+  expires = saved.pass ? saved.expires : 0;
+  // Even past the time it came with: how long a pass lasts is each server's
+  // access_pass_hours now, which may have been raised since. The server says.
+  if (saved.pass) setPass(saved.pass);
   // A site that shows the code screen alone hid the header and footer before first paint,
   // in case the code is asked for (index.html); they're back unless it is.
   const root = document.documentElement;
@@ -46,6 +48,16 @@ export async function admit(origin: Endpoint): Promise<AccessStatus | null> {
     return null;
   }
   note = status.note ?? "";
+  if (saved.pass && status.pass) {
+    if (status.pass.valid && status.pass.expires) {
+      expires = status.pass.expires; // as the setting is now
+      save(KEY, { pass: saved.pass, expires });
+    } else if (!status.pass.valid) {
+      // Ran out, or was ended: not sent on, and the code is asked for again.
+      setPass("");
+      expires = Math.min(expires, Math.floor(Date.now() / 1000));
+    }
+  }
   if (!status.required || status.pass?.valid) {
     root.classList.remove("gated");
     return status;

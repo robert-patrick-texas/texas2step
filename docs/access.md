@@ -280,7 +280,9 @@ texas2step run https://speedtest.example.net/texas2step --code maple.river.42
 | History, the API tab, `/r/<id>`, reading saved results, `/api/docs`, `/api/openapi.json`, `/api/v1/measure/*`, the current code, [lockouts and blocks](#lockouts-and-blocks) | An address in `internal_networks`; others get 404 |
 
 The page keeps the pass in the browser's local storage and sends it with every request
-it makes. To its own server it goes in an `Authorization: Bearer` header, and a
+it makes. Each time it loads, it asks its own server whether the pass still holds, and
+when it runs out under the setting now, so a raised `access_pass_hours` reaches passes
+already in browsers. To its own server it goes in an `Authorization: Bearer` header, and a
 WebSocket's in its subprotocol, which keeps the pass out of the URLs that
 TLS-inspecting proxies log. To the other servers in the picker it goes as `?pass=`: a
 header there would make the browser ask permission (a CORS preflight) before each timed
