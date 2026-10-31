@@ -67,7 +67,8 @@ export class CallStream {
   private origin: number | null = null; // Date.now() at the first packet: slices count from it
   private scored = new Map<number, Slice>();
 
-  constructor(readonly voiceIntervalMs: number) {}
+  /** `voiceIntervalMs`: changed as Monitor's Voice every is, for the slices still to score. */
+  constructor(public voiceIntervalMs: number) {}
 
   /** A new session to the server, after an outage: its counts start again from its first probe. */
   newSession(): void {

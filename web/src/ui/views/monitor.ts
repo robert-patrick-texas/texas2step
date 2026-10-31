@@ -378,7 +378,12 @@ export class MonitorView implements View {
     } else {
       grid.append(
         seg("Voice packet", [[100, "100 B"], [200, "200 B"], [300, "300 B"]], c.voiceSize, (v) => live(v, () => (c.voiceSize = v))),
-        seg("Voice every", [[10, "10 ms"], [20, "20 ms"], [30, "30 ms"]], c.every, (v) => live(v, () => (c.every = v))),
+        seg("Voice every", [[10, "10 ms"], [20, "20 ms"], [30, "30 ms"]], c.every, (v) =>
+          live(v, () => {
+            c.every = v;
+            for (const d of this.dests) if (d.stream) d.stream.voiceIntervalMs = v; // its gaps are this far apart now
+          }),
+        ),
       );
       if (c.profile === "video") grid.append(seg("Video", [[500, "0.5 Mb/s"], [1000, "1 Mb/s"], [2500, "2.5 Mb/s"]], c.video, (v) => live(v, () => (c.video = v))));
     }
@@ -794,6 +799,8 @@ export class MonitorView implements View {
     const c = this.choice;
     if (c.profile === "path" || c.profile === to) return;
     c.profile = to;
+    // Path probes aren't a call's packets: nothing scores them as one (as t2s).
+    if (to === "path") for (const d of this.dests) d.stream = null;
     this.say(`${message} Monitor carries on with ${to === "voice" ? "the Voice call" : "small probes"}.`, url);
     this.renderProfile();
     // The lede, the chart's head and the figures are each the profile's own.
