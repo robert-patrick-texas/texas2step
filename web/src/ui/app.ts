@@ -14,8 +14,12 @@ export interface Settings {
   intervalMs: number;
   oneStream: boolean | null; // null: as the server tested says (defaults.one_stream)
   family: "auto" | "ipv4" | "ipv6";
+  http: "auto" | HttpVersion; // a test's transfers, through the server's name for that version
   keepAwake: boolean; // keep the screen on while a page measures (awake.ts)
 }
+
+/** An HTTP version a test can be held to, where the server has a name that serves only it. */
+export type HttpVersion = "http1" | "http3";
 
 export interface View {
   mount(root: HTMLElement, params: Record<string, string>): void;
@@ -68,7 +72,7 @@ export class App {
   private routes: Route[] = [];
 
   constructor() {
-    this.settings = store<Settings>("t2s.settings", { streams: 4, seconds: 10, packets: 500, intervalMs: 10, oneStream: null, family: "auto", keepAwake: true });
+    this.settings = store<Settings>("t2s.settings", { streams: 4, seconds: 10, packets: 500, intervalMs: 10, oneStream: null, family: "auto", http: "auto", keepAwake: true });
   }
 
   /** A route to `page`; a page with several (Test's / and /r/<id>) is one page, kept once. */
@@ -236,6 +240,38 @@ export class App {
     if (family === "ipv4") return new Endpoint(loc.url_v4, family);
     if (family === "ipv6") return new Endpoint(loc.url_v6, family);
     return new Endpoint(loc.url);
+  }
+
+  /** The family a test to the selected server goes over: the chosen one, else the one the
+   * browser reached it by. */
+  private testFamily(): Family | null {
+    const family = this.whoami?.family;
+    return this.familyFor(this.selected) ?? (family === "IPv4" ? "ipv4" : family === "IPv6" ? "ipv6" : null);
+  }
+
+  /** The HTTP versions the selected server has a name for, in the family a test goes over.
+   * Each name has an address of its own, so a browser opens a connection of its own to it
+   * rather than reusing the page's (HTTP/2) one. */
+  httpVersions(): HttpVersion[] {
+    const loc = this.selected;
+    const v = { ipv4: "v4", ipv6: "v6" } as const;
+    const family = this.testFamily();
+    return loc && family ? (["http1", "http3"] as const).filter((http) => loc[`url_${v[family]}_${http}`]) : [];
+  }
+
+  /** The HTTP version a test goes over: the chosen one, where the server has a name for it. */
+  get http(): Settings["http"] {
+    const want = this.settings.http;
+    return want !== "auto" && this.httpVersions().includes(want) ? want : "auto";
+  }
+
+  /** The selected server's name for the chosen HTTP version; null for Auto. */
+  httpEndpoint(): Endpoint | null {
+    const loc = this.selected;
+    const family = this.testFamily();
+    const http = this.http;
+    if (!loc || !family || http === "auto") return null;
+    return new Endpoint(loc[`url_${family === "ipv4" ? "v4" : "v6"}_${http}`], family);
   }
 
   // ---- The access code, asked by another address -----------------------------------

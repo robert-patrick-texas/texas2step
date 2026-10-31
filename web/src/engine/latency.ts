@@ -59,6 +59,22 @@ export async function pingOnce(ep: Endpoint, signal?: AbortSignal, timeoutMs = 3
   return ping && "rtt" in ping ? ping : null;
 }
 
+/**
+ * Pings a name that offers HTTP/3 until the browser reaches it over HTTP/3: browsers ask
+ * over TCP first, and move once the server's Alt-Svc says it offers HTTP/3, after two or
+ * three requests. False if it hasn't within `timeoutMs`: UDP may be blocked on the way, or
+ * the browser doesn't use HTTP/3.
+ */
+export async function reachHttp3(ep: Endpoint, signal?: AbortSignal, timeoutMs = 10_000): Promise<boolean> {
+  const end = performance.now() + timeoutMs;
+  while (performance.now() < end) {
+    const ping = await pingOnce(ep, signal);
+    if (/^h3/i.test(ping?.protocol ?? "")) return true;
+    await sleep(250);
+  }
+  return false;
+}
+
 /** One GET of /ping, as pingOnce, but an error answer gives its status: the server
  * answered, so it wasn't lost. */
 async function pingAnswer(ep: Endpoint, signal?: AbortSignal, timeoutMs = 3000): Promise<Ping | { status: number } | null> {

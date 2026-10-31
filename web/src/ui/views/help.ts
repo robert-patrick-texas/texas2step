@@ -51,7 +51,7 @@ const TOPICS: Topic[] = [
         b("All measurements"),
         " lists every figure, to download or copy. Where the site keeps results, a finished test is saved with the address the server saw it from, and the page shows its ID: read it to the service desk, who can open the same result.",
       ),
-      p(b("Test options"), " change the number of transfers at once, how long each runs, the number of UDP packets and their spacing, and whether One stream runs."),
+      p(b("Test options"), " change the number of transfers at once, how long each runs, the number of UDP packets and their spacing, and whether One stream runs. Where the site has set it up, they also choose the HTTP version: HTTP/1.1, where each transfer has a connection of its own, or HTTP/3, over UDP."),
       h("h3", {}, "For good results"),
       list("ul", [
         ["Keep the page in front while it runs: browsers slow pages in the background."],

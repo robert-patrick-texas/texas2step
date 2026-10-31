@@ -1,9 +1,10 @@
 // The main view: run a test (or show a saved one) with live instruments and charts.
 import { appPath, NeedsCode, Refused, REFUSED } from "../../engine/net";
+import { reachHttp3 } from "../../engine/latency";
 import { callQuality, responsiveness } from "../../engine/quality";
 import { type Phase, PHASES, type RunEvents, TestRun } from "../../engine/runner";
 import type { CallQuality, CallRating, CallSide, Direction, Level, RateLimit, Readiness, Responsiveness, ResponsivenessSide, TestResult, ThroughputResult } from "../../types";
-import type { App, Settings, View } from "../app";
+import type { App, HttpVersion, Settings, View } from "../app";
 import { awakeSwitch } from "../awake";
 import { LatencyChart } from "../charts/latency";
 import { PacketGrid } from "../charts/packets";
@@ -66,6 +67,17 @@ const limitText = (l: RateLimit) => `${text(rate(l.from_mbps))} until ${fellAt(l
 function putLimit(t: Tile, l: RateLimit): void {
   t.sub.classList.add("wraps");
   t.sub.replaceChildren(h("span", { class: "grade limit" }, "Rate limit"), ` ${nb(l.to_mbps)} after\u00a0${fellAt(l)}`, h("br"), `${nb(l.from_mbps)} before`);
+}
+
+const HTTP_NAME: Record<HttpVersion, string> = { http1: "HTTP/1.1", http3: "HTTP/3" };
+
+/** The browser's or the server's word for an HTTP version, as the page writes it. */
+function httpWord(p: string | null | undefined): string {
+  const s = p ?? "";
+  if (/^(h3|http\/3)/i.test(s)) return "HTTP/3";
+  if (/^(h2|http\/2)/i.test(s)) return "HTTP/2";
+  if (/^http\/1\.1$/i.test(s)) return "HTTP/1.1";
+  return s;
 }
 
 const LIMIT_NOTE = "The rate held, then stepped down and stayed down: a shaper, a policer or the end of a speed boost. The big figure is the mean after ramp-up, both rates together.";
@@ -278,12 +290,29 @@ export class TestView implements View {
         { class: "opt-grid" },
         seg("streams", "Parallel streams", [[1, "1"], [2, "2"], [4, "4"], [6, "6"], [8, "8"]], "Concurrent transfers. Browsers allow six HTTP/1.1 connections per server; HTTP/2 multiplexes on one."),
         seg("seconds", "Duration", [[5, "5s"], [10, "10s"], [15, "15s"], [20, "20s"], [30, "30s"]], "Length of each of the download and upload phases. A longer one shows a speed boost that ends after several seconds."),
+        this.httpOption(seg("http", "HTTP", [["auto", "Auto"], ["http1", "HTTP/1.1"], ["http3", "HTTP/3"]], "The HTTP version of the test, through the server's name that serves only it. Auto: as the browser and the server agree, often HTTP/2, where every stream shares one connection. HTTP/1.1 gives each stream a connection of its own; HTTP/3 runs over UDP.", () => this.app.http)),
         seg("packets", "UDP probes", [[0, "Skip"], [200, "200"], [500, "500"], [1000, "1000"]], "Packets sent in the loss test."),
         seg("intervalMs", "Probe spacing", [[5, "5 ms"], [10, "10 ms"], [20, "20 ms"]], "Time between UDP probes."),
         seg("oneStream", "One stream", [[true, "Download"], [false, "Skip"]], "After the download, one stream for the same time: what a single file copy gets. Skipped when the test uses one stream. Until you choose, as the server says.", () => this.oneStream()),
         this.awakeOption(),
       ),
     );
+  }
+
+  /** The HTTP choice offers only the versions the server has a name for, in the family the
+   * test goes over, and none of it without any. */
+  private httpOption(row: HTMLElement): HTMLElement {
+    const offer = () => {
+      const versions = this.app.httpVersions();
+      const buttons = row.querySelectorAll<HTMLElement>("[role=radio]");
+      row.hidden = !versions.length;
+      buttons[1]!.hidden = !versions.includes("http1");
+      buttons[2]!.hidden = !versions.includes("http3");
+    };
+    offer();
+    this.refreshOptions.push(offer);
+    row.addEventListener("click", () => this.describeEndpoints()); // after the choice is saved
+    return row;
   }
 
   /** The screen is kept on while a test runs: one setting with Monitor's and Diag's. */
@@ -315,9 +344,8 @@ export class TestView implements View {
   }
 
   /** The server asks for the access code: a button to enter it, where it can be. */
-  private askingCode(): void {
+  private askingCode(ep = this.app.ep): void {
     const { app } = this;
-    const ep = app.ep;
     clear(this.status);
     this.status.append(app.needsCodeText(ep));
     if (app.takesCode) {
@@ -349,7 +377,10 @@ export class TestView implements View {
     };
     setText(this.link.client.title, "You");
     line(this.link.client.detail, client?.ip ?? whoami?.ip ?? "—");
-    line(this.link.client.sub, [client?.family ?? whoami?.family, client?.protocol ?? whoami?.http_version].filter(Boolean).join(" · "));
+    // The next test's HTTP version, where it's held to one, until a result says which it got.
+    const http = this.app.http;
+    const protocol = client?.protocol ?? (http !== "auto" ? HTTP_NAME[http] : whoami?.http_version);
+    line(this.link.client.sub, [client?.family ?? whoami?.family, httpWord(protocol)].filter(Boolean).join(" · "));
     const server = saved?.server ?? info?.server;
     const version = saved?.server.version ?? info?.version;
     setText(this.link.server.title, server?.name ?? "Server");
@@ -378,6 +409,29 @@ export class TestView implements View {
       return;
     }
     if (this.away) return; // another page was chosen meanwhile
+    // Held to an HTTP version: the server's name for it, how it sees this browser there,
+    // and for HTTP/3, the browser moved onto it before the clock starts.
+    let ep = app.ep;
+    let whoami = app.whoami;
+    const http = app.http;
+    const named = app.httpEndpoint();
+    if (named && http !== "auto") {
+      whoami = await named.whoami().catch(() => null);
+      if (!whoami) {
+        if (named.needsCode) this.askingCode(named);
+        else setText(this.status, `The server's ${HTTP_NAME[http]} name isn't answering. Choose Auto under Test options to test over its main name.`);
+        return;
+      }
+      if (http === "http3") {
+        setText(this.status, "Reaching the server over HTTP/3…");
+        if (!(await reachHttp3(named))) {
+          setText(this.status, "This browser stays on TCP to the server's HTTP/3 name: UDP may be blocked on the way, or this browser doesn't use HTTP/3. Choose Auto or HTTP/1.1 under Test options to test anyway.");
+          return;
+        }
+      }
+      if (this.away) return;
+      ep = named;
+    }
     this.noted = false;
     this.left = false;
     // Leave a saved-result URL without re-routing (that would build this page anew).
@@ -421,7 +475,7 @@ export class TestView implements View {
       partial: (r) => this.renderResult(r, true),
     };
 
-    this.run = new TestRun(app.ep, app.info, app.whoami, { streams, seconds, packets, intervalMs, oneStream }, events);
+    this.run = new TestRun(ep, app.info, whoami, { streams, seconds, packets, intervalMs, oneStream, ...(ep !== app.ep && http !== "auto" ? { http } : {}) }, events);
     app.awake.hold("test");
     this.gauge.setRunning(true);
     this.gauge.button.setAttribute("aria-label", "Stop test");
@@ -434,8 +488,8 @@ export class TestView implements View {
       } else if (err instanceof NeedsCode) {
         // The pass stopped working: on this site's own server the page goes back to the
         // code screen; another server has the code asked for over the page.
-        void app.ep.refused();
-        this.askingCode();
+        void ep.refused();
+        this.askingCode(ep);
       } else if (!this.run.aborted) {
         console.error(err);
         setText(this.status, `The test stopped unexpectedly: ${err instanceof Error ? err.message : String(err)}`);
@@ -455,8 +509,18 @@ export class TestView implements View {
     this.result = result;
     this.describeEndpoints();
     this.renderResult(result);
-    setText(this.status, `Done in ${result.duration_s?.toFixed(0)}s.`);
+    setText(this.status, `Done in ${result.duration_s?.toFixed(0)}s.${this.httpNote(result)}`);
     await this.save(result);
+  }
+
+  /** A test held to an HTTP version says which it went over, and why, if another. */
+  private httpNote(r: TestResult): string {
+    const asked = r.config.http;
+    if (!asked) return "";
+    const got = httpWord(r.client.protocol);
+    if (!got || got === HTTP_NAME[asked]) return ` Over ${HTTP_NAME[asked]}.`;
+    const why = asked === "http1" ? `the server's HTTP/1.1 name offers ${got} too` : "the browser moved back to TCP";
+    return ` Over ${got}, not ${HTTP_NAME[asked]}: ${why}.`;
   }
 
   private onPhase(p: Phase): void {
@@ -691,12 +755,12 @@ export class TestView implements View {
     const rows: [string, string][] = [];
     const add = (k: string, v: string | undefined | null) => v && rows.push([k, v]);
     add("Server", [r.server.name, r.server.location, r.server.url].filter(Boolean).join(" · "));
-    add("Client", [r.client.ip, r.client.family, r.client.protocol].filter(Boolean).join(" · "));
+    add("Client", [r.client.ip, r.client.family, httpWord(r.client.protocol)].filter(Boolean).join(" · "));
     add("This computer", r.client.local_ip);
     // Browser results from before mac_source read theirs from EUI-64 too.
     add("MAC", r.client.mac && `${r.client.mac}, ${r.client.mac_source === "nic" ? "of the NIC the connection left by" : "read from the IPv6 address (EUI-64)"}`);
     add("Started", when(r.started_at));
-    add("Configuration", `${r.config.streams} streams · ${r.config.seconds}s per direction${r.config.one_stream ? " · one stream's download" : ""} · ${r.config.packets} UDP probes every ${r.config.interval_ms} ms`);
+    add("Configuration", `${r.config.streams} streams · ${r.config.seconds}s per direction${r.config.http ? ` · ${HTTP_NAME[r.config.http]} chosen` : ""}${r.config.one_stream ? " · one stream's download" : ""} · ${r.config.packets} UDP probes every ${r.config.interval_ms} ms`);
     const lat = r.latency;
     if (lat) add("Idle latency", `median ${text(ms(lat.median))} · min ${text(ms(lat.min))} · p90 ${text(ms(lat.p90))} · max ${text(ms(lat.max))} · jitter ${text(ms(lat.jitter))} · ${lat.count} samples${lat.lost ? `, ${lat.lost} lost` : ""}`);
     const tp = (t: ThroughputResult | undefined, d: Direction) => {

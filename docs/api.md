@@ -277,7 +277,9 @@ used one stream or skipped it. Each transfer's `rate_limit` is where its rate st
 and stayed down: the rate before (`from_mbps`), when it fell, in seconds from the start of
 the transfer (`at_s`), what the transfer had moved by then (`before_bytes`) and the rate
 after (`to_mbps`); `null` when it held, and left out of results from before it. See
-[Rate limit](methodology.md#rate-limit). `call.mos_rating` is the score's own
+[Rate limit](methodology.md#rate-limit). `config.http` is the HTTP version a browser test
+was held to, `"http1"` or `"http3"`, through the server's name for it; it is left out
+for Auto ([Streams and HTTP versions](methodology.md#streams-and-http-versions)). `call.mos_rating` is the score's own
 rating, and `call.rating` the one shown: lower when a gap is long enough for a caller to
 hear ([Quality and user experience](experience.md#adjustments-for-what-callers-hear)). Each is left out without the figures it
 comes from: `call` without echoed UDP probes, `responsiveness` without latency-under-load

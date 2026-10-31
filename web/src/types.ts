@@ -164,7 +164,9 @@ export interface TestResult {
    *  left by (`mac_source` "nic"), or read from an EUI-64 IPv6 address ("eui64"). */
   client: { ip?: string; family?: string | null; protocol?: string; user_agent?: string; local_ip?: string; mac?: string; mac_source?: "nic" | "eui64" };
   /** `one_stream`: whether the run measured one stream's download too. */
-  config: { streams: number; seconds: number; packets: number; interval_ms: number; one_stream?: boolean };
+  /** `http`: the HTTP version the test was held to, through the server's name for it; left
+   * out for Auto, as the browser and the server agree. */
+  config: { streams: number; seconds: number; packets: number; interval_ms: number; one_stream?: boolean; http?: "http1" | "http3" };
   latency?: LatencyStats;
   download?: ThroughputResult;
   upload?: ThroughputResult;

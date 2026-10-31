@@ -135,7 +135,26 @@ Browsers open at most **six HTTP/1.1 connections** per server, so more than six 
 queue. Over **HTTP/2** all streams share **one TCP connection** as multiplexed streams;
 "parallel streams" then measures one TCP flow. The negotiated protocol is shown in the
 connection strip. To measure several TCP flows through a reverse proxy, serve
-texas2step over HTTP/1.1 (see [HTTP/2 and parallel streams](install.md#http2-and-parallel-streams)).
+texas2step over HTTP/1.1 (see [HTTP/2 and parallel streams](install.md#http2-and-parallel-streams)),
+or choose HTTP/1.1 for the test, below.
+
+A page can't choose the HTTP version itself, but where the server has a name for each
+version ([HTTP versions](configuration.md#http-versions)), Test options offer **HTTP:
+Auto, HTTP/1.1 or HTTP/3**, in the address family the test goes over. The whole test
+then runs on that name, which has an address of its own, so the browser opens a
+connection of its own to it rather than reusing the page's:
+
+* **HTTP/1.1:** each stream is a TCP connection of its own, as with many applications
+  and some other speed tests, each with its own congestion window.
+* **HTTP/3:** the streams share one QUIC connection over UDP, which firewalls and QoS
+  often treat apart from TCP. A browser moves to HTTP/3 only after the server's
+  `Alt-Svc` has offered it, so before the test the page pings the name until the browser
+  answers over HTTP/3. If it hasn't within 10 s, the test doesn't start, and the page
+  says that UDP may be blocked on the way or the browser doesn't use HTTP/3.
+
+The result keeps the version chosen (`config.http`) and the one the browser used
+(`client.protocol`); when they differ, as when an HTTP/1.1 name offers HTTP/2 too, the
+page says so.
 
 ## Latency under load (bufferbloat)
 

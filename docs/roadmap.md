@@ -35,21 +35,25 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 ### Test page
 
-- [ ] **Choosing HTTP/1.1 for a test.** A web page can't choose the HTTP version of its
-  requests: the browser and the server settle it during TLS (ALPN), and a server with
+- [ ] **Choosing the HTTP version for a test.** A web page can't choose the HTTP version of
+  its requests: the browser and the server settle it during TLS (ALPN), and a server with
   HTTP/2 enabled gets HTTP/2. Over HTTP/2 the Test page's parallel streams share one TCP
   connection; over HTTP/1.1 each is a connection of its own, closer to many applications
-  and to some other speed tests. A design that works with every hostname:
+  and to some other speed tests; over HTTP/3 they share one QUIC connection over UDP,
+  which firewalls and QoS often treat apart from TCP.
 
-  * a second HTTPS port, such as 8443, in an nginx `server` block without `http2 on`,
-    which the setup tool could write;
-  * a setting such as `http1_port`, and a firewall rule for it like the one for 443;
-  * an "HTTP: Auto / HTTP/1.1" choice in the header beside the IP one, which sends the
-    test to that port.
+  The [names Diag uses for each HTTP version](install.md#names-for-each-http-version)
+  make the choice possible: each has an address of its own, so a browser opens a
+  connection of its own to it rather than reusing the page's HTTP/2 one. An
+  "HTTP: Auto / HTTP/1.1 / HTTP/3" choice in Test options would send the test's
+  transfers to that version's name for the address family in use, wherever one is set,
+  over HTTP/3 once a few requests have brought the browser to it. The result would say
+  which version each transfer used.
 
-  A second hostname on port 443 wouldn't do: browsers reuse an HTTP/2 connection for any
-  name that shares its IP address and is covered by the same certificate, and a wildcard
-  certificate makes that likely.
+  A server with a single address can't do it that way: browsers reuse an HTTP/2
+  connection for any name on the same address that the same certificate covers. For one,
+  a second HTTPS port, such as 8443, in an nginx `server` block without `http2 on`, with a
+  setting such as `http1_port` and a firewall rule like 443's.
 
 ### Monitoring and alerts
 
@@ -152,6 +156,34 @@ test. Today a script runs t2s or the API from cron and keeps the JSON itself.
   publishes with each release, and `--from` against the digest built into the setup
   tool. Signing each release with a key the servers trust would also guard against a
   tampered mirror or release.
+
+### Deployment
+
+Ways to run a server beyond the Debian package on an Ubuntu host.
+
+- [ ] **A container image.** texas2step and nginx in one image for Docker and Podman, on
+  amd64 and arm64, built by GitHub Actions with signed attestations and published to
+  GitHub's container registry. Settings from the `TEXAS2STEP_*` environment variables or
+  a mounted `config.toml`; a volume for results and the access key; a certificate mounted,
+  or one made at first start. It needs host networking or macvlan: the UDP test gives the
+  browser the container's own address, which Docker's default NAT hides. A new image takes
+  the place of `texas2step update`.
+- [ ] **cloud-init for LXC containers and virtual machines.** The package already runs
+  unchanged in an Ubuntu 26.04 system container (Incus, LXD, Proxmox) or virtual machine.
+  A cloud-init file in `deploy/` would install nginx, fetch the latest release, and run
+  the setup tool and the install script it writes, so one file deploys a server on
+  Proxmox, VMware, KVM or a cloud.
+- [ ] **On Cisco switches and routers (IOx).** The container image, packaged for IOx app
+  hosting on Catalyst 9300 and 9400 switches and Catalyst 8000 routers such as the 8500,
+  which run it under LXC. It gets an address of its own on a VLAN, through the
+  AppGigabitEthernet port on a switch or VirtualPortGroup0 on a router, so the UDP test
+  works without NAT: a test endpoint in every branch with no server, for latency, loss,
+  call quality, Monitor and Diag to the branch's own switch. Throughput is bounded by the
+  app port and the CPU IOx allows, so measure it on a real device before saying what to
+  expect. Catalyst 9000 switches need Cisco's USB 3.0 SSD and a DNA Advantage or Premier
+  license for app hosting.
+- [ ] **Ready-made images.** A script that builds an Incus image and a qcow2 or OVA virtual
+  machine with texas2step installed, named at first boot through cloud-init.
 
 ### Command line
 

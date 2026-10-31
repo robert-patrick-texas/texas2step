@@ -271,7 +271,8 @@ block without `http2 on` (a separate hostname or port).
 ### Names for each HTTP version
 
 Diag tests HTTP/1.1, HTTP/2 and HTTP/3 each on a name of its own
-([HTTP versions](configuration.md#http-versions)). The IPv4-only and IPv6-only names
+([HTTP versions](configuration.md#http-versions)), and the Test page can run a test over
+HTTP/1.1 or HTTP/3 on the same names. The IPv4-only and IPv6-only names
 are its HTTP/2 rows. For HTTP/1.1 and HTTP/3, add two more names in each family you
 want tested, each with one A record or one AAAA record. Over HTTP/2 and HTTP/3,
 browsers share a connection between names that resolve to the same address when the

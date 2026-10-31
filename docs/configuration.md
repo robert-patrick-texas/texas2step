@@ -315,6 +315,11 @@ A family with none of its names set isn't listed. A server without any single-fa
 names lists an HTTP/2 and a WebSocket row for its own address, over whichever family
 the browser picks, and a UDP row for each family.
 
+The **Test page** uses the HTTP/1.1 and HTTP/3 names too. Where the server has one in
+the address family a test goes over, Test options offer **HTTP: Auto, HTTP/1.1 or
+HTTP/3**, and the test runs on that name; see
+[Streams and HTTP versions](methodology.md#streams-and-http-versions).
+
 A web page can't choose an HTTP version. The browser and the server agree on one for
 each connection, and a browser moves to HTTP/3 only once a server's `Alt-Svc` header
 says it offers it. So each version needs a name of its own: the IPv4-only and

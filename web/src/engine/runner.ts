@@ -18,6 +18,7 @@ export interface RunConfig {
   packets: number;
   intervalMs: number;
   oneStream: boolean; // after the download, one stream's: skipped when the test uses one
+  http?: "http1" | "http3"; // held to this HTTP version, by the endpoint's name for it
 }
 
 export interface RunEvents {
@@ -72,6 +73,7 @@ export class TestRun {
         packets: config.packets,
         interval_ms: config.intervalMs,
         one_stream: config.oneStream && config.streams > 1,
+        ...(config.http ? { http: config.http } : {}),
       },
     };
   }

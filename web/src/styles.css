@@ -1682,6 +1682,12 @@ a.brand-org:hover,
   gap: 6px;
 }
 
+/* An option, or one of its choices, the server doesn't offer. */
+.opt[hidden],
+.seg button[hidden] {
+  display: none;
+}
+
 .opt-label {
   font-size: 12px;
   color: var(--muted);
