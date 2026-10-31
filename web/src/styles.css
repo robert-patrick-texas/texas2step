@@ -1215,6 +1215,58 @@ a.brand-org:hover,
   opacity: 1;
 }
 
+/* The packet-loss test's ring: silver and gold, filling as the probes go out. */
+.gauge {
+  --metal-gold-deep: #a8822a;
+  --metal-gold: #e2c264;
+  --metal-shine: #fbf6e6;
+  --metal-silver: #b9bec8;
+}
+
+.packet-ring {
+  opacity: 0;
+  transition: opacity 0.6s var(--ease);
+}
+
+.gauge.has-packets .packet-ring {
+  opacity: 1;
+}
+
+.packet-track {
+  fill: none;
+  stroke: var(--grid);
+  stroke-width: 7;
+  stroke-linecap: round;
+  opacity: 0.6;
+}
+
+.packet-edge {
+  fill: none;
+  stroke: color-mix(in srgb, #5c4614 55%, transparent);
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+
+.packet-band {
+  fill: none;
+  stroke: url(#g-metal);
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+
+.packet-shine {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+}
+
+.packet-lost line {
+  stroke: var(--critical);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
 .gauge-ticks line {
   stroke: var(--axis);
   stroke-linecap: round;
@@ -3609,6 +3661,7 @@ a.brand-org:hover,
 
 @media (forced-colors: active) {
   .gauge-value,
+  .packet-band,
   .chart-svg .line {
     stroke: CanvasText;
   }

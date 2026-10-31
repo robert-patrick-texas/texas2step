@@ -7,6 +7,9 @@ const SWEEP = 270;
 const R = 150;
 const C = 200;
 const MAX_MBPS = 10_000;
+// The packet-loss test's ring: inside the speed arc, around the start button, on the same
+// 270° sweep, filling as probes go out, so half the probes reach 12 o'clock.
+const RP = 128;
 
 export type GaugeTone = "idle" | "download" | "upload" | "latency" | "loss";
 
@@ -37,6 +40,13 @@ export class Gauge {
   private target = 0;
   private raf = 0;
   private tone: GaugeTone = "idle";
+  private packetBand: SVGPathElement;
+  private packetEdge: SVGPathElement;
+  private packetShine: SVGPathElement;
+  private packetLost: SVGGElement;
+  private packetsShown = 0; // the share of the ring drawn
+  private packetsTarget = 0;
+  private packetRaf = 0;
 
   constructor(onStart: () => void) {
     const ticks = s("g", { class: "gauge-ticks" });
@@ -62,6 +72,19 @@ export class Gauge {
     this.glow = s("path", { d: arc(START, START + 0.01), class: "gauge-glow" });
     this.value = s("path", { d: arc(START, START + 0.01), class: "gauge-value" });
     this.tip = s("circle", { r: 9, cx: polar(START)[0], cy: polar(START)[1], class: "gauge-tip" });
+    this.packetEdge = s("path", { d: "", class: "packet-edge" });
+    this.packetBand = s("path", { d: "", class: "packet-band" });
+    this.packetShine = s("path", { d: "", class: "packet-shine" });
+    this.packetLost = s("g", { class: "packet-lost" });
+    const packets = s(
+      "g",
+      { class: "packet-ring" },
+      s("path", { d: arc(START, START + SWEEP, RP), class: "packet-track" }),
+      this.packetEdge,
+      this.packetBand,
+      this.packetShine,
+      this.packetLost,
+    );
 
     const svg = s(
       "svg",
@@ -72,12 +95,14 @@ export class Gauge {
         gradient("g-download", "--dl-from", "--dl"),
         gradient("g-upload", "--ul-from", "--ul"),
         gradient("g-latency", "--idle-from", "--idle"),
+        metal(),
         s("filter", { id: "g-blur", x: "-50%", y: "-50%", width: "200%", height: "200%" }, s("feGaussianBlur", { stdDeviation: 10 })),
       ),
       s("circle", { cx: C, cy: C, r: R + 74, class: "gauge-ring ring-3" }),
       s("circle", { cx: C, cy: C, r: R + 62, class: "gauge-ring ring-2" }),
       s("circle", { cx: C, cy: C, r: R - 34, class: "gauge-ring ring-1" }),
       s("path", { d: arc(START, START + SWEEP), class: "gauge-track" }),
+      packets,
       ticks,
       this.glow,
       this.value,
@@ -119,6 +144,51 @@ export class Gauge {
     this.animate();
   }
 
+  /** The packet-loss test's ring: `sent` of `total` probes, filling clockwise from the
+   * speed arc's start. 0 clears it, as a new test begins. */
+  setPackets(sent: number, total: number): void {
+    const share = total > 0 ? Math.min(1, Math.max(0, sent / total)) : 0;
+    if (share === 0) {
+      this.packetsShown = this.packetsTarget = 0;
+      this.drawPackets();
+      this.packetLost.replaceChildren();
+      return;
+    }
+    this.packetsTarget = share;
+    if (!this.packetRaf) {
+      this.packetRaf = requestAnimationFrame(() => {
+        this.packetRaf = 0;
+        this.packetsShown = this.packetsTarget;
+        this.drawPackets();
+      });
+    }
+  }
+
+  /** The finished test: the ring as far as its probes went, with a notch at each lost one
+   * (null in `packets`) out of `total`. */
+  setPacketResult(packets: (number | null)[], total: number): void {
+    if (!total) return this.setPackets(0, 0);
+    this.packetsShown = this.packetsTarget = Math.min(1, packets.length / total);
+    this.drawPackets();
+    const marks = packets.flatMap((p, seq) => {
+      if (p !== null) return [];
+      const deg = START + (SWEEP * (seq + 0.5)) / total;
+      const [x0, y0] = polar(deg, RP - 7);
+      const [x1, y1] = polar(deg, RP + 7);
+      return [s("line", { x1: x0, y1: y0, x2: x1, y2: y1 })];
+    });
+    this.packetLost.replaceChildren(...marks);
+  }
+
+  private drawPackets(): void {
+    const on = this.packetsShown > 0;
+    this.el.classList.toggle("has-packets", on);
+    const d = on ? arc(START, START + Math.max(0.5, SWEEP * this.packetsShown), RP) : "";
+    this.packetEdge.setAttribute("d", d);
+    this.packetBand.setAttribute("d", d);
+    this.packetShine.setAttribute("d", on ? arc(START, START + Math.max(0.5, SWEEP * this.packetsShown), RP - 2) : "");
+  }
+
   /** Free-form readout for phases that aren't a rate (latency, packets). */
   readoutText(caption: string, value: string, unit: string): void {
     setText(this.caption, caption);
@@ -147,6 +217,24 @@ export class Gauge {
     };
     this.raf = requestAnimationFrame(step);
   }
+}
+
+/** Silver and gold, in bands across the packet ring that stay put as it fills. */
+function metal(): SVGLinearGradientElement {
+  const stops: [number, string][] = [
+    [0, "--metal-gold-deep"],
+    [0.2, "--metal-gold"],
+    [0.36, "--metal-shine"],
+    [0.5, "--metal-silver"],
+    [0.64, "--metal-shine"],
+    [0.8, "--metal-gold"],
+    [1, "--metal-gold-deep"],
+  ];
+  return s(
+    "linearGradient",
+    { id: "g-metal", gradientUnits: "userSpaceOnUse", x1: C - RP, y1: C - RP, x2: C + RP, y2: C + RP },
+    ...stops.map(([offset, color]) => s("stop", { offset, style: `stop-color: var(${color})` })),
+  );
 }
 
 function gradient(id: string, from: string, to: string): SVGLinearGradientElement {

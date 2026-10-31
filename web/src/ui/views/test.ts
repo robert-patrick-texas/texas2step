@@ -509,6 +509,7 @@ export class TestView implements View {
     const { streams, seconds, packets, intervalMs } = app.settings;
     const oneStream = this.oneStream();
     this.packets.reset(packets);
+    this.gauge.setPackets(0, 0);
     this.options.removeAttribute("open");
 
     const events: RunEvents = {
@@ -532,6 +533,7 @@ export class TestView implements View {
         this.packets.sent(seq);
         this.link.packetOut();
         this.gauge.readoutText("Packets", String(seq + 1), `of ${packets}`);
+        this.gauge.setPackets(seq + 1, packets);
       },
       packetEcho: (seq, rtt) => {
         this.packets.echo(seq, rtt);
@@ -787,6 +789,7 @@ export class TestView implements View {
     put(this.tiles.loss, lossPct, `${loss.lost} of ${loss.sent} lost · ${loss.transport === "webrtc" ? "UDP" : "TCP fallback"}`);
     railValue("loss", text(lossPct));
     this.packets.finalize(loss.packets);
+    this.gauge.setPacketResult(loss.packets, Math.max(loss.packets.length, this.result?.config.packets ?? 0));
     clear(this.packetStats);
     const row = (k: string, v: string) => this.packetStats.append(h("dt", {}, k), h("dd", {}, v));
     row("Transport", loss.transport === "webrtc" ? "UDP (WebRTC, no retransmit)" : "TCP (WebSocket fallback)");
