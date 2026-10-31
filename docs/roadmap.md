@@ -243,6 +243,12 @@ Worth considering, not urgent, and perhaps not needed.
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.14.2](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.14.2) (2026-10-31)
+
+- [x] **Plain words for the device's figures:** "server waited 98%", "browser busy/late",
+  "page behind" and "long stalls" in All measurements and on the tiles, and the client's
+  own rows named "Client local address" and "Client device".
+
 ### [2.14.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.14.1) (2026-10-31)
 
 - [x] **A packet ring:** a metallic ring around the Test page's start button fills as the
