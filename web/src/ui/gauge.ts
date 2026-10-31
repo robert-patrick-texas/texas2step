@@ -219,16 +219,16 @@ export class Gauge {
   }
 }
 
-/** Silver and gold, in bands across the packet ring that stay put as it fills. */
+/** The theme's metal (--metal-*), in bands across the packet ring that stay put as it fills. */
 function metal(): SVGLinearGradientElement {
   const stops: [number, string][] = [
-    [0, "--metal-gold-deep"],
-    [0.2, "--metal-gold"],
+    [0, "--metal-deep"],
+    [0.2, "--metal-mid"],
     [0.36, "--metal-shine"],
-    [0.5, "--metal-silver"],
+    [0.5, "--metal-alt"],
     [0.64, "--metal-shine"],
-    [0.8, "--metal-gold"],
-    [1, "--metal-gold-deep"],
+    [0.8, "--metal-mid"],
+    [1, "--metal-deep"],
   ];
   return s(
     "linearGradient",

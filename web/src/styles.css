@@ -8,6 +8,14 @@
 
 :root,
 [data-theme="light"] {
+  /* The packet ring's metal: steel blue, well apart from the red of lost probes, and the
+     start button's gradient ends in a blue that answers it. */
+  --metal-deep: #23446f;
+  --metal-mid: #4f7fc4;
+  --metal-shine: #e1ecfc;
+  --metal-alt: #7b9ccc;
+  --metal-edge: #132842;
+  --start: linear-gradient(120deg, var(--sun-1), var(--sun-2) 40%, var(--sun-3) 70%, #3f7be6);
   color-scheme: light;
   --page: #f3f2ee;
   --surface: #fdfdfc;
@@ -65,6 +73,13 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
+    /* The packet ring's metal: silver gold. */
+    --metal-deep: #a8822a;
+    --metal-mid: #e2c264;
+    --metal-shine: #fbf6e6;
+    --metal-alt: #b9bec8;
+    --metal-edge: #5c4614;
+    --start: var(--brand);
     color-scheme: dark;
     --page: #090b0f;
     --surface: #121419;
@@ -98,6 +113,13 @@
 }
 
 [data-theme="dark"] {
+  /* The packet ring's metal: silver gold. */
+  --metal-deep: #a8822a;
+  --metal-mid: #e2c264;
+  --metal-shine: #fbf6e6;
+  --metal-alt: #b9bec8;
+  --metal-edge: #5c4614;
+  --start: var(--brand);
   color-scheme: dark;
   --page: #090b0f;
   --surface: #121419;
@@ -132,6 +154,13 @@
 /* Federal: a deep-navy masthead with a gold rule, cool grey-blue surfaces and serif
    headings, after whitehouse.gov and energy.gov. Colours and type only, no insignia. */
 [data-theme="federal"] {
+  /* The packet ring's metal: dark gold. */
+  --metal-deep: #6b4f0c;
+  --metal-mid: #b08a1e;
+  --metal-shine: #f2dd8c;
+  --metal-alt: #8c6b12;
+  --metal-edge: #3a2a04;
+  --start: var(--brand);
   color-scheme: light;
   --page: #eef1f6;
   --surface: #ffffff;
@@ -171,6 +200,13 @@
 
 /* Texas: a night sky over the plains, a red-to-gold horizon and the lone star. */
 [data-theme="texas"] {
+  /* The packet ring's metal: silver gold. */
+  --metal-deep: #a8822a;
+  --metal-mid: #e2c264;
+  --metal-shine: #fbf6e6;
+  --metal-alt: #b9bec8;
+  --metal-edge: #5c4614;
+  --start: var(--brand);
   color-scheme: dark;
   --page: #070b15;
   --surface: #0e1424;
@@ -210,6 +246,13 @@
 /* America: Old Glory red and blue on a cool white, the window framed in navy and red,
    and a faint field of stars. Blue leads; red is the accent. */
 [data-theme="america"] {
+  /* The packet ring's metal: royal blue. */
+  --metal-deep: #10296e;
+  --metal-mid: #2f5ccf;
+  --metal-shine: #cbd9ff;
+  --metal-alt: #1d4c95;
+  --metal-edge: #0a1838;
+  --start: var(--brand);
   color-scheme: light;
   --page: #f2f5fa;
   --surface: #ffffff;
@@ -251,6 +294,13 @@
    into fusion-plasma violet, a beam line under the header and a faint machine-room
    lattice. Colours and type only, no seals or insignia. */
 [data-theme="energy"] {
+  /* The packet ring's metal: silver gold. */
+  --metal-deep: #a8822a;
+  --metal-mid: #e2c264;
+  --metal-shine: #fbf6e6;
+  --metal-alt: #b9bec8;
+  --metal-edge: #5c4614;
+  --start: var(--brand);
   color-scheme: dark;
   --page: #04080f;
   --surface: #0a121f;
@@ -291,6 +341,13 @@
    olive drab for action, condensed capitals and a faint topographic map. Colours and
    type only, no insignia, branch marks or camouflage. */
 [data-theme="military"] {
+  /* The packet ring's metal: green. */
+  --metal-deep: #2d4a1c;
+  --metal-mid: #5e8c34;
+  --metal-shine: #d6ebb4;
+  --metal-alt: #46702a;
+  --metal-edge: #1b2a10;
+  --start: var(--brand);
   color-scheme: light;
   --page: #e9e5d6;
   --surface: #faf8f1;
@@ -1215,14 +1272,7 @@ a.brand-org:hover,
   opacity: 1;
 }
 
-/* The packet-loss test's ring: silver and gold, filling as the probes go out. */
-.gauge {
-  --metal-gold-deep: #a8822a;
-  --metal-gold: #e2c264;
-  --metal-shine: #fbf6e6;
-  --metal-silver: #b9bec8;
-}
-
+/* The packet-loss test's ring: each theme's metal (--metal-*), filling as the probes go out. */
 .packet-ring {
   opacity: 0;
   transition: opacity 0.6s var(--ease);
@@ -1242,7 +1292,7 @@ a.brand-org:hover,
 
 .packet-edge {
   fill: none;
-  stroke: color-mix(in srgb, #5c4614 55%, transparent);
+  stroke: color-mix(in srgb, var(--metal-edge) 55%, transparent);
   stroke-width: 9;
   stroke-linecap: round;
 }
@@ -1340,7 +1390,7 @@ a.brand-org:hover,
   justify-content: center;
   gap: 2px;
   color: var(--on-brand);
-  background: var(--brand);
+  background: var(--start);
   box-shadow:
     0 18px 50px -12px color-mix(in srgb, var(--sun-2) 55%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.35);
