@@ -488,6 +488,20 @@ def test_peers():
     assert any("browsers on the HTTPS page will block it" in t for t in levels(p, setup.NOTE))
 
 
+def test_a_peers_name_stays_inside_the_scripts_comment():
+    # The name comes from the peer's /api/v1/info: a line break in it mustn't end the
+    # comment line of the plan at the top of the script, which runs as root.
+    sneaky = setup.Peer(
+        "https://dallas.example.net/texas2step",
+        {"server": {"id": "dallas", "name": "Dallas\ntouch /tmp/owned #"}},
+    )
+    h = host(peers=[sneaky])
+    p = setup.plan(h, setup.Options(id="houston"))
+    script = setup.install_script(h, p, setup.Options(id="houston"))
+    assert "#   - list Dallas touch /tmp/owned # (dallas, " in script
+    assert "\ntouch /tmp/owned # (dallas" not in script
+
+
 def test_peers_bring_their_single_family_urls():
     v4 = "https://v4.dallas.example.net/texas2step"
     v6 = "https://v6.dallas.example.net/texas2step"

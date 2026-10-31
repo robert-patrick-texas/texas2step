@@ -1396,7 +1396,9 @@ def write_file(
 def install_script(host: Host, p: Plan, opts: Options) -> str:
     q = shlex.quote
     deb = os.path.realpath(host.deb_path)
-    plan_lines = [f.text for f in p.findings if f.level == CHANGE]
+    # One comment line each: a line break in one, such as from a peer's name, would leave
+    # the rest of it outside the comment, run as a command.
+    plan_lines = [" ".join(f.text.split()) for f in p.findings if f.level == CHANGE]
     header = "\n".join(f"#   - {line}" for line in plan_lines) or "#   - nothing to change"
     out = [
         "#!/usr/bin/env bash",
@@ -1752,7 +1754,12 @@ def gather(opts: Options, deb_path: str) -> Host:
         h.shipped_md5 = m.group(1) if m else ""
         h.template_md5 = packaged_md5(deb_path, CONFIG)
         if h.config_md5 != h.shipped_md5 and h.template_md5 != h.shipped_md5:
-            h.merge_preview, h.merge_error = preview_merge(deb_path)
+            # The preview runs the package's own Python, as root: only the package this
+            # script was built with (_check_package refuses any other).
+            if DEB_SHA256.startswith("@") or h.deb_sha256 == DEB_SHA256:
+                h.merge_preview, h.merge_error = preview_merge(deb_path)
+            else:
+                h.merge_error = "the package's checksum doesn't match"
 
     if shutil.which("ufw"):
         h.ufw = run("ufw", "status")[1]
