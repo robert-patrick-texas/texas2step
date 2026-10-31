@@ -228,10 +228,12 @@ class Site:
         self.pages = {
             src: Page(src, label=labels.get(str(src)) or "") for src in self.lead + self.tail
         }
-        # Images join as pages show them. Every PDF under docs/ is published, linked or not:
-        # other sites link to them by their address on this one.
+        # Every PDF under docs/ and every file in docs/images/ is published, linked or not:
+        # other sites, and pages with absolute links such as the at-a-glance page, link to
+        # them by their address on this one. Other images join as pages show them.
+        published = [*(root / "docs").rglob("*.pdf"), *(root / "docs" / "images").glob("*")]
         self.assets: set[PurePosixPath] = {
-            PurePosixPath(p.relative_to(root).as_posix()) for p in (root / "docs").rglob("*.pdf")
+            PurePosixPath(p.relative_to(root).as_posix()) for p in published if p.is_file()
         }
         self.anchors: list[tuple[Page, PurePosixPath, str, str]] = []
         self.problems: list[str] = []
