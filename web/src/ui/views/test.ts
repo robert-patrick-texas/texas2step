@@ -129,7 +129,7 @@ function deviceText(t: ThroughputResult): string | null {
 }
 
 /** The server kernel's round-trip time on the connection while it carried a download. */
-const serverRttText = (t: ThroughputResult) => (t.server_rtt_ms !== undefined ? `${text(ms(t.server_rtt_ms))} while it ran${t.server_min_rtt_ms !== undefined ? ` · lowest ${text(ms(t.server_min_rtt_ms))}` : ""}` : null);
+const serverRttText = (t: ThroughputResult) => (t.server_rtt_ms !== undefined ? `${text(ms(t.server_rtt_ms))} while running${t.server_min_rtt_ms !== undefined ? ` · lowest ${text(ms(t.server_min_rtt_ms))}` : ""}` : null);
 
 /** The page ran late this share of the call test or more: its timing may read worse than the path. */
 const CALL_BUSY = 0.25;
@@ -837,8 +837,9 @@ export class TestView implements View {
     const add = (k: string, v: string | undefined | null) => v && rows.push([k, v]);
     add("Server", [r.server.name, r.server.location, r.server.url].filter(Boolean).join(" · "));
     add("Client", [r.client.ip, r.client.family, httpWord(r.client.protocol)].filter(Boolean).join(" · "));
-    add("This computer", r.client.local_ip);
-    add("This device", [r.client.cores ? `${r.client.cores} cores` : "", r.client.pressure ? `CPU pressure ${r.client.pressure} at most` : ""].filter(Boolean).join(" · "));
+    // The client that ran the test, as it was saved: not the one viewing a saved result.
+    add("Client local address", r.client.local_ip);
+    add("Client device", [r.client.cores ? `${r.client.cores} logical cores` : "", r.client.pressure ? `CPU pressure ${r.client.pressure} at most` : ""].filter(Boolean).join(" · "));
     // Browser results from before mac_source read theirs from EUI-64 too.
     add("MAC", r.client.mac && `${r.client.mac}, ${r.client.mac_source === "nic" ? "of the NIC the connection left by" : "read from the IPv6 address (EUI-64)"}`);
     add("Started", when(r.started_at));
