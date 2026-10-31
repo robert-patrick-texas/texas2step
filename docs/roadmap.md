@@ -48,13 +48,13 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 Figures for the tools a network team already watches, gathered without anyone running a
 test. Today a script runs t2s or the API from cron and keeps the JSON itself.
 
-- [ ] **A `/metrics` page for Prometheus.** Figures in the OpenMetrics text format, for
-  Prometheus or Grafana Agent to collect: the latest saved results by server and client
-  network, measurements between servers, the sessions `texas2step clients` lists, and the
-  traffic counted toward the [traffic limits](traffic.md). Open to `internal_networks`
-  only, as History is. To decide: which figures become series, and keeping the client
-  label to a network, a /24 or /48 as lockouts count them, so it doesn't grow a series for
-  every address.
+- [ ] **Test figures for Prometheus.** `/api/v1/metrics` has the server's
+  [CPU figures](cpu.md#over-the-api) since [2.12.0](#2120-2026-10-31), for Prometheus
+  or Grafana Agent to collect. It could carry the latest saved results by server and client
+  network too, measurements between servers, the sessions `texas2step clients` lists, and
+  the traffic counted toward the [traffic limits](traffic.md). To decide: which figures
+  become series, and keeping the client label to a network, a /24 or /48 as lockouts count
+  them, so it doesn't grow a series for every address.
 - [ ] **Servers measuring each other on a schedule.** Each server already measures another
   on request (`/api/v1/measure/*`, with a pass it issues itself). A setting such as
   `mesh_minutes` would have each server measure every server in `[[locations]]` on a timer
@@ -233,6 +233,16 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
 ## Done
 
 Newest first. Each release's notes have the details and its upgrade steps.
+
+### [2.12.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.12.0) (2026-10-31)
+
+- [x] **Server CPU:** `texas2step cpu`, the journal, `/api/v1/cpu`, `/api/v1/metrics` for
+  Prometheus and a Diag card show the server's CPU over 30 days beside its traffic, and
+  what it spends with nothing to serve.
+- [x] **A busy host:** `cpu_busy_percent` refuses new download and upload tests and
+  Monitor's Video call while other work on the host is past it.
+- [x] **CPU-bound results:** the Test page, `texas2step run` and t2s say when a worker's
+  CPU, not the network, set a transfer's rate.
 
 ### [2.11.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.11.0) (2026-10-31)
 
