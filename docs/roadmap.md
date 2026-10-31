@@ -149,13 +149,6 @@ test. Today a script runs t2s or the API from cron and keeps the JSON itself.
 
 Ways to run a server beyond the Debian package on an Ubuntu host.
 
-- [ ] **A container image.** texas2step and nginx in one image for Docker and Podman, on
-  amd64 and arm64, built by GitHub Actions with signed attestations and published to
-  GitHub's container registry. Settings from the `TEXAS2STEP_*` environment variables or
-  a mounted `config.toml`; a volume for results and the access key; a certificate mounted,
-  or one made at first start. It needs host networking or macvlan: the UDP test gives the
-  browser the container's own address, which Docker's default NAT hides. A new image takes
-  the place of `texas2step update`.
 - [ ] **Let's Encrypt in the container.** The image takes a mounted certificate or makes
   a self-signed one. An ACME client in it could get and renew one for the server's name
   over `HTTP_PORT`, for servers the Internet can reach.
@@ -241,6 +234,14 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
 ## Done
 
 Newest first. Each release's notes have the details and its upgrade steps.
+
+### [2.13.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.13.0) (2026-10-31)
+
+- [x] **A container image:** texas2step and nginx in one image for Docker and Podman, on
+  amd64 and arm64, at `ghcr.io/robert-patrick-texas/texas2step`, built and attested by
+  GitHub Actions. It runs on the host's network or a macvlan network, with settings from
+  `TEXAS2STEP_*` variables or `config.toml`, two volumes, and a mounted certificate or one
+  it makes. A newer image updates it ([Container](container.md)).
 
 ### [2.12.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.12.0) (2026-10-31)
 
