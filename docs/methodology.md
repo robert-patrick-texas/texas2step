@@ -500,7 +500,7 @@ asks the server over HTTPS, with a small request, every 2 seconds, or every 10 o
 minute has passed. It also keeps one probe a second going on the old session, which
 picks up again by itself after a short blip. Once the server answers over HTTPS but not
 to its probes, as after a restart or a change of network, Monitor opens a new session.
-It opens one at a time, and waits 5, then 10, then 30 seconds between tries that fail,
+It opens one at a time, and waits 5, then 10, 20 and 30 seconds between tries that fail,
 since each holds a port on the server for up to 30 seconds. Where only TCP gets through,
 it carries on over the WebSocket and tries UDP again every 30 seconds. When the server
 answers again, the line says how long it was gone and how many outages there have been
