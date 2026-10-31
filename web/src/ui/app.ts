@@ -56,6 +56,7 @@ export class App {
   whoami: WhoAmI | null = null;
   locations: Location[] = [];
   selected: Location | null = null;
+  private selecting = 0; // counts select()s, so a later pick's answer isn't overwritten
   /** Whether this visitor gets the service desk's functions (saved results, share links). */
   desk = true;
   /** What this server said about the access code; null where it has none (or didn't say). */
@@ -321,17 +322,22 @@ export class App {
   }
 
   async select(loc: Location | null): Promise<void> {
+    const turn = ++this.selecting;
     this.selected = loc;
     if (loc) save("t2s.server", { id: loc.id });
     this.ep = loc ? this.endpointFor(loc) : this.origin;
     this.renderFamily();
     this.info = null;
     this.whoami = null;
+    let found: [ServerInfo, WhoAmI] | null = null;
     try {
-      [this.info, this.whoami] = await Promise.all([this.ep.info(), this.ep.whoami()]);
+      found = await Promise.all([this.ep.info(), this.ep.whoami()]);
     } catch (err) {
-      console.warn("server unreachable", err);
+      if (turn === this.selecting) console.warn("server unreachable", err);
     }
+    // Another server was picked while this one answered: the answer is that one's to give.
+    if (turn !== this.selecting) return;
+    if (found) [this.info, this.whoami] = found;
     // A site with brand_credit = "none" has no credit in its footer.
     setText(document.querySelector("#footer-version"), this.info?.version ? `texas2step ${this.info.version}` : "texas2step");
     const picker = document.querySelector("#server-picker .picker-status");

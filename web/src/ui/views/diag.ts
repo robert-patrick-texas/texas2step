@@ -66,6 +66,7 @@ abstract class Method {
   stopped = false;
   private timer = 0;
   private codeLogged = false; // the log says this address requires the access code
+  private answeredSent = 0; // when the latest attempt that was answered was made
   readonly lane = new Lane();
   readonly row: {
     root: HTMLElement;
@@ -179,14 +180,18 @@ abstract class Method {
   }
 
   /** An attempt's outcome. Once a method has answered, a miss counts as loss; `why` is
-   * what the log says when answers stop. */
-  record(ok: boolean, rtt: number | null, why = "no answer"): void {
+   * what the log says when answers stop. `sent`: when the attempt was made. */
+  record(ok: boolean, rtt: number | null, why = "no answer", sent = Date.now()): void {
     if (this.stopped || this.tone === "off") return;
     const now = Date.now();
     const up = this.tone === "up" || this.tone === "loss";
     this.samples.push({ t: now, ok, rtt, up });
     while (this.samples.length && this.samples[0]!.t < now - KEEP_MS) this.samples.shift();
+    // Attempts overlap: one made before an attempt already answered times out after that
+    // answer. It was lost, but in the outage that answer ended, so it starts no new one.
+    if (!ok && sent < this.answeredSent) return;
     if (ok) {
+      this.answeredSent = Math.max(this.answeredSent, sent);
       this.codeLogged = false;
       if (this.tone === "trying") this.view.log(this, `answering${rtt !== null ? `, ${text(ms(rtt))}` : ""}`);
       if (this.tone === "loss") this.view.log(this, `answering again after ${seconds(now - this.downSince)}, ${this.lostRun} lost`);
@@ -300,12 +305,12 @@ class HttpsMethod extends Method {
         this.tcpSince = 0;
         this.tcpLogged = false;
         done(true);
-        this.record(true, rtt);
+        this.record(true, rtt, undefined, wall);
       })
       .catch(() => {
         this.fellBack = false;
         done(false);
-        this.record(false, null);
+        this.record(false, null, undefined, wall);
       });
   }
 
@@ -360,9 +365,10 @@ class WsMethod extends Method {
     if (!this.prober?.ready && this.ep.needsCode) return this.needsCode();
     const done = this.lane.send();
     if (this.prober?.ready) {
+      const sent = Date.now();
       void this.prober.ping(1500).then((rtt) => {
         done(rtt !== null);
-        this.record(rtt !== null, rtt);
+        this.record(rtt !== null, rtt, undefined, sent);
       });
       return;
     }
@@ -420,11 +426,12 @@ class UdpMethod extends Method {
     const done = this.lane.send();
     if (rtc?.open) {
       const seq = this.seq++ >>> 0;
+      const sent = Date.now();
       const finish = (rtt: number | null) => {
         clearTimeout(timer);
         this.waitingFor.delete(seq);
         done(rtt !== null);
-        this.record(rtt !== null, rtt);
+        this.record(rtt !== null, rtt, undefined, sent);
       };
       const timer = setTimeout(() => finish(null), 1500);
       this.waitingFor.set(seq, finish);
