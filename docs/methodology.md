@@ -207,11 +207,12 @@ does. Behind nginx the connection is nginx's, which the server finds by the addr
 and ports the package's snippet passes on (`X-Client-Port`, `X-Server-Addr`,
 `X-Server-Port`, believed only from `trusted_proxies`); serving on its own, it asks for its
 own. Any user may read these figures, and a lookup takes a few tens of microseconds. The
-**share of the download the client held the server back** is the time with nothing in
-flight plus the time the client's TCP receive window limited what could be sent. A
-browser that can't keep up stops reading; over HTTP/2 it then stops granting the server
-room on the stream, so the connection goes idle, and over HTTP/1.1 its TCP receive
-window fills. When that share reaches `device_bound_percent` (10 % by default), the
+**share of the download the client held the server back** is the time the client's TCP
+receive window limited what could be sent and, over HTTP/2, the time with nothing in
+flight. A browser that can't keep up stops reading: over HTTP/1.1 its TCP receive window
+fills, and over HTTP/2 it stops granting the server room on the stream, so the connection
+goes idle. Over HTTP/1.1 an idle connection means the server's side had nothing to send,
+so it doesn't count. When that share reaches `device_bound_percent` (10 % by default), the
 download is Device-bound, unless the server's CPU set the rate, or the server had the
 next bytes ready less than half the time, which would mean the server itself couldn't
 keep up. The server can't say this of HTTP/3, which isn't TCP, or of uploads, where it is

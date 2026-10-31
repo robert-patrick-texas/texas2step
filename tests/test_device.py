@@ -16,7 +16,7 @@ from starlette.requests import Request
 from texas2step.api.meta import connection_ends
 from texas2step.config import Settings
 from texas2step.cpu import CpuMonitor
-from texas2step.tcpinfo import DIAG, Held, Window
+from texas2step.tcpinfo import DIAG, Held, Info, Window
 
 linux = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="NETLINK_SOCK_DIAG")
 
@@ -86,6 +86,53 @@ def test_lookups_find_ipv4_on_a_dual_stack_socket_and_nothing_else():
     window = Window(("127.0.0.1", 1, "127.0.0.1", 2))
     window.moved()
     assert window.ends is None and window.held() is None  # stops asking after a miss
+
+
+class Fake:
+    """Lookups that answer what a test queues up, as a connection's figures over time."""
+
+    available = True
+
+    def __init__(self, *infos: Info | None) -> None:
+        self.infos = list(infos)
+
+    def lookup(self, ends) -> Info | None:
+        return self.infos.pop(0) if self.infos else None
+
+
+def info(at: float, busy: float, rwnd: float = 0.0, rtt: int = 20_000) -> Info:
+    return Info(at, int(busy * 1e6), int(rwnd * 1e6), 0, rtt, 15_000)
+
+
+def drive(window: Window, lookups: int) -> None:
+    for _ in range(lookups):
+        window._next = 0.0  # each moved() looks, as a quarter second has gone by
+        window.moved()
+
+
+def test_a_connection_the_client_closed_keeps_the_figures_it_had():
+    # The kernel sets a reset connection's counters back to 0 (and says TCP_CLOSE, which
+    # lookup() refuses): the transfer's figures are those from before.
+    fake = Fake(info(0.0, 0.0), info(1.0, 0.9), info(2.0, 1.8), info(2.1, 0.0))
+    window = Window(("192.0.2.1", 443, "192.0.2.7", 50000), diag=fake)  # ty: ignore[invalid-argument-type]
+    drive(window, 3)
+    got = window.held()
+    assert got is not None and got.seconds == 2.0
+    assert got.idle == pytest.approx(0.2) and got.rwnd == 0.0
+
+
+def test_over_http1_nothing_in_flight_is_the_servers_doing():
+    # A slow HTTP/1.1 client fills its receive window; an idle connection there means the
+    # server's side had nothing to send.
+    lookups = (info(0.0, 0.0), info(1.0, 0.5, rwnd=0.2), info(2.0, 1.0, rwnd=0.4))
+    h2 = Window(("192.0.2.1", 443, "192.0.2.7", 50000), diag=Fake(*lookups))  # ty: ignore[invalid-argument-type]
+    h1 = Window(("192.0.2.1", 443, "192.0.2.7", 50000), False, Fake(*lookups))  # ty: ignore[invalid-argument-type]
+    for window in (h2, h1):
+        drive(window, 3)
+    got2, got1 = h2.held(), h1.held()
+    assert got2 is not None and got1 is not None
+    assert (got2.idle, got2.rwnd) == (pytest.approx(1.0), pytest.approx(0.4))
+    assert (got1.idle, got1.rwnd) == (0.0, pytest.approx(0.4))
 
 
 def held(seconds=10.0, idle=0.0, rwnd=0.0, ready=None, rtt=40.0, n=40) -> Held:

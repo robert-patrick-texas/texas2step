@@ -23,7 +23,7 @@ from ..rtc import RtcBusy, RtcUnavailable
 from ..tcpinfo import Window
 from ..traffic import Closed, TrafficMeter
 from .access import WS_PROTOCOL, pass_issued
-from .meta import client_address, connection_ends
+from .meta import client_address, connection_ends, http_version
 
 router = APIRouter(prefix="/api/v1", tags=["wire"])
 
@@ -154,7 +154,7 @@ async def down(
     if metered:
         body = _metered(body, *metered)
     ends = connection_ends(request) if test and settings.device_window else None
-    window = Window(ends) if ends else None
+    window = Window(ends, http_version(request).upper().startswith("HTTP/2")) if ends else None
     body = _watched(body, request.app.state.cpu, test, transfer, request.app.state.tasks, window)
     headers["Server-Timing"] = _timing(app=(time.perf_counter() - t0) * 1000)
     return StreamingResponse(body, headers=headers)

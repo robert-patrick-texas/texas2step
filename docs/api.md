@@ -70,8 +70,9 @@ kept an hour; `capabilities.test_cpu` in `/api/v1/info` says a server keeps them
 
 For a download over HTTP/1.1 or HTTP/2, `window` says how long the client held the server
 back ([When the device is the limit](methodology.md#when-the-device-is-the-limit)):
-`held`, the share of its `seconds` with nothing in flight (`idle`) or limited by the
-client's TCP receive window (`rwnd`); `ready`, the share the server had the next bytes
+`held`, the share of its `seconds` limited by the client's TCP receive window (`rwnd`)
+or, over HTTP/2, with nothing in flight (`idle`; 0 over HTTP/1.1, where that is the
+server's doing); `ready`, the share the server had the next bytes
 ready; the kernel's round-trip time while it ran and the lowest it saw (`rtt_ms`,
 `min_rtt_ms`); and `bound`, whether `held` reached `device_bound_percent` while the
 server's CPU didn't set the rate and its bytes were ready at least half the time:

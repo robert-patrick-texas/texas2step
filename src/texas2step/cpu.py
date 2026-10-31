@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS windows (
     part    TEXT NOT NULL,    -- download or one_stream
     worker  INTEGER NOT NULL,
     seconds REAL NOT NULL,    -- the requests' seconds on their connections, summed (tcpinfo.py)
-    idle    REAL NOT NULL,    -- of those, with nothing in flight
+    idle    REAL NOT NULL,    -- of those, with nothing in flight (HTTP/2 only: tcpinfo.Window)
     rwnd    REAL NOT NULL,    -- and held back by the client's TCP receive window
     rtt_sum REAL NOT NULL,    -- the kernel's RTTs while they ran, in ms, summed
     rtt_n   INTEGER NOT NULL, -- and counted

@@ -30,6 +30,9 @@ NOCOOKIE = 0xFFFFFFFF
 # times came in Linux 4.10; a shorter answer has none of them.
 RTT_AT, MIN_RTT_AT, BUSY_AT, NEEDED = 68, 148, 168, 192
 NO_RTT = 0xFFFFFFFF  # tcpi_min_rtt before the connection's first RTT sample
+# tcpi_state: a connection reset or closed by its client has its counters set back to 0
+# by the kernel, so its figures say nothing of the transfer; nor does a listener.
+TCP_CLOSE, TCP_LISTEN = 7, 10
 
 INTERVAL = 0.25  # seconds between a transfer's lookups
 
@@ -130,7 +133,7 @@ class Diag:
                 break
             if atype == INET_DIAG_INFO:
                 info = data[off + 4 : off + alen]
-                if len(info) < NEEDED:
+                if len(info) < NEEDED or info[0] in (TCP_CLOSE, TCP_LISTEN):
                     return None
                 rtt = struct.unpack_from("=I", info, RTT_AT)[0]
                 min_rtt = struct.unpack_from("=I", info, MIN_RTT_AT)[0]
@@ -162,11 +165,15 @@ class Held:
 class Window:
     """Times how long the client held one download back: the connection's tcp_info when
     the first bytes go, every quarter second while they flow, and at the end. Held back is
-    time with nothing in flight (the client read too slowly, so its windows, TCP's or
-    HTTP/2's, closed) plus time the TCP receive window limited what could be sent."""
+    the time the client's TCP receive window limited what could be sent and, over HTTP/2
+    (``multiplexed``), the time with nothing in flight: a client that reads too slowly
+    stops granting the stream room, so the connection goes idle. Over HTTP/1.1 such a
+    client fills its receive window instead, and nothing in flight means the server's
+    side had nothing to send, which isn't the client's doing."""
 
-    def __init__(self, ends: Ends | None, diag: Diag = DIAG) -> None:
+    def __init__(self, ends: Ends | None, multiplexed: bool = True, diag: Diag = DIAG) -> None:
         self.ends = ends if diag.available else None
+        self.multiplexed = multiplexed
         self.diag = diag
         self.first: Info | None = None
         self.last: Info | None = None
@@ -192,6 +199,10 @@ class Window:
             if self.first is None:
                 self.ends = None  # not a connection the kernel knows: stop asking
             return
+        before = self.last or self.first
+        if before is not None and got.busy_us < before.busy_us:
+            self.ends = None  # its counters went back: another connection, or a reset one
+            return
         if self.first is None:
             self.first = got
         else:
@@ -202,7 +213,7 @@ class Window:
     def held(self) -> Held | None:
         """The figures, after one last lookup; None without two lookups."""
         if self.ends is not None and self.first is not None:
-            self._take()  # a connection closed by the client keeps its last figures
+            self._take()  # a connection the client closed keeps the figures it had
         first, last = self.first, self.last
         if first is None or last is None or last.at <= first.at:
             return None
@@ -211,7 +222,7 @@ class Window:
         rwnd = max(0, last.rwnd_us - first.rwnd_us) / 1e6
         return Held(
             seconds=seconds,
-            idle=max(0.0, seconds - busy),
+            idle=max(0.0, seconds - busy) if self.multiplexed else 0.0,
             rwnd=min(rwnd, seconds),
             rtt_sum_ms=sum(self.rtts) / 1000,
             rtt_n=len(self.rtts),
