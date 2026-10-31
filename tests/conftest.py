@@ -21,6 +21,7 @@ def settings(tmp_path) -> Settings:
         server_location="Testville",
         results_path=str(tmp_path / "results.db"),
         clients_file=str(tmp_path / "clients.db"),
+        cpu_file=str(tmp_path / "cpu.db"),
         locations=[Location(id="peer", name="Peer", url="https://peer.example")],
     )
 
@@ -48,7 +49,10 @@ def live_server(tmp_path_factory) -> Iterator[str]:
     port = _free_port()
     db = tmp_path_factory.mktemp("db")
     settings = Settings(
-        results_path=str(db / "r.db"), clients_file=str(db / "c.db"), allow_any_target=True
+        results_path=str(db / "r.db"),
+        clients_file=str(db / "c.db"),
+        cpu_file=str(db / "cpu.db"),
+        allow_any_target=True,
     )
     server = uvicorn.Server(
         uvicorn.Config(create_app(settings), host="127.0.0.1", port=port, log_level="warning")

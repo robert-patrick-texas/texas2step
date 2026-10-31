@@ -235,6 +235,16 @@ class Settings:
     clients_file: str = "/run/texas2step/clients.db"
     clients_max: int = 1000
 
+    # The server's CPU (docs/cpu.md): the workers', nginx's and the rest of the host's,
+    # beside what the tests move, for texas2step cpu, the desk's API and /metrics; shared by
+    # the workers and kept 30 days. With cpu_busy_percent set, new download and upload
+    # tests, tests toward other servers and Monitor's Video call are refused while other
+    # work uses at least that share of the host's cores, averaged over cpu_busy_seconds;
+    # running tests finish, and open Video calls go on as Voice calls. 0: never refused.
+    cpu_file: str = "/var/lib/texas2step/cpu.db"
+    cpu_busy_percent: float = 0.0
+    cpu_busy_seconds: float = 30.0
+
     # Other servers offered in the location picker (this server is always first).
     locations: list[Location] = field(default_factory=list)
 
@@ -313,6 +323,10 @@ class Settings:
             raise ValueError("access_digits: expected 2, 3 or 4")
         if not 10 <= self.clients_max <= 5000:
             raise ValueError("clients_max: expected 10 to 5000 sessions")
+        if not 0 <= self.cpu_busy_percent <= 100:
+            raise ValueError("cpu_busy_percent: expected 0 (never refuse) to 100 percent")
+        if not 10 <= self.cpu_busy_seconds <= 3600:
+            raise ValueError("cpu_busy_seconds: expected 10 to 3600 seconds")
         if not 1 <= self.access_pass_hours <= 168:
             raise ValueError("access_pass_hours: expected 1 to 168 hours")
         if not 1 <= self.access_lockout_after <= 100:

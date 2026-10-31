@@ -71,6 +71,7 @@ STAMP_AT = 12
 # video sessions count toward a traffic limit; past it a session is held to path probes.
 PROFILES = ("path", "voice", "video")
 PATH_BYTES = 64
+VOICE_BYTES = 300  # the largest voice packet Monitor sends; its video packets are larger
 LIMIT_CHECK = 5.0  # seconds between checks that a counted session is still within a limit
 # A traffic limit counts what the network carries: each probe's bytes, its SCTP, DTLS, UDP
 # and IP headers, and the acknowledgements, which this server sends one of per probe. Per
@@ -237,6 +238,7 @@ class Session:
     issued: int | None = None  # ...and when its pass was issued: ending passes ends it
     profile: str = "path"
     limited: bool = False  # held to path probes by a traffic limit
+    voice_only: bool = False  # a Video call held to its Voice call while the host is busy
     control: Any = None  # the control channel, to tell the client of a limit reached
     ending: float | None = None  # when it was told session_max_runtime is up
 
@@ -275,6 +277,8 @@ class RtcEcho:
         self.offered = {"path": True, "voice": voice, "video": video}  # monitor_voice, _video
         self.meter: Any = None  # a traffic.TrafficMeter, when the server has a traffic limit
         self.blocks: Any = None  # lockouts.HandBlocks: a block set by hand ends a session
+        self.cpu: Any = None  # cpu.CpuMonitor: other work on the host may refuse Video calls
+        self.probes = 0  # probes taken in since the worker started, for cpu.py
         self._replies: set[asyncio.Future[None]] = set()
         self.ice_servers = ice_servers
         self.max_sessions = max_sessions
@@ -327,8 +331,10 @@ class RtcEcho:
         counted = name != "path" and self.counted(session)
         if counted and (notice := await asyncio.to_thread(self.past_limit)):
             return {"op": "profile", "ok": False, "reason": "traffic limit", **notice}
+        if name == "video" and self.cpu is not None and self.cpu.refusing():
+            return {"op": "profile", "ok": False, "reason": "server busy", **self.cpu.notice()}
         session.profile = name
-        session.limited = False
+        session.limited = session.voice_only = False
         return {"op": "profile", "ok": True, "name": name}
 
     async def _reply(self, channel: Any, session: Session, name: Any) -> None:
@@ -366,6 +372,7 @@ class RtcEcho:
                 @channel.on("message")
                 def on_probe(message: bytes | str) -> None:
                     now = time.monotonic()
+                    self.probes += 1
                     session.rx += 1
                     session.rx_bytes += len(message)
                     session.bytes_in += len(message)
@@ -373,6 +380,8 @@ class RtcEcho:
                     counted = session.profile != "path"
                     if session.limited and len(message) > PATH_BYTES:
                         return  # past a traffic limit: only path probes are echoed
+                    if session.voice_only and len(message) > VOICE_BYTES:
+                        return  # the host is busy: a Video call's video isn't echoed
                     end = STAMP_AT + STAMP.size
                     if session.stamp and isinstance(message, bytes) and len(message) >= end:
                         stamp = STAMP.pack(now * 1000, session.rx & 0xFFFFFFFF)
@@ -437,7 +446,17 @@ class RtcEcho:
                 await session.pc.close()
 
     async def hold(self) -> None:
-        """Past a traffic limit, hold the sessions it counts to path probes, and say why."""
+        """Past a traffic limit, hold the sessions it counts to path probes, and say why.
+        While the host is busy with other work, hold Video calls to their Voice call."""
+        if self.cpu is not None and self.cpu.refusing():
+            for session in self.sessions.values():
+                if session.profile == "video":
+                    session.profile = "voice"
+                    session.voice_only = True
+                    # A page from before 2.12.0 knows no "to", and goes on with path probes.
+                    reply = {"op": "limit", "to": "voice", **self.cpu.notice()}
+                    with contextlib.suppress(Exception):
+                        session.control.send(json.dumps(reply))
         counted = [s for s in self.sessions.values() if s.profile != "path" and self.counted(s)]
         if not counted or not (notice := await asyncio.to_thread(self.past_limit)):
             return

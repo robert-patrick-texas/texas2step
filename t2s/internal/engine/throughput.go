@@ -35,7 +35,13 @@ type Throughput struct {
 	Connections   *quality.Connections `json:"connections,omitempty"`
 	// On HTTP/2, GETs of /ping on the transfer's own connection, as the browser's.
 	LoadedProbes []float64 `json:"loaded_probes,omitempty"`
+	// The busiest share of a core among the server's workers that served it; at Bound or
+	// more, the server's CPU set the rate. Nil where the server doesn't say.
+	ServerCPU *float64 `json:"server_cpu,omitempty"`
 }
+
+// Bound is the share of a core at which a server worker held a transfer back (cpu.py).
+const Bound = 0.9
 
 // Transfer is what responsiveness needs of it.
 func (t *Throughput) Transfer() *quality.Transfer {
@@ -211,6 +217,9 @@ func MeasureThroughput(ctx context.Context, t *Target, direction string, seconds
 			var err error
 			if direction == "download" {
 				q := url.Values{"bytes": {strconv.FormatInt(capBytes, 10)}, "test": {test}}
+				if t.Transfer != "" {
+					q.Set("transfer", t.Transfer)
+				}
 				req, err = t.request(transfer, http.MethodGet, "/down", q, nil)
 			} else {
 				body := &upload{cap: capBytes, deadline: deadline, bins: b, stream: &perStream[i]}

@@ -1,4 +1,4 @@
-from . import access, clients, measure, meta, results, wire
+from . import access, clients, cpu, measure, meta, results, wire
 
 routers = [
     wire.router,
@@ -7,4 +7,5 @@ routers = [
     measure.router,
     results.router,
     clients.router,
+    cpu.router,
 ]

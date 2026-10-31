@@ -110,6 +110,13 @@ results_path = "/var/lib/texas2step/results.db"
 # clients_file = "/run/texas2step/clients.db"  # sudo texas2step clients; in memory (tmpfs)
 # clients_max = 1000                    # sessions listed, active and the last hour's ended
 
+# --- Server CPU (docs/cpu.md) --------------------------------------------------------------
+# cpu_file = "/var/lib/texas2step/cpu.db"  # sudo texas2step cpu; kept 30 days
+# cpu_busy_percent = 0                  # refuse new download/upload tests and Video calls
+#                                       # while other work uses this % of the host's cores;
+#                                       # 0 = never (texas2step and nginx don't count)
+# cpu_busy_seconds = 30                 # averaged over this long
+
 # --- Branding and themes -------------------------------------------------------------------
 # brand_name = "texas2step"             # header and browser tab
 # brand_organization = ""               # shown beside the name and in the footer

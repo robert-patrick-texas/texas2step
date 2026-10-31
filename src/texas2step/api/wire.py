@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from starlette.requests import ClientDisconnect
 
 from .. import payload
+from ..cpu import CpuMonitor, Watched
 from ..rtc import RtcBusy, RtcUnavailable
 from ..traffic import Closed, TrafficMeter
 from .access import WS_PROTOCOL, pass_issued
@@ -60,14 +61,31 @@ TestId = Annotated[
 
 
 async def _admit(request: Request, test: str | None) -> tuple[TrafficMeter, str] | None:
-    """The meter and whose traffic this is, or 503 if a traffic limit refuses the test."""
+    """The meter and whose traffic this is, or 503 if a traffic limit refuses the test, or
+    other work on the host does (cpu_busy_percent)."""
     meter: TrafficMeter | None = request.app.state.traffic
-    if meter is None:
-        return None
-    kind = meter.kind(client_address(request)[0])
-    if await asyncio.to_thread(meter.admit, test, kind):
+    kind = meter.kind(client_address(request)[0]) if meter is not None else None
+    if meter is not None and kind is not None and await asyncio.to_thread(meter.admit, test, kind):
         raise Closed(meter.notice())
-    return meter, kind
+    monitor: CpuMonitor = request.app.state.cpu
+    if monitor.busy_share and not await asyncio.to_thread(monitor.admit, test):
+        raise Closed(monitor.notice())
+    return (meter, kind) if meter is not None and kind is not None else None
+
+
+async def _watched(
+    body: AsyncIterator[bytes], monitor: CpuMonitor, test: str | None, part: str, tasks: set
+) -> AsyncIterator[bytes]:
+    """Counts what a download sends, for the CPU figures, and times this worker's CPU
+    while it does, for GET /api/v1/tests/{id}."""
+    watch = Watched(monitor, test, part)
+    try:
+        async for chunk in body:
+            yield chunk
+            monitor.work.sent += len(chunk)
+            watch.moved()
+    finally:
+        watch.done(tasks)
 
 
 async def _metered(
@@ -96,6 +114,13 @@ async def down(
         Query(gt=0, description="Stream for this long instead (chunked, not byte-capped)."),
     ] = None,
     test: TestId = None,
+    transfer: Annotated[
+        Literal["download", "one_stream"],
+        Query(
+            description="Which of the test's transfers this is: its download, or the one "
+            "stream's after it, for GET /api/v1/tests/{id}."
+        ),
+    ] = "download",
 ) -> Response:
     """``curl -o /dev/null 'https://host/api/v1/down?bytes=1000000000'`` or ``?seconds=10``.
 
@@ -118,6 +143,7 @@ async def down(
         headers["Content-Length"] = str(n)
     if metered:
         body = _metered(body, *metered)
+    body = _watched(body, request.app.state.cpu, test, transfer, request.app.state.tasks)
     headers["Server-Timing"] = _timing(app=(time.perf_counter() - t0) * 1000)
     return StreamingResponse(body, headers=headers)
 
@@ -131,6 +157,8 @@ async def up(request: Request, test: TestId = None) -> Response:
     """
     limit = request.app.state.settings.max_upload_bytes
     metered = await _admit(request, test)
+    monitor: CpuMonitor = request.app.state.cpu
+    watch = Watched(monitor, test, "upload")
     total = first_len = 0
     first = last = None
     try:
@@ -142,6 +170,8 @@ async def up(request: Request, test: TestId = None) -> Response:
                 first, first_len = now, len(data)
             last = now
             total += len(data)
+            monitor.work.received += len(data)
+            watch.moved()
             if metered:
                 metered[0].add(metered[1], received=len(data))
             if total > limit:
@@ -151,6 +181,7 @@ async def up(request: Request, test: TestId = None) -> Response:
         # answer, so this is never sent; 499 is nginx's code for "client closed request".
         return Response(status_code=499)
     t_done = time.perf_counter()
+    await watch.save()  # before the answer, which the client asks about it after
     rx_ms = (last - first) * 1000 if first is not None and last is not None else 0.0
     mbps = (total - first_len) * 8 / (rx_ms * 1000) if rx_ms > 0 else None
     return JSONResponse(
@@ -176,6 +207,7 @@ async def ws_echo(ws: WebSocket) -> None:
     issued = await pass_issued(ws)
     checked = opened = time.monotonic()
     limit = ws.app.state.settings.session_max_runtime
+    work = ws.app.state.cpu.work
     try:
         while True:
             message = await ws.receive()
@@ -192,8 +224,12 @@ async def ws_echo(ws: WebSocket) -> None:
                 return
             if message.get("bytes") is not None:
                 await ws.send_bytes(message["bytes"])
+                work.sent += len(message["bytes"])
+                work.received += len(message["bytes"])
             elif message.get("text") is not None:
                 await ws.send_text(message["text"])
+                work.sent += len(message["text"])
+                work.received += len(message["text"])
     except WebSocketDisconnect:
         return
 

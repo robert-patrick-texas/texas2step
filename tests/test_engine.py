@@ -190,6 +190,9 @@ async def test_run_all_measures_one_stream_and_responsiveness(live_server):
         assert len(c["setup_ms"]) == len(c["tcp_ms"]) == len(c["http_ms"]) >= 1
     assert r["responsiveness"]["basis"] == "ippm"
     assert r["responsiveness"]["download"]["loaded_on"] == "own connection"
+    # The server timed its CPU for each transfer, the one stream's apart. Client and server
+    # share this process here, so the figure is theirs together.
+    assert all(r[part]["server_cpu"] > 0 for part in ("download", "one_stream", "upload"))
     no_one = await engine.run_all(live_server, seconds=1, streams=2, loss=False, one_stream=False)
     assert "one_stream" not in no_one and no_one["config"]["one_stream"] is False
 

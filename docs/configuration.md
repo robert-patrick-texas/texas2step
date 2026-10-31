@@ -29,7 +29,7 @@ file up to date with the new version's template and keeps your values; see
 | `max_stream_seconds` | 60 | Cap for `/down?seconds=` |
 | `webrtc_enabled` | `true` | Offer the UDP probe |
 | `ice_servers` | `[]` | STUN/TURN URLs given to both peers, e.g. `["stun:stun.example:3478"]`. No public STUN server is used unless listed here. |
-| `max_rtc_sessions` | 32 | Concurrent UDP probe sessions per worker. Each costs the server some CPU: about 1 % of a core for Monitor's Path profile at 10 probes a second, 3 % for its Voice call and 8 % for its Video call, measured on a 2019 server CPU. |
+| `max_rtc_sessions` | 32 | Concurrent UDP probe sessions per worker. Each costs the server some CPU: about 1 % of a core for Monitor's Path profile at 10 probes a second, 3 % for its Voice call and 8 % for its Video call, measured on a 2019 server CPU. See [CPU without much traffic](cpu.md#cpu-without-much-traffic). |
 | `rtc_session_timeout` | 120 | Seconds of inactivity before a session is closed |
 | `session_max_runtime` | 0 | Seconds any one UDP probe session or echo socket may last, however busy: 0 for no limit, else 300 or more. The server then ends it and says why, and Monitor or Diag stops and asks for a reload rather than open another. A test's own sessions last a minute or two; a long `texas2step loss` run is cut off too. Unlike the page limits below, it holds for any client, though one that ignores it can open a new session. |
 | `rtc_port_min` / `rtc_port_max` | 0 / 0 | Inclusive UDP port range for the probe's server sockets, so a firewall can open just that range. Both 0 lets the OS pick ports. See [Pinning the UDP ports](install.md#pinning-the-udp-ports). |
@@ -75,6 +75,9 @@ file up to date with the new version's template and keeps your values; see
 | `traffic_url` | `""` | If set, the message is followed by "Click here to continue.", linking here: another texas2step server, another provider's test, the service desk's page |
 | `clients_file` | `/run/texas2step/clients.db` | The pages and command-line runs active now and in the last hour, shared by the workers, `texas2step clients` and `/api/v1/clients`; in memory, on the tmpfs the service's `/run/texas2step` is. See [Active clients](clients.md). |
 | `clients_max` | 1000 | Sessions listed at most, active and the last hour's ended together: ended ones make room, the oldest first. With this many active, new ones go unlisted and the journal is warned. 10 to 5000; see [How many are listed](clients.md#how-many-are-listed). |
+| `cpu_file` | `/var/lib/texas2step/cpu.db` | The server's CPU figures: the workers', nginx's and the rest of the host's, beside what the tests move. Shared by the workers, `texas2step cpu`, `/api/v1/cpu` and `/api/v1/metrics`; kept 30 days. See [Server CPU](cpu.md). |
+| `cpu_busy_percent` | 0 | Refuse new download and upload tests, tests toward other servers and Monitor's Video call while other work on the host uses this share of all its cores; open Video calls go on as Voice calls, and running tests finish. texas2step and nginx don't count as other work. 0 never refuses; up to 100. See [Keep tests off a busy host](cpu.md#keep-tests-off-a-busy-host). |
+| `cpu_busy_seconds` | 30 | How long other work's share is averaged over, 10 to 3600 seconds |
 | `brand_name` | `texas2step` | Name in the header and the browser tab |
 | `brand_organization` | `""` | Organization shown beside the name and in the footer |
 | `brand_url` | `""` | The organization's website; the organization name links to it |

@@ -10,6 +10,7 @@ export interface ThroughputOptions {
   streams: number;
   maxBytes: number;
   test: string; // the test's id: a server's traffic limit lets a test it let in finish
+  transfer?: "one_stream"; // the one stream's download, which the server times apart
   signal: AbortSignal;
   onTick?: (live: LiveThroughput) => void;
 }
@@ -87,7 +88,7 @@ export async function measureDownload(ep: Endpoint, opts: ThroughputOptions): Pr
     while (performance.now() < meter.deadline && !opts.signal.aborted) {
       const ctrl = linked(opts.signal);
       try {
-        const res = await fetch(ep.url("/down", { bytes: opts.maxBytes, test: opts.test, r: nonce() }), ep.init({
+        const res = await fetch(ep.url("/down", { bytes: opts.maxBytes, test: opts.test, ...(opts.transfer ? { transfer: opts.transfer } : {}), r: nonce() }), ep.init({
           cache: "no-store",
           signal: ctrl.signal,
         }));

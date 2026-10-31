@@ -171,6 +171,9 @@ For servers open to the Internet, see [Access codes](docs/access.md).
   for servers whose traffic is billed.
 * [Active clients](docs/clients.md): who is using the server now, page by page, without
   cookies.
+* [Server CPU](docs/cpu.md): the workers' CPU beside what they serve, over 30 days;
+  refusing tests while the host is busy with other work; and results that say when the
+  server, not the network, set the rate.
 * [Security](docs/security.md): the security controls, what each guards against, and
   what is left to the operator.
 * [Methodology](docs/methodology.md): what is measured, and how.

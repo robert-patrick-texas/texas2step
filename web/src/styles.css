@@ -2873,7 +2873,20 @@ a.brand-org:hover,
   font-weight: 650;
 }
 
-.egress-fam dl {
+/* Diag's NAT and egress card, with the desk's Server CPU card under it. */
+.diag-stack {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+  min-width: 0;
+}
+
+.diag-stack > .diag-card {
+  margin-bottom: 0;
+}
+
+.egress-fam dl,
+.diag-cpu dl {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 3px 16px;
@@ -2881,11 +2894,13 @@ a.brand-org:hover,
   font-size: 13px;
 }
 
-.egress-fam dt {
+.egress-fam dt,
+.diag-cpu dt {
   color: var(--muted);
 }
 
-.egress-fam dd {
+.egress-fam dd,
+.diag-cpu dd {
   margin: 0;
   overflow-wrap: anywhere;
 }

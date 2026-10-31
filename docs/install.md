@@ -190,7 +190,7 @@ What the package installs:
 | `/etc/nginx/conf.d/texas2step-log.conf` | The snippets' log format: nginx's usual one, without query strings, which can hold an access pass |
 | `/etc/nginx/snippets/texas2step.conf` | The `/texas2step/` location for your site |
 | `/etc/nginx/snippets/texas2step-speedtest.conf` | Optional `/speedtest` redirect |
-| `/var/lib/texas2step/` | Saved results (SQLite); [`texas2step results clear`](#clear-saved-results) deletes them. With access codes on, also the [lockouts](access.md#lockouts-and-blocks) (`access.db`); with a traffic limit, the [traffic figures](traffic.md) (`traffic.db`) |
+| `/var/lib/texas2step/` | Saved results (SQLite); [`texas2step results clear`](#clear-saved-results) deletes them. With access codes on, also the [lockouts](access.md#lockouts-and-blocks) (`access.db`); with a traffic limit, the [traffic figures](traffic.md) (`traffic.db`). The [server's CPU](cpu.md) figures (`cpu.db`), kept 30 days |
 | `/run/texas2step/` | The [active clients](clients.md) (`clients.db`), in memory: kept over a restart, gone at a reboot |
 
 Files under `/etc` are conffiles: upgrades keep your edits.
@@ -368,7 +368,8 @@ but only toward listed locations.
 
 **Listen address and workers.** These are set in `/etc/default/texas2step`. To move the
 service to another port, see [Another port](#another-port). More workers help on
-multi-gigabit links, where Python's per-connection CPU cost is the limit. Each worker
+multi-gigabit links, where Python's per-connection CPU cost is the limit;
+[`texas2step cpu`](cpu.md) shows whether it is. Each worker
 keeps its own UDP sessions, which is fine, because a session lives entirely in the
 worker that answered it.
 

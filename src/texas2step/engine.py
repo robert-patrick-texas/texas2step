@@ -283,6 +283,7 @@ async def _throughput(
     streams: int,
     loaded_latency: bool,
     progress: Progress | None,
+    transfer: str = "",
 ) -> dict[str, Any]:
     base = _base(target)
     per_stream = [0] * streams
@@ -303,7 +304,8 @@ async def _throughput(
         async def download(i: int) -> None:
             while time.perf_counter() < deadline:
                 url = f"{base}{API}/down"
-                async with client.stream("GET", url, params={"bytes": cap, "test": test}) as r:
+                params = {"bytes": cap, "test": test} | ({"transfer": transfer} if transfer else {})
+                async with client.stream("GET", url, params=params) as r:
                     if r.is_error:  # such as 503 from a traffic limit: not test data
                         await r.aread()
                         r.raise_for_status()
@@ -378,8 +380,13 @@ async def measure_download(
     streams: int = 4,
     loaded_latency: bool = True,
     progress: Progress | None = None,
+    transfer: str = "",
 ) -> dict[str, Any]:
-    return await _throughput("download", target, seconds, streams, loaded_latency, progress)
+    """``transfer="one_stream"`` names the one stream's download after a test's download,
+    which the server times apart (GET /api/v1/tests/{id})."""
+    return await _throughput(
+        "download", target, seconds, streams, loaded_latency, progress, transfer
+    )
 
 
 async def measure_upload(
@@ -612,7 +619,8 @@ async def run_all(
     result["latency"] = await measure_latency(base, progress=progress)
     if steps := await new_connection(base):  # what a new connection costs, idle
         result["latency"]["setup_ms"] = round(sum(steps.values()), 3)
-    test = TEST.set(secrets.token_hex(8))  # one test: the upload goes on if the download did
+    test_id = secrets.token_hex(8)
+    test = TEST.set(test_id)  # one test: the upload goes on if the download did
     try:
         result["download"] = await measure_download(base, seconds, streams, progress=progress)
         if one_stream:  # what a single file copy gets
@@ -621,11 +629,18 @@ async def run_all(
                 await _emit(progress, "1 stream", data)
 
             result["one_stream"] = await measure_download(
-                base, seconds, 1, loaded_latency=False, progress=one if progress else None
+                base,
+                seconds,
+                1,
+                loaded_latency=False,
+                progress=one if progress else None,
+                transfer="one_stream",
             )
         result["upload"] = await measure_upload(base, seconds, streams, progress=progress)
     finally:
         TEST.reset(test)
+    if info.get("capabilities", {}).get("test_cpu"):
+        await server_cpu(base, test_id, result)
     if loss and info.get("capabilities", {}).get("webrtc"):
         try:
             result["loss"] = await measure_loss(base, packets, interval_ms, progress=progress)
@@ -638,6 +653,23 @@ async def run_all(
         result["responsiveness"] = rpm
     result["duration_s"] = (datetime.now(UTC) - started).total_seconds()
     return result
+
+
+async def server_cpu(base: str, test: str, result: dict[str, Any]) -> None:
+    """Each transfer's ``server_cpu``: the busiest share of a core among the server's
+    workers that served it. At 0.9 or more, the server's CPU set its rate (docs/cpu.md).
+    Left out where the server can't say."""
+    try:
+        async with _client() as client:
+            r = await client.get(f"{base}{API}/tests/{test}")
+            r.raise_for_status()
+            parts = r.json()
+    except (httpx.HTTPError, ValueError):
+        return
+    for name in ("download", "one_stream", "upload"):
+        cpu = (parts.get(name) or {}).get("cpu")
+        if name in result and isinstance(cpu, int | float):
+            result[name]["server_cpu"] = cpu
 
 
 def bufferbloat(result: dict[str, Any]) -> dict[str, Any]:

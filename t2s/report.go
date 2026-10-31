@@ -64,6 +64,15 @@ func limitLine(t *engine.Throughput) []string {
 		"", fv(l.FromMbps, " Mbps", 1), strconv.FormatFloat(l.AtS, 'g', -1, 64), before, fv(l.ToMbps, " Mbps", 1))}
 }
 
+// boundLine says when the server's CPU, not the network, set a transfer's rate; nothing
+// otherwise.
+func boundLine(t *engine.Throughput) []string {
+	if t == nil || t.ServerCPU == nil || *t.ServerCPU < engine.Bound {
+		return nil
+	}
+	return []string{fmt.Sprintf("  %-14s server CPU-bound: a worker ran at %.0f%% of a core, so the server, not the network, set this rate", "", *t.ServerCPU*100)}
+}
+
 func oneStreamLine(r *engine.Result) []string {
 	one, multi := r.OneStream, r.Download
 	if one == nil {
@@ -74,7 +83,7 @@ func oneStreamLine(r *engine.Result) []string {
 		share = fmt.Sprintf(" · %.0f %% of %d streams", one.Mbps/multi.Mbps*100, multi.Streams)
 	}
 	return append([]string{fmt.Sprintf("  %-14s %14s   peak %s   (a single file copy%s)",
-		"One stream", fv(one.Mbps, " Mbps", 1), fv(one.PeakMbps, "", 1), share)}, limitLine(one)...)
+		"One stream", fv(one.Mbps, " Mbps", 1), fv(one.PeakMbps, "", 1), share)}, append(limitLine(one), boundLine(one)...)...)
 }
 
 func lossLine(l *engine.Loss) string {
@@ -180,9 +189,11 @@ func report(r *engine.Result) string {
 	}
 	lines = append(lines, "", latencyLine("Latency", latency), throughputLine("Download", r.Download, idle))
 	lines = append(lines, limitLine(r.Download)...)
+	lines = append(lines, boundLine(r.Download)...)
 	lines = append(lines, oneStreamLine(r)...)
 	lines = append(lines, throughputLine("Upload", r.Upload, idle))
 	lines = append(lines, limitLine(r.Upload)...)
+	lines = append(lines, boundLine(r.Upload)...)
 	lines = append(lines, lossLine(r.Loss), callLine(r.Call), rpmLine(r.Responsiveness))
 	if g := r.Bufferbloat.Grade; g != nil {
 		lines = append(lines, fmt.Sprintf("  %-14s %14s", "Bufferbloat", *g))

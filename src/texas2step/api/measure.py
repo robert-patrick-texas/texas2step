@@ -75,6 +75,9 @@ async def _run(
     kind = await _whose(target, meter) if meter is not None and moves else None
     if meter is not None and kind is not None and await asyncio.to_thread(meter.admit, None, kind):
         raise Closed(meter.notice())
+    monitor = request.app.state.cpu
+    if moves and monitor.busy_share and not await asyncio.to_thread(monitor.admit, None):
+        raise Closed(monitor.notice())  # other work on this host (cpu_busy_percent)
     if _slots.locked():
         raise HTTPException(429, "measurement already in progress, retry shortly")
     async with _slots:

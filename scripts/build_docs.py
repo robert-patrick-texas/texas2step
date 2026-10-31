@@ -55,6 +55,7 @@ LEADING: list[tuple[str, str | None]] = [
     ("docs/access.md", None),
     ("docs/traffic.md", None),
     ("docs/clients.md", None),
+    ("docs/cpu.md", None),
     ("docs/security.md", None),
     ("docs/methodology.md", None),
     ("docs/experience.md", None),

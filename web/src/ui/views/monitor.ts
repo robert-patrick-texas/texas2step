@@ -600,15 +600,16 @@ export class MonitorView implements View {
       const answer = await rtc.profile(profile);
       if (answer && !answer.ok) {
         rtc.close();
-        if (answer.reason === "traffic limit") return { message: answer.message ?? REFUSED, url: answer.url ?? null };
+        if (answer.reason === "traffic limit" || answer.reason === "server busy") return { message: answer.message ?? REFUSED, url: answer.url ?? null };
         return { message: `${info.server.name} doesn't offer Monitor's ${profile === "video" ? "Video call" : "Voice call"} profile.`, url: null };
       }
       if (info.capabilities.stamps) await rtc.stamp();
     }
-    // At a traffic limit the server holds a call to path probes: follow it. At its
-    // session_max_runtime it ends the session: stop, rather than open another.
+    // At a traffic limit the server holds a call to path probes, and while it is busy with
+    // other work, a Video call to its Voice call: follow it. At its session_max_runtime it
+    // ends the session: stop, rather than open another.
     rtc.onNotice = (msg) => {
-      if (msg.op === "limit") this.limited(typeof msg.message === "string" ? msg.message : REFUSED, typeof msg.url === "string" ? msg.url : null);
+      if (msg.op === "limit") this.limited(typeof msg.message === "string" ? msg.message : REFUSED, typeof msg.url === "string" ? msg.url : null, msg.to === "voice" ? "voice" : "path");
       else if (msg.op === "ended") this.serverEnded(d, msg.seconds);
     };
     rtc.onEcho = (seq, rtt, now, stamp) => {
@@ -787,12 +788,21 @@ export class MonitorView implements View {
     this.end(sessionEnded(this.serverName(d), seconds));
   }
 
-  /** A server's traffic limit is reached: carry on with path probes, and say why. */
-  private limited(message: string, url: string | null): void {
-    if (this.choice.profile === "path") return;
-    this.choice.profile = "path";
-    this.say(`${message} Monitor carries on with small probes.`, url);
+  /** A server's traffic limit is reached: carry on with path probes, and say why. A server
+   * busy with other work holds a Video call to its Voice call instead. */
+  private limited(message: string, url: string | null, to: "path" | "voice" = "path"): void {
+    const c = this.choice;
+    if (c.profile === "path" || c.profile === to) return;
+    c.profile = to;
+    this.say(`${message} Monitor carries on with ${to === "voice" ? "the Voice call" : "small probes"}.`, url);
     this.renderProfile();
+    // The lede, the chart's head and the figures are each the profile's own.
+    const sides = this.sides();
+    const comparing = this.comparing && sides !== null;
+    setText(this.lede, lede(c, comparing));
+    this.renderChartHead();
+    if (comparing) this.renderCompare(sides);
+    else this.renderTiles();
     this.lock(true);
     if (this.running) this.schedule();
   }

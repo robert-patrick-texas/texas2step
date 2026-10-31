@@ -117,7 +117,14 @@ def test_info_whoami_locations(client):
     info = client.get("/api/v1/info").json()
     assert info["version"] == __version__
     assert info["server"] == {"id": "t1", "name": "Test One", "location": "Testville"}
-    assert set(info["capabilities"]) == {"websocket", "webrtc", "results", "measure", "stamps"}
+    assert set(info["capabilities"]) == {
+        "websocket",
+        "webrtc",
+        "results",
+        "measure",
+        "stamps",
+        "test_cpu",
+    }
     assert info["defaults"] == {"streams": 4, "seconds": 10.0, "packets": 500, "one_stream": True}
     assert info["monitor"] == {"profile": "path", "voice": True, "video": True}
 

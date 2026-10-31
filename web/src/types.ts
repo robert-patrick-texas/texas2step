@@ -39,6 +39,10 @@ export interface ThroughputResult {
   loaded_probes?: number[];
   /** Where the rate stepped down and stayed down; absent from results saved before it. */
   rate_limit?: RateLimit | null;
+  /** The busiest share of a core among the server's worker processes that served the
+   * transfer (GET /api/v1/tests/{id}); 0.9 or more, its CPU set the rate. Absent where
+   * the server doesn't say (before 2.12.0, or under a second). */
+  server_cpu?: number;
 }
 
 /** A rate that held, then stepped down and stayed down to the end of the transfer: a shaper,
@@ -179,13 +183,34 @@ export interface TestResult {
   readiness?: Readiness[];
 }
 
+/** GET /api/v1/cpu, for the service desk (docs/cpu.md): `texas2step` and `nginx` in shares
+ * of one core, `host` and `other` (the host's other programs) of all its cores. */
+export interface CpuFigures {
+  now: {
+    seconds: number;
+    texas2step: number;
+    nginx: number | null;
+    host: number | null;
+    other: number | null;
+    cores: number | null;
+    sessions: number;
+    probes_per_s: number;
+    sent_mbps: number;
+    received_mbps: number;
+    workers: { pid: number; cpu: number; memory: number; sessions: number; probes_per_s: number }[];
+  } | null;
+  /** cpu_busy_percent, and whether other work keeps new tests out; null without it. */
+  busy: { percent: number; seconds: number; refusing: boolean; since: string | null } | null;
+}
+
 export interface ServerInfo {
   name: string;
   /** Left out for visitors outside internal_networks (docs/access.md). */
   version?: string;
   server: { id: string; name: string; location: string };
-  /** `stamps`: the UDP probe's echoes can carry the server's stamps; older servers leave it out. */
-  capabilities: { websocket: boolean; webrtc: boolean; results: boolean; measure: boolean; stamps?: boolean };
+  /** `stamps`: the UDP probe's echoes can carry the server's stamps; `test_cpu`: it says
+   * whether its CPU held a test's transfers back. Older servers leave them out. */
+  capabilities: { websocket: boolean; webrtc: boolean; results: boolean; measure: boolean; stamps?: boolean; test_cpu?: boolean };
   /** `max_session_seconds`: session_max_runtime; `max_monitor_seconds`, `max_diag_seconds`:
    * page_monitor_max_runtime and page_diag_max_runtime. 0 for none; older servers leave them out. */
   limits: {

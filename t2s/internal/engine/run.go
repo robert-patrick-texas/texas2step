@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http/httptrace"
+	"net/url"
 	"time"
 
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/iface"
@@ -166,12 +167,17 @@ func RunAll(ctx context.Context, t *Target, o Options, progress Progress) (*Resu
 		return nil, err
 	}
 	if oneStream { // what a single file copy gets
-		if r.OneStream, err = MeasureThroughput(ctx, &test, "download", o.Seconds, 1, false, progress, "1 stream"); err != nil {
+		one := test
+		one.Transfer = "one_stream"
+		if r.OneStream, err = MeasureThroughput(ctx, &one, "download", o.Seconds, 1, false, progress, "1 stream"); err != nil {
 			return nil, err
 		}
 	}
 	if r.Upload, err = MeasureThroughput(ctx, &test, "upload", o.Seconds, o.Streams, true, progress, ""); err != nil {
 		return nil, err
+	}
+	if info.Capabilities.TestCPU {
+		ServerCPU(ctx, &test, r)
 	}
 	if o.Loss && info.Capabilities.WebRTC {
 		loss, err := MeasureLoss(ctx, t, info, o.Packets, o.IntervalMs, ProbeBytes, 2*time.Second, progress)
@@ -190,6 +196,30 @@ func RunAll(ctx context.Context, t *Target, o Options, progress Progress) (*Resu
 	r.Responsiveness = quality.Work(r.Download.Transfer(), r.Upload.Transfer(), r.Latency.SetupMs)
 	r.DurationS = time.Since(started).Seconds()
 	return r, nil
+}
+
+// ServerCPU asks the server how busy its CPU was while it served each of the test's
+// transfers, and sets their ServerCPU; a transfer it can't say of is left as it is.
+func ServerCPU(ctx context.Context, t *Target, r *Result) {
+	type part struct {
+		CPU *float64 `json:"cpu"`
+	}
+	var parts struct {
+		Download  part `json:"download"`
+		OneStream part `json:"one_stream"`
+		Upload    part `json:"upload"`
+	}
+	if _, err := t.GetJSON(ctx, t.Client(1), "/tests/"+url.PathEscape(t.Test), nil, &parts); err != nil {
+		return
+	}
+	for _, p := range []struct {
+		tr  *Throughput
+		cpu *float64
+	}{{r.Download, parts.Download.CPU}, {r.OneStream, parts.OneStream.CPU}, {r.Upload, parts.Upload.CPU}} {
+		if p.tr != nil && p.cpu != nil {
+			p.tr.ServerCPU = p.cpu
+		}
+	}
 }
 
 func loadedMedian(t *Throughput) *float64 {

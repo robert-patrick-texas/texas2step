@@ -42,6 +42,18 @@ def test_report_without_this_computer():
     assert "this computer 10.8.0.2" in cli._report(no_mac).splitlines()
 
 
+def test_report_says_when_the_servers_cpu_set_the_rate():
+    download = {"mbps": 9400.0, "peak_mbps": 9900.0, "streams": 4, "server_cpu": 0.97}
+    upload = {**download, "server_cpu": 0.42}
+    lines = cli._report({**RESULT, "download": download, "upload": upload}).splitlines()
+    i = next(n for n, line in enumerate(lines) if line.startswith("  Download"))
+    assert lines[i + 1] == (
+        "                 server CPU-bound: a worker ran at 97% of a core, so the server, not "
+        "the network, set this rate"
+    )
+    assert sum("CPU-bound" in line for line in lines) == 1
+
+
 def test_report_gives_a_rate_limit_under_its_transfer():
     download = {
         "mbps": 485.4,

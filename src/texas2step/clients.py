@@ -158,9 +158,10 @@ UNPRINTABLE = re.compile(r"[^\x20-\x7e]")
 
 
 def untracked(path: str, query: bytes) -> bool:
-    """Monitoring's liveness checks, and the desk's own view of this list, aren't clients.
+    """Monitoring's liveness checks and scrapes, and the desk's own view of this list and of
+    the CPU, aren't clients.
     A page's own /health, as Monitor asks a server that has gone quiet, is."""
-    if path == "/api/v1/clients":
+    if path in ("/api/v1/clients", "/api/v1/cpu", "/api/v1/metrics"):
         return True
     return path == "/api/v1/health" and b"session=" not in query
 

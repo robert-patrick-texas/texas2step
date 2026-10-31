@@ -106,7 +106,8 @@ server itself), and `404` to everyone else, as if they weren't there:
 * lockouts and blocks (`/api/v1/access/blocks`);
 * the API explorer (`/api/docs`, `/api/openapi.json`);
 * the server-side measurements (`/api/v1/measure/*`);
-* the [active clients](clients.md) (`/api/v1/clients`), which a server without
+* the [active clients](clients.md) (`/api/v1/clients`) and the
+  [server's CPU](cpu.md) (`/api/v1/cpu`, `/api/v1/metrics`), which a server without
   `internal_networks` doesn't answer at all.
 
 They also refuse, with `403`, a browser's request made for a page on another site. They
@@ -165,7 +166,7 @@ A speed test exists to move a lot of data, so each part has a cap:
 * **Secrets apart from settings.** The access key and standing phrases are in their own
   files, readable by root and the service only; `config.toml` holds no secret.
 * **The service's files** under `/var/lib/texas2step` (saved results, lockouts, traffic
-  figures) and `/run/texas2step` (active clients) belong to the service user. The traffic
+  and CPU figures) and `/run/texas2step` (active clients) belong to the service user. The traffic
   figures hold no addresses.
 * **No third parties.** The web page loads nothing from other sites: no CDN, fonts,
   analytics or telemetry. No public STUN server is used unless listed in `ice_servers`.

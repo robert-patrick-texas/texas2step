@@ -7,12 +7,12 @@ import { RUNTIME_CLOSE, WsProber } from "../../engine/latency";
 import { NotOffered, RtcProbe, type UdpAddress } from "../../engine/loss";
 import { Endpoint } from "../../engine/net";
 import { percentile } from "../../engine/stats";
-import type { DiagHttp, Location } from "../../types";
+import type { CpuFigures, DiagHttp, Location } from "../../types";
 import type { App, View } from "../app";
 import { awakeSwitch } from "../awake";
 import { drawTimeline, Lane, type Sample, type Tone } from "../charts/diag";
 import { clear, h, onResize, setText } from "../dom";
-import { ms, text } from "../format";
+import { bytes, ms, rate, text } from "../format";
 import { RuntimeCounter, reloadButton, sessionEnded, span, strictest, whose } from "../runtime";
 
 type Fam = "IPv4" | "IPv6";
@@ -491,6 +491,8 @@ interface Event {
   text: string;
 }
 
+const CPU_EVERY = 5000; // ms between asks for the server's CPU, as often as it writes them
+
 export class DiagView implements View {
   private methods: Method[] = [];
   private groups: Group[] = [];
@@ -510,7 +512,9 @@ export class DiagView implements View {
   private since = 0; // Date.now() when it last started, for its time limit
   private counter: RuntimeCounter | null = null; // the time counted against it, where there is one
   private awakeOpt: ReturnType<typeof awakeSwitch> = null; // Keep screen on
-  private els!: { you: HTMLElement; clock: HTMLElement; rows: HTMLElement; egress: HTMLElement; log: HTMLElement; notice: HTMLElement };
+  // The server's CPU, for the desk: where it is asked, when last, whether it said no.
+  private cpu: { ep: Endpoint; asked: number; off: boolean; busy: boolean | null } | null = null;
+  private els!: { you: HTMLElement; clock: HTMLElement; rows: HTMLElement; egress: HTMLElement; cpu: HTMLElement; cpuCard: HTMLElement; log: HTMLElement; notice: HTMLElement };
   private readonly onVisibility = () => this.log(null, document.hidden ? "tab hidden: browsers slow down timers in background tabs, so gaps may follow" : "tab visible again");
 
   constructor(private readonly app: App) {}
@@ -530,11 +534,20 @@ export class DiagView implements View {
       clock: h("div", { class: "diag-clock" }),
       rows: h("div", { class: "diag-rows" }),
       egress: h("div", { class: "egress" }),
+      cpu: h("div", { class: "diag-cpu" }),
+      cpuCard: h("section"),
       log: h("ol", { class: "diag-log" }),
       notice: h("p", { class: "diag-notice", role: "status", hidden: true }),
     };
     const card = (title: string, note: string, ...body: (HTMLElement | null)[]) =>
       h("section", { class: "card diag-card" }, h("header", { class: "card-head head-inline" }, h("h2", {}, title), note ? h("p", { class: "wide" }, note) : null), ...body);
+    this.els.cpuCard = card(
+      "Server CPU",
+      "The server's own figures over the last 30s, for the desk's networks.",
+      this.els.cpu,
+      h("p", { class: "diag-note" }, "Workers and nginx are in shares of one core, as top shows each process; Other work and Host, of the host's whole CPU. Other work leaves out texas2step and nginx. A UDP probe costs about the same CPU whatever its size, so Monitor's calls weigh more than their bytes."),
+    );
+    this.els.cpuCard.hidden = true;
     this.awakeOpt = awakeSwitch(this.app);
     this.counter = new RuntimeCounter(
       (limit, whose) => `Time Diag has run since it was last shown or its server changed, counted against ${whose} ${limit} limit. Coming back to Diag counts from zero.`,
@@ -576,11 +589,16 @@ export class DiagView implements View {
       h(
         "div",
         { class: "grid" },
-        card(
-          "NAT and egress",
-          "Your address and port as the server sees them, over TCP and over UDP, and this computer's own address where the browser reveals it.",
-          this.els.egress,
-          h("p", { class: "diag-note" }, "Behind NAT the ports differ, as they should. Different addresses mean TCP and UDP leave by different routes or NAT pools, as with several internet links or carrier-grade NAT."),
+        h(
+          "div",
+          { class: "diag-stack" },
+          card(
+            "NAT and egress",
+            "Your address and port as the server sees them, over TCP and over UDP, and this computer's own address where the browser reveals it.",
+            this.els.egress,
+            h("p", { class: "diag-note" }, "Behind NAT the ports differ, as they should. Different addresses mean TCP and UDP leave by different routes or NAT pools, as with several internet links or carrier-grade NAT."),
+          ),
+          this.els.cpuCard,
         ),
         h("section", { class: "card" }, h("header", { class: "card-head head-inline diag-log-head" }, h("h2", {}, "Events"), copy), this.els.log),
       ),
@@ -655,6 +673,8 @@ export class DiagView implements View {
     this.offsets = [];
     this.offsetSpread = [];
     const { info, selected: loc } = this.app;
+    this.cpu = { ep: new Endpoint(loc?.url ?? ""), asked: 0, off: false, busy: null };
+    this.els.cpuCard.hidden = true;
     clear(this.els.rows);
     if (!info) {
       this.els.rows.append(h("p", { class: "status" }, "Waiting for the server to answer…"));
@@ -764,6 +784,7 @@ export class DiagView implements View {
     const ran = Date.now() - this.since;
     if (!this.over && !this.away) this.counter?.set(ran);
     if (limit.ms && !this.over && !this.away && ran >= limit.ms) return this.end(`Stopped after ${span(limit.ms / 1000)}, ${whose(limit)} limit.`);
+    this.askCpu();
     // One button for each address that asks for the code, on the first of its rows.
     const offered = new Set<string>();
     for (const m of this.methods) {
@@ -837,6 +858,55 @@ export class DiagView implements View {
         ),
       );
     }
+  }
+
+  /** The server's CPU, for the service desk, every CPU_EVERY ms while Diag runs. A server
+   * that doesn't show it to this visitor (outside internal_networks, none set, or before
+   * 2.12.0) answers 404, and the card stays hidden. */
+  private askCpu(): void {
+    const cpu = this.cpu;
+    if (!cpu || cpu.off || this.over || this.away || Date.now() - cpu.asked < CPU_EVERY) return;
+    cpu.asked = Date.now();
+    cpu.ep.json<CpuFigures>("/cpu?days=0").then(
+      (figures) => {
+        if (this.cpu === cpu) this.renderCpu(figures, cpu);
+      },
+      (err: unknown) => {
+        if (this.cpu !== cpu || !(err instanceof Error && err.message.startsWith("404"))) return;
+        cpu.off = true;
+        this.els.cpuCard.hidden = true;
+      },
+    );
+  }
+
+  private renderCpu(f: CpuFigures, cpu: NonNullable<DiagView["cpu"]>): void {
+    this.els.cpuCard.hidden = false;
+    clear(this.els.cpu);
+    const now = f.now;
+    if (!now) {
+      this.els.cpu.append(h("p", { class: "status" }, "No figures yet: the server writes them every 5s."));
+      return;
+    }
+    const refusing = f.busy?.refusing ?? false;
+    if (cpu.busy !== null && cpu.busy !== refusing) this.log(null, refusing ? "server busy with other work: new tests refused" : "server no longer busy: tests let in again");
+    cpu.busy = refusing;
+    const share = (v: number) => `${v < 0.095 ? (v * 100).toFixed(1) : Math.round(v * 100)}%`;
+    const row = (term: string, value: string, note = "") => [h("dt", {}, term), h("dd", {}, value, note ? h("span", { class: "egress-note" }, note) : null)];
+    const busy = f.busy ? (refusing ? `Refusing new tests: past cpu_busy_percent, ${f.busy.percent}%` : `New tests refused past ${f.busy.percent}%`) : "";
+    const tests = now.sent_mbps + now.received_mbps;
+    const memory = now.workers.reduce((n, w) => n + w.memory, 0);
+    this.els.cpu.append(
+      h(
+        "dl",
+        {},
+        ...row("Workers", `${share(now.texas2step)} of a core`, now.workers.map((w) => `${w.pid}: ${share(w.cpu)}`).join(" · ")),
+        ...(now.nginx !== null ? row("nginx", `${share(now.nginx)} of a core`) : []),
+        ...(now.other !== null ? row("Other work", `${share(now.other)} of the host's CPU`, busy) : []),
+        ...(now.host !== null ? row("Host", `${share(now.host)} of the host's CPU${now.cores ? `, ${now.cores} cores` : ""}`) : []),
+        ...row("Serving", `${now.sessions} UDP session${now.sessions === 1 ? "" : "s"} · ${Math.round(now.probes_per_s).toLocaleString()}\u00a0probes/s · tests ${text(rate(tests)).replace(" ", "\u00a0")}`),
+        ...row("Memory", bytes(memory)),
+      ),
+    );
   }
 
   private renderLog(): void {

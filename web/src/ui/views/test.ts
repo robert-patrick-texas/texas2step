@@ -69,6 +69,30 @@ function putLimit(t: Tile, l: RateLimit): void {
   t.sub.replaceChildren(h("span", { class: "grade limit" }, "Rate limit"), ` ${nb(l.to_mbps)} after\u00a0${fellAt(l)}`, h("br"), `${nb(l.from_mbps)} before`);
 }
 
+/** The busiest server worker's share of a core during a transfer, in words. */
+const cpuText = (t: ThroughputResult) => `${coreText(t.server_cpu!)}, the busiest worker process${bound(t) ? ": CPU\u2011bound, the server set the rate" : ""}`;
+
+/** A worker process at this share of a core set the transfer's rate (cpu.py's BOUND). */
+const BOUND = 0.9;
+const bound = (t: ThroughputResult) => (t.server_cpu ?? 0) >= BOUND;
+const coreText = (cpu: number) => `${Math.round(cpu * 100)}% of a core`;
+
+/** A transfer the server's CPU held back, in its tile's small print, above what it had. It
+ * wraps, as a phone's narrow tile needs, but never between a figure and its unit. */
+function putBound(t: Tile, cpu: number, sub: string): void {
+  t.sub.classList.add("wraps");
+  t.sub.replaceChildren(h("span", { class: "grade limit" }, "Server CPU-bound"), ` ${Math.round(cpu * 100)}%\u00a0of a\u00a0core`, h("br"), sub.replace(/(\d) /g, "$1\u00a0"));
+}
+
+const BOUND_NOTE = "A worker process on the server ran at a full core, so the server's CPU, not the network, set this rate.";
+
+/** A tile's tooltip: its rate limit and whether the server's CPU held it back. */
+function tileNote(t: ThroughputResult, before = ""): string {
+  const limit = t.rate_limit ? `Rate limit: ${limitText(t.rate_limit)}. ${LIMIT_NOTE}` : "";
+  const cpu = bound(t) ? `Server CPU-bound: ${coreText(t.server_cpu!)}. ${BOUND_NOTE}` : "";
+  return [before, limit, cpu].filter(Boolean).join(" ");
+}
+
 const HTTP_NAME: Record<HttpVersion, string> = { http1: "HTTP/1.1", http3: "HTTP/3" };
 
 /** The browser's or the server's word for an HTTP version, as the page writes it. */
@@ -616,9 +640,11 @@ export class TestView implements View {
     for (const dir of ["download", "upload"] as const) {
       const t = r[dir];
       if (!t) continue;
-      put(this.tiles[dir], rate(t.mbps), `peak ${text(rate(t.peak_mbps))} · ${t.streams} stream${t.streams > 1 ? "s" : ""}`);
+      const sub = `peak ${text(rate(t.peak_mbps))} · ${t.streams} stream${t.streams > 1 ? "s" : ""}`;
+      put(this.tiles[dir], rate(t.mbps), sub);
       if (t.rate_limit) putLimit(this.tiles[dir], t.rate_limit);
-      this.tiles[dir].el.title = t.rate_limit ? `Rate limit: ${limitText(t.rate_limit)}. ${LIMIT_NOTE}` : "";
+      else if (bound(t)) putBound(this.tiles[dir], t.server_cpu!, sub);
+      this.tiles[dir].el.title = tileNote(t);
       this.throughput.set(dir, { timeline: t.timeline, binMs: t.bin_ms, warmupS: t.warmup_s, durationS: t.duration_s, stable: t.mbps, limit: t.rate_limit ?? null });
       this.latency.setStats(dir, t.loaded_latency);
       this.streams.set(dir, t.per_stream_mbps);
@@ -628,10 +654,11 @@ export class TestView implements View {
     if (one) {
       const multi = r.download?.mbps;
       const share = multi ? `${Math.round((one.mbps / multi) * 100)} % of ${r.download!.streams} streams · ` : "";
-      put(this.tiles.one, rate(one.mbps), `${share}peak ${text(rate(one.peak_mbps))}`);
+      const sub = `${share}peak ${text(rate(one.peak_mbps))}`;
+      put(this.tiles.one, rate(one.mbps), sub);
       if (one.rate_limit) putLimit(this.tiles.one, one.rate_limit);
-      const limit = one.rate_limit ? ` Rate limit: ${limitText(one.rate_limit)}. ${LIMIT_NOTE}` : "";
-      this.tiles.one.el.title = `One stream's download, after the download over several: what a single file copy, backup or remote-desktop session gets.${shared(r) ? " Over HTTP/2 or 3 the several streams shared one connection too." : ""}${limit}`;
+      else if (bound(one)) putBound(this.tiles.one, one.server_cpu!, sub);
+      this.tiles.one.el.title = tileNote(one, `One stream's download, after the download over several: what a single file copy, backup or remote-desktop session gets.${shared(r) ? " Over HTTP/2 or 3 the several streams shared one connection too." : ""}`);
       this.throughput.set("one", { timeline: one.timeline, binMs: one.bin_ms, warmupS: one.warmup_s, durationS: one.duration_s, stable: one.mbps, limit: one.rate_limit ?? null });
       railValue("one", text(rate(one.mbps)));
     } else if (!partial) {
@@ -769,12 +796,14 @@ export class TestView implements View {
       const label = d === "download" ? "Download" : "Upload";
       add(label, `${text(rate(t.mbps))} stable · peak ${text(rate(t.peak_mbps))} · ${bytes(t.bytes)} in ${t.duration_s}s · ${t.streams} streams`);
       if (t.rate_limit) add(`${label} rate limit`, limitText(t.rate_limit));
+      if (t.server_cpu !== undefined) add(`${label} server CPU`, cpuText(t));
       if (loaded) add(`Latency during ${d}`, `median ${text(ms(loaded.median))} · p90 ${text(ms(loaded.p90))} · jitter ${text(ms(loaded.jitter))} · ${loaded.count} probes`);
     };
     tp(r.download, "download");
     const one = r.one_stream;
     if (one) add("One stream", `${text(rate(one.mbps))} stable · peak ${text(rate(one.peak_mbps))} · ${bytes(one.bytes)} in ${one.duration_s}s${r.download?.mbps ? ` · ${Math.round((one.mbps / r.download.mbps) * 100)} % of the ${r.download.streams}-stream rate` : ""}`);
     if (one?.rate_limit) add("One stream rate limit", limitText(one.rate_limit));
+    if (one?.server_cpu !== undefined) add("One stream server CPU", cpuText(one));
     tp(r.upload, "upload");
     if (r.bufferbloat?.grade) add("Bufferbloat", `grade ${r.bufferbloat.grade}`);
     const l = r.loss;

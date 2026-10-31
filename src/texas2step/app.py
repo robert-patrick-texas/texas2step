@@ -24,7 +24,7 @@ from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
-from . import __version__, clients, page, traffic
+from . import __version__, clients, cpu, page, traffic
 from .access import Codes, is_internal, read_key
 from .api import routers
 from .api.access import given_pass
@@ -198,6 +198,8 @@ class AccessGate:
         "/api/v1/access/code",
         "/api/v1/access/blocks",
         "/api/v1/clients",
+        "/api/v1/cpu",
+        "/api/v1/metrics",
     )
 
     def __init__(self, app: ASGIApp, settings: Settings) -> None:
@@ -472,10 +474,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         meter = app.state.traffic
         flushing = asyncio.create_task(traffic.keep(meter)) if meter is not None else None
         noting = asyncio.create_task(clients.keep(app.state.clients))
+        sampling = asyncio.create_task(cpu.keep(app.state.cpu))
         yield
-        noting.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await noting
+        for task in (noting, sampling):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        app.state.cpu.close()
         app.state.clients.close()
         await app.state.rtc.stop()
         if app.state.store is not None:
@@ -525,6 +530,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.rtc.meter = app.state.traffic
     app.state.rtc.blocks = app.state.blocks
     app.state.clients = Clients(settings.clients_file, app.state.rtc, settings.clients_max)
+    app.state.cpu = cpu.CpuMonitor.of(settings, app.state.rtc)  # sampled from the lifespan
+    app.state.rtc.cpu = app.state.cpu
 
     @app.exception_handler(traffic.Closed)
     async def closed(request: Request, exc: traffic.Closed) -> JSONResponse:

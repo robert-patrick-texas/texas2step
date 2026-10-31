@@ -19,6 +19,7 @@ headers. Measurement endpoints add `Server-Timing` so clients can subtract serve
 | GET | `/api/v1/ping` | Minimal response for round-trip timing. `Server-Timing: app;dur=…` |
 | GET | `/api/v1/down?bytes=N` | Exactly N bytes (≤ `max_download_bytes`) with `Content-Length`: [five founding documents](methodology.md#what-the-tests-send) as text, then random bytes |
 | GET | `/api/v1/down?seconds=S` | The documents, then random bytes for S seconds (chunked, ≤ `max_stream_seconds`) |
+| GET | `/api/v1/tests/{id}` | Whether the server's CPU held a test's transfers back (below) |
 | POST | `/api/v1/up` | Read and discard the body; returns `{"bytes", "rx_ms", "mbps"}` measured server-side |
 | WS | `/api/v1/ws` | Echo every message unchanged; closed with code `4001` once `session_max_runtime` is up |
 | POST | `/api/v1/rtc/offer` | WebRTC signalling for the UDP probe (see below) |
@@ -50,7 +51,22 @@ set). The Test page shows the message, then "Click here to continue." linking to
 They don't say when tests start again. Add `?test=<id>` (up to 64 letters, digits, `-`
 and `_`) to every request of one test: once the server has let a test in, it lets the
 rest of it in for up to 10 minutes, so a running test finishes. The browser and the
-command line do this.
+command line do this. A server whose host is busy with other work answers the same
+way while it refuses tests (`cpu_busy_percent`, [Server CPU](cpu.md#keep-tests-off-a-busy-host)),
+with "This server is busy. Try again in a few minutes." and `url` `null`.
+
+The server also times its CPU for each test id: `GET /api/v1/tests/{id}` answers, for
+each of the test's transfers that a worker served for a second or more, the busiest
+worker's share of a core while it did, and `bound`, whether that was 90 % or more, so
+its CPU, not the network, set the rate:
+
+```json
+{"test": "k7q2m9xd3p", "download": {"cpu": 0.998, "bound": true}, "upload": {"cpu": 0.42, "bound": false}}
+```
+
+The transfers are `download`, `upload` and `one_stream`: add `&transfer=one_stream` to
+the one stream's `/down` requests, after the download, to keep it apart. The figures are
+kept an hour; `capabilities.test_cpu` in `/api/v1/info` says a server keeps them.
 
 Any request may also carry `?session=<id>` (4 to 32 letters, digits, `-` and `_`) and
 `?page=<name>` (`test`, `monitor`, `diag`, `history`, `help`, `api`, `cli` or `server`).
@@ -86,10 +102,14 @@ sending the offer. The offer must include data channels:
   [traffic limit](traffic.md#monitors-call-profiles). The answer is
   `{"op":"profile","ok":true,"name":"voice"}`, or `"ok": false` with a `reason`: the
   server withholds that profile (`monitor_voice` or `monitor_video` is `false`, as
-  `/api/v1/info`'s `monitor` says), or a traffic limit is reached, when
-  the site's `message` and `url` come with it. Past a limit while a session runs, the
+  `/api/v1/info`'s `monitor` says), a traffic limit is reached, or, for `"video"`, the
+  host is busy with other work (`"server busy"`, with `cpu_busy_percent`); the last two
+  come with the `message` and `url` to show. Past a limit while a session runs, the
   server sends `{"op":"limit","message":…,"url":…}` unasked and from then on echoes only
-  probes of up to 64 bytes.
+  probes of up to 64 bytes. While the host is busy, it sends a Video call
+  `{"op":"limit","to":"voice","message":…,"url":null}` and from then on echoes its probes
+  of up to 300 bytes, its voice: the client goes on with the Voice call (a client that
+  knows no `to` goes on with path probes, which still come back).
 
   Once `session_max_runtime` is up, the server sends `{"op":"ended","reason":"runtime","seconds":…}`
   unasked and closes the session a few seconds later. texas2step's pages then stop and ask
@@ -104,12 +124,14 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/v1/info` | name, version (left out for clients outside `internal_networks`), server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes), limits (`max_session_seconds`: `session_max_runtime`; `max_monitor_seconds`, `max_diag_seconds`: `page_monitor_max_runtime` and `page_diag_max_runtime`, which pages from other servers keep while they test this one; `0` for none), ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `monitor` (`profile`: Monitor's until a visitor picks; `voice`, `video`: whether the Voice call and Video call profiles are offered); with a [traffic limit](traffic.md), `traffic` (below) |
+| GET | `/api/v1/info` | name, version (left out for clients outside `internal_networks`), server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes; `test_cpu`: it answers `/api/v1/tests/{id}`), limits (`max_session_seconds`: `session_max_runtime`; `max_monitor_seconds`, `max_diag_seconds`: `page_monitor_max_runtime` and `page_diag_max_runtime`, which pages from other servers keep while they test this one; `0` for none), ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `monitor` (`profile`: Monitor's until a visitor picks; `voice`, `video`: whether the Voice call and Video call profiles are offered); with a [traffic limit](traffic.md), `traffic` (below) |
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |
 | GET | `/api/v1/health` | `{"status": "ok", "version": …}`; without the version for clients outside `internal_networks`, or that need an [access code](#access-codes) |
 | GET | `/api/v1/clients` | The pages and command-line runs active now, and in `ended` those of the last hour, as `texas2step clients --json` prints them; only for `internal_networks`, and `404` on a server without them. See [Active clients](clients.md#over-the-api). |
+| GET | `/api/v1/cpu` | The server's CPU now, the last hour by the minute and each day (`?days=0` to 30), as `texas2step cpu --json` prints it; only for `internal_networks`. See [Server CPU](cpu.md#over-the-api). |
+| GET | `/api/v1/metrics` | The same figures in Prometheus's text format; only for `internal_networks` |
 
 With a traffic limit, `traffic` says whether this client may start a test, and if not,
 what it is told:
@@ -277,7 +299,10 @@ used one stream or skipped it. Each transfer's `rate_limit` is where its rate st
 and stayed down: the rate before (`from_mbps`), when it fell, in seconds from the start of
 the transfer (`at_s`), what the transfer had moved by then (`before_bytes`) and the rate
 after (`to_mbps`); `null` when it held, and left out of results from before it. See
-[Rate limit](methodology.md#rate-limit). `config.http` is the HTTP version a browser test
+[Rate limit](methodology.md#rate-limit). Each transfer's `server_cpu` is the busiest
+share of a core among the server's workers that served it (`GET /api/v1/tests/{id}`);
+at 0.9 or more the server's CPU set the rate. It is left out where the server doesn't
+say: before 2.12.0, or a transfer under a second. `config.http` is the HTTP version a browser test
 was held to, `"http1"` or `"http3"`, through the server's name for it; it is left out
 for Auto ([Streams and HTTP versions](methodology.md#streams-and-http-versions)). `call.mos_rating` is the score's own
 rating, and `call.rating` the one shown: lower when a gap is long enough for a caller to

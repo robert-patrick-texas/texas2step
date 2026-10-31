@@ -55,8 +55,11 @@ type Target struct {
 	Session string
 	Page    string
 	Test    string // the test download and upload requests belong to, sent as ?test=
-	HTTP2   bool   // let transfers and pings share one HTTP/2 connection
-	Family  string // "tcp4" or "tcp6" to hold to one address family; "" for either
+	// "one_stream" for the one stream's download after a test's download, sent as
+	// ?transfer=, which the server times apart (GET /api/v1/tests/{id}).
+	Transfer string
+	HTTP2    bool   // let transfers and pings share one HTTP/2 connection
+	Family   string // "tcp4" or "tcp6" to hold to one address family; "" for either
 }
 
 // Base is a server's URL as given, tidied: an http:// scheme if none, no trailing slash.
@@ -287,6 +290,8 @@ type Info struct {
 		WebRTC    bool `json:"webrtc"`
 		Stamps    bool `json:"stamps"`
 		Results   bool `json:"results"`
+		// GET /api/v1/tests/{id}: whether the server's CPU held a transfer back.
+		TestCPU bool `json:"test_cpu"`
 	} `json:"capabilities"`
 	Limits struct {
 		MaxDownloadBytes  *int64  `json:"max_download_bytes"`

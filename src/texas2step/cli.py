@@ -79,6 +79,19 @@ def _limit_line(t: dict[str, Any] | None) -> list[str]:
     ]
 
 
+def _bound_line(t: dict[str, Any] | None) -> list[str]:
+    """A transfer the server's CPU held back, under its line; nothing otherwise."""
+    from .cpu import BOUND
+
+    cpu = (t or {}).get("server_cpu")
+    if not isinstance(cpu, int | float) or cpu < BOUND:
+        return []
+    return [
+        f"  {'':<14} server CPU-bound: a worker ran at {cpu * 100:.0f}% of a core, so the "
+        "server, not the network, set this rate"
+    ]
+
+
 def _one_stream_line(result: dict[str, Any]) -> list[str]:
     """One stream's download, beside the multi-stream rate; nothing when not measured."""
     one, multi = result.get("one_stream"), result.get("download") or {}
@@ -93,6 +106,7 @@ def _one_stream_line(result: dict[str, Any]) -> list[str]:
         f"  {'One stream':<14} {_fmt(one['mbps'], ' Mbps', 1):>14}"
         f"   peak {_fmt(one['peak_mbps'], '', 1)}   (a single file copy{share})",
         *_limit_line(one),
+        *_bound_line(one),
     ]
 
 
@@ -164,9 +178,11 @@ def _report(result: dict[str, Any]) -> str:
         _latency_line("Latency", result.get("latency")),
         _throughput_line("Download", result.get("download"), idle),
         *_limit_line(result.get("download")),
+        *_bound_line(result.get("download")),
         *_one_stream_line(result),
         _throughput_line("Upload", result.get("upload"), idle),
         *_limit_line(result.get("upload")),
+        *_bound_line(result.get("upload")),
         _loss_line(result.get("loss")),
     ]
     if client.get("local_ip"):
@@ -1165,6 +1181,153 @@ def _clients_table(board: Any, now: float, limit: int, everything: bool) -> list
     return lines
 
 
+def _pct(value: float | None) -> str:
+    """A share as a percentage: one decimal under 10 %, where small figures matter."""
+    if value is None:
+        return "-"
+    return f"{value * 100:.1f}%" if value < 0.095 else f"{value * 100:.0f}%"
+
+
+def _cpu_lines(report: dict[str, Any], hostname: str) -> list[str]:
+    """texas2step cpu's figures: now, the last hour by ten minutes, and each day."""
+    import textwrap
+    from datetime import datetime
+
+    from .cpu import NOW, SAMPLE
+    from .traffic import size
+
+    now, busy = report["now"], report["busy"]
+    if now is None:
+        return [
+            f"No worker has written in the last {3 * SAMPLE:g}s: is the service running? "
+            "(systemctl status texas2step)"
+        ]
+    cores = now["cores"]
+    lines = [
+        f"texas2step on {hostname}"
+        + (f", {cores} cores" if cores else "")
+        + f". Now, over the last {NOW:g}s:",
+        "",
+    ]
+    workers = now["workers"]
+    each = ", ".join(f"{w['pid']} {_pct(w['cpu'])}" for w in workers)
+    rows = [("Workers", f"{_pct(now['texas2step'])} of a core: {each}")]
+    if now["nginx"] is not None:
+        rows.append(("nginx", f"{_pct(now['nginx'])} of a core"))
+    if now["other"] is not None:
+        other = f"{_pct(now['other'])} of the host's CPU"
+        if busy is not None:
+            since = datetime.fromisoformat(busy["since"]).strftime("%H:%M") if busy["since"] else ""
+            state = f"refusing new tests since {since}" if busy["refusing"] else "tests let in"
+            other += f"   (cpu_busy_percent = {busy['percent']:g}: {state})"
+        rows += [("Other work", other), ("Host", f"{_pct(now['host'])} of the host's CPU")]
+    sessions = now["sessions"]
+    tests = now["sent_mbps"] + now["received_mbps"]
+    rows.append(
+        (
+            "Serving",
+            f"{sessions:,} UDP session{'' if sessions == 1 else 's'}, "
+            f"{now['probes_per_s']:,.0f} probes/s; tests {tests:,.1f} Mb/s",
+        )
+    )
+    memory = sum(w["memory"] for w in workers)
+    rows.append(
+        (
+            "Memory",
+            f"{size(memory)}: " + ", ".join(f"{w['pid']} {size(w['memory'])}" for w in workers),
+        )
+    )
+    lines += [f"  {name:<12}{text}" for name, text in rows]
+
+    table: list[tuple[str, ...]]
+    hour = report["hour"]
+    if hour:
+        lines += ["", "The last hour, by ten minutes:", ""]
+        table = [("From", "Workers", "Busiest", "Other", "Probes/s", "Sessions", "Tests")]
+        for i in range(0, len(hour), 10):
+            part = hour[i : i + 10]
+            others = [m["other"] for m in part if m["other"] is not None]
+            mbps = sum(m["sent_mbps"] + m["received_mbps"] for m in part) / len(part)
+            table.append(
+                (
+                    datetime.fromisoformat(part[0]["minute"]).strftime("%H:%M"),
+                    _pct(sum(m["texas2step"] for m in part) / len(part)),
+                    _pct(max(m["busiest"] for m in part)),
+                    _pct(sum(others) / len(others) if others else None),
+                    f"{sum(m['probes_per_s'] for m in part) / len(part):,.0f}",
+                    f"{max(m['sessions'] for m in part):,}",
+                    f"{mbps:,.1f} Mb/s",
+                )
+            )
+        lines += _table(table)
+
+    days = report["days"]
+    if days:
+        lines += ["", "Each day, the latest first:", ""]
+        table = [("Day", "Idle", "Average", "Peak", "Other", "Probes", "Tests", "Memory")]
+        for d in days:
+            table.append(
+                (
+                    d["day"],
+                    _pct(d["idle"]),
+                    _pct(d["average"]),
+                    _pct(d["peak"]),
+                    _pct(d["other"]),
+                    f"{d['probes']:,}",
+                    size(d["bytes"]),
+                    size(d["memory"]),
+                )
+            )
+        lines += _table(table)
+    note = (
+        "Workers, Busiest, Idle, Average and Peak are shares of one core, as top shows each "
+        "process; Other work and Host, of all the host's cores. Idle: with no tests, probes or "
+        "UDP sessions to serve (docs/cpu.md)."
+    )
+    return [*lines, "", *textwrap.wrap(note, 88)]
+
+
+def cmd_cpu(args: argparse.Namespace) -> None:
+    import json
+    import socket
+    import sqlite3
+    import time
+
+    from .cpu import SAMPLE, CpuFile
+
+    settings = _server_settings(args)
+    path = Path(settings.cpu_file)
+    if not path.exists():
+        sys.exit(f"texas2step: no figures yet: the service writes {path} as it runs")
+    figures = CpuFile(path, settings.access_timezone)
+
+    def show() -> None:
+        try:
+            busy = figures.noted_busy(settings.cpu_busy_percent, settings.cpu_busy_seconds)
+            report = figures.report(time.time(), busy, args.days)
+        except (OSError, sqlite3.Error) as exc:
+            why = str(exc)
+            denied = isinstance(exc, PermissionError) or "readonly" in why or "open" in why
+            sys.exit(f"texas2step: can't read {path}: {why}" + (" (try sudo)" if denied else ""))
+        if args.json:
+            print(json.dumps(report, indent=2), flush=True)
+        else:
+            print("\n".join(_cpu_lines(report, socket.gethostname())), flush=True)
+
+    if not args.watch:
+        show()
+        return
+    try:
+        while True:
+            if not args.json:
+                print("\x1b[H\x1b[2J", end="")  # to the top, and clear the screen
+                print(f"Every {SAMPLE:g}s; Ctrl-C to stop.\n")
+            show()
+            time.sleep(SAMPLE)
+    except KeyboardInterrupt:
+        print()
+
+
 def cmd_clients(args: argparse.Namespace) -> None:
     import json
     import sqlite3
@@ -1643,6 +1806,27 @@ def build_parser() -> argparse.ArgumentParser:
         f"{CLIENTS_ENDED_SHOWN}",
     )
     cl.set_defaults(func=cmd_clients)
+
+    cp = sub.add_parser(
+        "cpu",
+        help="the server's CPU, and what it serves",
+        description="Show the CPU texas2step's workers use now, nginx's, the host's and other "
+        "work's, beside the UDP sessions and probes and the tests' traffic they serve; then the "
+        "last hour by ten minutes and each day's figures, which say whether the workers' CPU "
+        "with nothing to serve is growing (docs/cpu.md).",
+    )
+    settings_file(cp)
+    cp.add_argument("--json", action="store_true", help="print the figures as JSON, for scripts")
+    cp.add_argument("--watch", action="store_true", help="show them again every 5 seconds")
+    cp.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        choices=range(31),
+        metavar="N",
+        help="days of daily figures, 0 to 30 (default 30)",
+    )
+    cp.set_defaults(func=cmd_cpu)
 
     def target(p: argparse.ArgumentParser) -> None:
         p.add_argument("url", help="base URL of a texas2step server")

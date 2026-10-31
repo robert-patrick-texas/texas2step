@@ -44,6 +44,7 @@ const TOPICS: Topic[] = [
         [b("Responsiveness"), ": round trips per minute while busy (RPM); higher is better."],
         [b("Call quality"), ": how a voice call would sound, from the packet-loss step, scored 1 to 5 and rated Excellent, Good, Fair, Poor or Bad. Each direction is scored, and the worse is shown."],
         [b("Rate limit"), ": a speed that holds, then drops partway and stays down, as when a provider's speed boost ends or a firewall limits a transfer. The tile shows the lower speed, when it came, and the speed before. A longer test, under Test options, catches a boost a short one ends inside."],
+        [b("Server CPU-bound"), ": the server ran at a full core while it served the transfer, so the server, not the network, set its speed. Fast links can outrun a server; the path may carry more."],
       ]),
       p(
         b("Readiness"),

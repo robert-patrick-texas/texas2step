@@ -129,12 +129,30 @@ export class TestRun {
     } finally {
       prober.close();
     }
+    await this.serverCpu();
 
     r.bufferbloat = bufferbloat(r);
     this.judge();
     r.readiness = readiness(r);
     r.duration_s = (performance.now() - t0) / 1000;
     return r;
+  }
+
+  /** The server's CPU while it served each transfer, where it can say: a server at a full
+   * core set the rate, not the network. */
+  private async serverCpu(): Promise<void> {
+    if (!this.info.capabilities.test_cpu) return;
+    const r = this.result;
+    try {
+      const parts = await this.ep.json<Partial<Record<"download" | "one_stream" | "upload", { cpu: number }>>>(`/tests/${this.test}`);
+      for (const name of ["download", "one_stream", "upload"] as const) {
+        const t = r[name];
+        const cpu = parts[name]?.cpu;
+        if (t && typeof cpu === "number") t.server_cpu = cpu;
+      }
+    } catch {
+      /* the result goes on without it */
+    }
   }
 
   /** What the figures so far mean for calls and responsiveness. */
@@ -184,6 +202,7 @@ export class TestRun {
       streams: 1,
       maxBytes: this.info.limits.max_download_bytes,
       test: this.test,
+      transfer: "one_stream",
       signal,
       onTick: (live) => this.on.throughput("one", live),
     });

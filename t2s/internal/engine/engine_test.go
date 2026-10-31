@@ -78,6 +78,28 @@ func TestOnlyFamilyKeepsOneFamilysCandidates(t *testing.T) {
 	}
 }
 
+func TestServerCPUFillsEachTransfer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/tests/abc" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"test":"abc","download":{"cpu":0.97,"bound":true},"upload":{"cpu":0.4,"bound":false}}`))
+	}))
+	defer srv.Close()
+	target := NewTarget(srv.URL)
+	target.Test = "abc"
+	r := &Result{Download: &Throughput{}, OneStream: &Throughput{}, Upload: &Throughput{}}
+	ServerCPU(context.Background(), target, r)
+	if r.Download.ServerCPU == nil || *r.Download.ServerCPU != 0.97 || *r.Upload.ServerCPU != 0.4 {
+		t.Errorf("got %v, %v", r.Download.ServerCPU, r.Upload.ServerCPU)
+	}
+	if r.OneStream.ServerCPU != nil {
+		t.Errorf("one stream: the server said nothing, got %v", *r.OneStream.ServerCPU)
+	}
+}
+
 func TestAWrongCodeSaysWhatTheServerSaid(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -75,6 +75,8 @@ async def info(request: Request) -> dict[str, Any]:
             "stamps": s.webrtc_enabled and rtc.AVAILABLE,
             "results": s.results_enabled,
             "measure": s.measure_enabled,
+            # GET /api/v1/tests/{id}: whether the server's CPU held a transfer back.
+            "test_cpu": True,
         },
         "limits": {
             "max_download_bytes": s.max_download_bytes,

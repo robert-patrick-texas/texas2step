@@ -69,6 +69,7 @@ test, on PyPI too.
 | **Servers open to the Internet** | Access codes from the service desk that change daily, weekly or monthly. Wrong codes lock a network out, and servers can share lockouts. Your own networks need no code. |
 | **Billed traffic** | Daily and monthly caps on what the tests move, and time limits for Monitor and Diag. |
 | **Who is testing** | `texas2step clients` lists the pages and command-line runs in use now. |
+| **Server CPU** | `texas2step cpu`, Prometheus and Diag show the server's CPU beside its traffic. Busy hosts can refuse tests, and results say when the server set the rate. |
 | **Your brand** | Your name, logo, notice, links and footer, and a choice of seven themes. Any page or header item can be hidden. |
 | **Security** | A sandboxed service behind nginx, a Content-Security-Policy, and no cookies or telemetry. TLS 1.3 with post-quantum key exchange is recommended. |
 

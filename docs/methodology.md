@@ -175,7 +175,9 @@ added: **bufferbloat**.
 
 On very fast links (multi-gigabit, or loopback) the server's own CPU can become the
 bottleneck and add queueing delay of its own. Running with `--workers 2` or more
-reduces this.
+reduces this. A transfer the server's CPU held back says so: "Server CPU-bound" on the
+Test page and a line under it from the command line, when the busiest worker serving it
+ran at 90 % of a core or more ([Server CPU](cpu.md#server-cpu-bound-results)).
 
 ## Responsiveness
 
