@@ -10,7 +10,8 @@ or promised: one goes into a release when it's needed, and moves to
 
 Tests that say how a connection will feel to the people using it, not only how fast it
 is. Call quality, responsiveness, one stream and Monitor's call profiles came in
-[2.1.0](#210-2026-10-24), and rate limits in [2.10.0](#2100-2026-10-30).
+[2.1.0](#210-2026-10-24), rate limits in [2.10.0](#2100-2026-10-30), and Device-bound
+results in [2.14.0](#2140-2026-10-31).
 
 - [ ] **Where is the problem?** A guided comparison of a nearby or internal server with a
   distant one: if both are bad, it's the local network or Wi-Fi; if only the distant one
@@ -233,6 +234,14 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
 ## Done
 
 Newest first. Each release's notes have the details and its upgrade steps.
+
+### [2.14.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.14.0) (2026-10-31)
+
+- [x] **Device-bound results:** the Test page, `texas2step run` and t2s say when the
+  device, not the network, set a transfer's rate. The server times how long the client
+  held each download back, from the kernel's figures for its connection, and the page how
+  late it ran; a bufferbloat grade the page's own lateness made is withheld
+  ([When the device is the limit](methodology.md#when-the-device-is-the-limit)).
 
 ### [2.13.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.13.0) (2026-10-31)
 
