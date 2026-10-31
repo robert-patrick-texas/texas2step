@@ -137,7 +137,12 @@ export class LiveChart {
   push(sample: LiveSample, series = 0): void {
     const s = this.series[series];
     if (!s) return;
-    s.samples.push(sample);
+    // In the order the probes were sent, as t2s keeps them, so jitter compares each round
+    // trip with the one sent before it: an answer that overtakes an earlier probe's, or a
+    // probe found lost a second later, goes in its place.
+    let i = s.samples.length;
+    while (i > 0 && s.samples[i - 1]!.t > sample.t) i--;
+    s.samples.splice(i, 0, sample);
     const cutoff = Date.now() - 15 * 60 * 1000;
     while (s.samples.length && s.samples[0]!.t < cutoff) s.samples.shift();
     this.raf ||= requestAnimationFrame(() => {

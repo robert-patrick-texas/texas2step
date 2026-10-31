@@ -60,7 +60,9 @@ jitter = Σ |rttᵢ − rttᵢ₋₁| / (n − 1)
 
 This is the unsmoothed form of the RFC 3550 inter-arrival jitter, and it is what most
 web speed tests report. It reflects how much successive packets' delay varies, which is
-what real-time media notices. Standard deviation is shown alongside.
+what real-time media notices. Standard deviation is shown alongside. Where probes overlap,
+as the UDP probes and Monitor's do, consecutive means in the order they were sent, not
+the order their answers came back.
 
 ## Throughput
 

@@ -111,7 +111,7 @@ type Dest struct {
 	busy      bool
 	udpAt     float64
 	points    []point
-	all       []float64 // every round trip since Start, for the summary
+	all       []point // every round trip since Start, for the summary, in the order sent
 	lost      int
 	slices    map[float64]Slice // every slice scored since Start, by its start
 	outages   int
@@ -404,19 +404,27 @@ func (m *Monitor) record(d *Dest, seq uint32, rtt float64) {
 	}
 	delete(d.sentAt, seq)
 	d.latest = rtt
-	d.all = append(d.all, rtt)
+	d.all = inOrder(d.all, point{t, rtt})
 	d.push(point{t, rtt})
+}
+
+// inOrder adds p to points in the order the probes were sent: an answer that overtakes an
+// earlier probe's goes in its place, so jitter compares each round trip with the one sent
+// before it.
+func inOrder(points []point, p point) []point {
+	i := len(points)
+	for i > 0 && points[i-1].t > p.t {
+		i--
+	}
+	points = append(points, point{})
+	copy(points[i+1:], points[i:])
+	points[i] = p
+	return points
 }
 
 // push adds a point in time order, and lets go of those older than the longest window.
 func (d *Dest) push(p point) {
-	i := len(d.points)
-	for i > 0 && d.points[i-1].t > p.t {
-		i--
-	}
-	d.points = append(d.points, point{})
-	copy(d.points[i+1:], d.points[i:])
-	d.points[i] = p
+	d.points = inOrder(d.points, p)
 	cut := 0
 	for cut < len(d.points) && d.points[cut].t < p.t-keepMs {
 		cut++
@@ -1017,8 +1025,12 @@ func (m *Monitor) Totals() []Total {
 			t.LossPct = ptr(float64(d.lost) / float64(resolved) * 100)
 		}
 		if len(d.all) > 0 {
-			t.Median, t.P95 = ptr(stats.Percentile(d.all, 50)), ptr(stats.Percentile(d.all, 95))
-			t.Jitter = ptr(stats.Jitter(d.all))
+			all := make([]float64, len(d.all))
+			for i, p := range d.all {
+				all[i] = p.rtt
+			}
+			t.Median, t.P95 = ptr(stats.Percentile(all, 50)), ptr(stats.Percentile(all, 95))
+			t.Jitter = ptr(stats.Jitter(all))
 		}
 		var scores []float64
 		var worst *Slice
