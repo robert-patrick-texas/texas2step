@@ -17,8 +17,6 @@ results in [2.14.0](#2140-2026-10-31).
   distant one: if both are bad, it's the local network or Wi-Fi; if only the distant one
   is, it's the WAN or the ISP. It would build on the server picker and Monitor's
   two-server mode.
-- [ ] **Device-bound on Monitor.** Mark the stretches when the page ran late on Monitor's
-  loss strip, as the Test page says when the device set a transfer's rate.
 - [ ] **A path trace from the server.** For the service desk only: the server traces the
   path back to the caller's address with `tracepath`, which needs no privileges, and shows
   each hop and the largest packet the path carries. Rate-limited, and only toward the
@@ -230,6 +228,16 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
   URL in the release notes ahead of the package's name would run into it, so release
   notes keep their links after the Files table. Reading the description as JSON, with the
   `python3` the package already needs, wouldn't depend on that.
+
+### Later, maybe
+
+Worth considering, not urgent, and perhaps not needed.
+
+- [ ] **Device-bound on Monitor.** Mark the stretches when the page ran late on Monitor's
+  loss strip, as the Test page says when the device set a transfer's rate. A busy computer
+  usually gives itself away first: the pointer lags, Outlook freezes, Teams stops
+  responding. Symptoms like these point to the client, not the network, especially when
+  no one else on the network reports them.
 
 ## Done
 
