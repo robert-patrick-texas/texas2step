@@ -307,11 +307,11 @@ func (m *Monitor) connect(d *Dest) error {
 		m.mu.Unlock()
 		return nil
 	}
-	w.Closed = func(code int) {
+	w.OnClose(func(code int) {
 		if code == engine.RuntimeClose {
 			m.serverEnded(d, d.info.Limits.MaxSessionSeconds)
 		}
-	}
+	})
 	m.mu.Lock()
 	// Over TCP the probes are round trips of a fixed small size, and video isn't sent.
 	d.probe = wsProbe{w: w, echo: func(seq uint32, rtt float64) {
@@ -338,7 +338,7 @@ func (m *Monitor) udp(d *Dest) (probe, string, error) {
 	if p := m.cfg.Profile; p != "path" {
 		if answer := rtc.Profile(p); answer != nil && !answer.OK {
 			rtc.Close()
-			if answer.Reason == "traffic limit" {
+			if answer.Reason == "traffic limit" || answer.Reason == "server busy" {
 				return nil, "", &Refusal{Message: or(answer.Message, "Testing temporarily disabled."), URL: answer.URL}
 			}
 			return nil, "", &Refusal{Message: fmt.Sprintf("%s doesn't offer Monitor's %s profile.", d.info.Name(d.t), profileNames[p])}
@@ -347,14 +347,16 @@ func (m *Monitor) udp(d *Dest) (probe, string, error) {
 			rtc.Stamp()
 		}
 	}
-	// At a traffic limit the server holds a call to path probes: follow it. At its
-	// session_max_runtime it ends the session: stop, rather than open another.
+	// At a traffic limit the server holds a call to path probes, and while the host is
+	// busy a Video call to its Voice call ("to"): follow it. At its session_max_runtime it
+	// ends the session: stop, rather than open another.
 	rtc.OnNotice(func(msg map[string]any) {
 		switch msg["op"] {
 		case "limit":
 			text, _ := msg["message"].(string)
 			link, _ := msg["url"].(string)
-			m.limited(or(text, "Testing temporarily disabled."), link)
+			to, _ := msg["to"].(string)
+			m.limited(or(text, "Testing temporarily disabled."), link, to)
 		case "ended":
 			seconds, _ := msg["seconds"].(float64)
 			m.serverEnded(d, seconds)
@@ -570,7 +572,9 @@ func (m *Monitor) watch() {
 // check asks a quiet server over HTTPS whether the network, and the server, are back.
 func (m *Monitor) check(d *Dest) {
 	ctx, cancel := context.WithTimeout(m.ctx, 2*time.Second)
-	_, err := d.t.GetJSON(ctx, d.t.Client(1), "/health", nil, nil)
+	c := d.t.Client(1) // its own, closed after: one every few seconds through an outage
+	_, err := d.t.GetJSON(ctx, c, "/health", nil, nil)
+	c.CloseIdleConnections()
 	cancel()
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -675,21 +679,30 @@ func (m *Monitor) restored(d *Dest) {
 	m.event(fmt.Sprintf("%s didn't answer from %s to %s, for %s.", d.Name(), clock(dn.since), clock(d.lastEcho), span))
 }
 
-// limited is a server's traffic limit reached: Monitor carries on with path probes.
-func (m *Monitor) limited(message, link string) {
+// limited is a server's traffic limit reached: Monitor carries on with path probes. A
+// server busy with other work holds a Video call to its Voice call instead (to "voice").
+func (m *Monitor) limited(message, link, to string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.cfg.Profile == "path" {
+	if to != "voice" {
+		to = "path"
+	}
+	if m.cfg.Profile == "path" || m.cfg.Profile == to {
 		return
 	}
-	m.cfg.Profile = "path"
+	m.cfg.Profile = to
 	text := message + " Monitor carries on with small probes."
+	if to == "voice" {
+		text = message + " Monitor carries on with the Voice call."
+	}
 	if link != "" {
 		text += " " + link
 	}
 	m.event(text)
-	for _, d := range m.Dests {
-		d.stream = nil
+	if to == "path" {
+		for _, d := range m.Dests {
+			d.stream = nil
+		}
 	}
 	if m.running {
 		m.schedule()

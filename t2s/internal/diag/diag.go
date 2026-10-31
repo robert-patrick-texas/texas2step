@@ -668,11 +668,11 @@ func (d *Diag) openWs(m *Method) {
 		go w.Close()
 		return
 	}
-	w.Closed = func(code int) {
+	w.OnClose(func(code int) {
 		if code == engine.RuntimeClose {
 			d.serverEnded(d.Info.Limits.MaxSessionSeconds)
 		}
-	}
+	})
 	m.ws, m.Restricted = w, false
 	m.Detail = "its own TCP connection, opened by an HTTP/1.1 upgrade"
 }

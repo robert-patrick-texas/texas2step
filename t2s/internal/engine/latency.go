@@ -76,6 +76,10 @@ func (t *Target) Ping(ctx context.Context, c *http.Client, n int, timeout time.D
 	return ms, r, nil
 }
 
+// ProbeTimeout is how long a latency probe waits for its answer before it counts as lost,
+// idle and under load, as the browser's and the Python engine's.
+const ProbeTimeout = 3 * time.Second
+
 // MeasureLatency is idle round-trip time over HTTP, the server's processing time taken out
 // by Server-Timing. A ping without an answer is lost; one the server answers with an error,
 // such as 401 for want of an access code, ends the measurement with it: a refusal isn't a
@@ -89,7 +93,7 @@ func MeasureLatency(ctx context.Context, t *Target, count int, progress Progress
 	var samples []float64
 	lost := 0
 	for i := range count {
-		rtt, _, err := t.Ping(ctx, c, i, 2*time.Second)
+		rtt, _, err := t.Ping(ctx, c, i, ProbeTimeout)
 		var se *StatusError
 		if errors.As(err, &se) {
 			return nil, err
@@ -239,10 +243,22 @@ type WsProber struct {
 	seq     uint32
 	pending map[uint32]chan float64
 	done    chan struct{}
-	// Closed hears the socket's close code once it closes, by either end: RuntimeClose,
-	// say. Set before the socket can close.
-	Closed func(code int)
-	code   int
+	onClose func(code int) // see OnClose
+	ended   bool           // the socket closed
+	code    int
+}
+
+// OnClose has f hear the socket's close code once it closes, by either end: RuntimeClose,
+// say. A close that came before OnClose is heard too, from a goroutine of its own, as the
+// caller may hold the lock f takes.
+func (w *WsProber) OnClose(f func(code int)) {
+	w.mu.Lock()
+	w.onClose = f
+	ended, code := w.ended, w.code
+	w.mu.Unlock()
+	if ended {
+		go f(code)
+	}
 }
 
 // DialWs opens the echo socket, within timeout.
@@ -271,11 +287,12 @@ func (w *WsProber) read() {
 		if err != nil {
 			w.mu.Lock()
 			w.code = int(websocket.CloseStatus(err))
+			w.ended = true
 			for seq, ch := range w.pending {
 				close(ch)
 				delete(w.pending, seq)
 			}
-			closed := w.Closed
+			closed := w.onClose
 			w.mu.Unlock()
 			if closed != nil {
 				closed(w.code)
@@ -359,7 +376,7 @@ func (l *loadedLatency) run(ctx context.Context) {
 	}
 	defer w.Close()
 	for ctx.Err() == nil && w.Ready() {
-		if rtt, ok := w.Ping(2 * time.Second); ok {
+		if rtt, ok := w.Ping(ProbeTimeout); ok {
 			l.samples = append(l.samples, rtt)
 		} else if ctx.Err() == nil {
 			l.lost++

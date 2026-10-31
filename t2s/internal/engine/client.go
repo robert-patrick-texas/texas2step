@@ -345,7 +345,9 @@ func (i *Info) ICE() []string {
 // GetInfo reads the server's /api/v1/info.
 func (t *Target) GetInfo(ctx context.Context) (*Info, error) {
 	var info Info
-	if _, err := t.GetJSON(ctx, t.Client(1), "/info", nil, &info); err != nil {
+	c := t.Client(1)
+	defer c.CloseIdleConnections() // Monitor asks again on each reconnect
+	if _, err := t.GetJSON(ctx, c, "/info", nil, &info); err != nil {
 		return nil, err
 	}
 	return &info, nil
