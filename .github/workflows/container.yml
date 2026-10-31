@@ -1,0 +1,185 @@
+# The container image (Dockerfile, docs/container.md): built and tested for amd64 and arm64
+# on every change that touches it, each on a runner of its own architecture.
+#
+# A published GitHub release tagged v<version> also pushes both to GitHub's container
+# registry, joins them under the tags <version>, <major>.<minor>, <major> and latest, and
+# adds a signed attestation of where the image was built, as pypi.yml does for PyPI.
+# Check one with: gh attestation verify oci://ghcr.io/robert-patrick-texas/texas2step:<version> \
+#     --owner robert-patrick-texas
+name: container
+
+on:
+  push:
+    branches: ["**"] # not tags: a release tag runs the release event below
+    paths: ["Dockerfile", ".dockerignore", "deploy/container/**", "deploy/nginx/**", "src/**", "pyproject.toml", "uv.lock", ".github/workflows/container.yml"]
+  pull_request:
+    paths: ["Dockerfile", ".dockerignore", "deploy/container/**", "deploy/nginx/**", "src/**", "pyproject.toml", "uv.lock", ".github/workflows/container.yml"]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  IMAGE: ghcr.io/robert-patrick-texas/texas2step
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write # used only by a release, to push the image it tested
+    steps:
+      # Actions are pinned by commit, as pypi.yml's are; the comment is its tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check that a release's tag is the version
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(make -s version)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = release ] && [ "$TAG" != "v$version" ]; then
+            echo "::error::The release's tag is $TAG, but src/texas2step/__init__.py says $version: tag it v$version."
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Built from scratch each time, with no shared cache, as a release is.
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          pull: true
+          load: true
+          tags: texas2step:test
+          provenance: false
+
+      - name: Run it on the host's network, as docs/container.md does, and test it
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          docker run -d --name texas2step --network host \
+              -e HTTPS_PORT=8443 -e HTTP_PORT=8088 texas2step:test
+          site=https://127.0.0.1:8443/texas2step
+          curl -fsSk --retry 30 --retry-all-errors --retry-delay 1 "$site/api/v1/health" \
+              | grep -F "\"version\":\"$VERSION\""
+          curl -fsSk "$site/" | grep -q 'assets/app.js'
+          test "$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/)" = 302
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8088/)" = 301
+          # The loss test over UDP, from the command line inside, trusting the
+          # certificate the container made.
+          docker exec -e SSL_CERT_FILE=/etc/texas2step/tls/fullchain.pem texas2step \
+              texas2step loss "$site" --packets 100 | tee loss.txt
+          grep -q 'Loss .* UDP RTT' loss.txt
+          if docker exec texas2step texas2step update --check 2> update.txt; then
+            echo "::error::texas2step update should refuse to run in the container"
+            exit 1
+          fi
+          grep -F 'recreate the container' update.txt
+          docker exec texas2step /usr/lib/texas2step/healthcheck
+          docker stop texas2step
+          test "$(docker inspect -f '{{.State.ExitCode}}' texas2step)" = 0
+
+      - name: Show the container's log
+        if: always()
+        run: docker logs texas2step || true
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        if: github.event_name == 'release'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The same build again, from the builder's own cache: the image just tested.
+      - name: Push it by digest
+        if: github.event_name == 'release'
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          provenance: false
+
+      - name: Keep the digest for the next job
+        if: github.event_name == 'release'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.event_name == 'release'
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write # the tags
+      id-token: write # the OpenID Connect token Sigstore signs the attestation with
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag both architectures as one image
+        id: tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          version=${TAG#v}
+          tags=(-t "$IMAGE:$version")
+          if [ "$PRERELEASE" != true ]; then
+            minor=${version%.*}
+            tags+=(-t "$IMAGE:$minor" -t "$IMAGE:${minor%.*}" -t "$IMAGE:latest")
+          fi
+          sources=()
+          for digest in *; do sources+=("$IMAGE@sha256:$digest"); done
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "$IMAGE:$version"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$version" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.tag.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false # storage records are for organizations' repositories

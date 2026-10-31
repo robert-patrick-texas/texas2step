@@ -273,6 +273,16 @@ def test_only_package_installs_are_updated(mirror, host, monkeypatch):
         run(mirror, "--check")
 
 
+def test_the_container_image_is_updated_by_a_newer_image(mirror, host, monkeypatch, tmp_path):
+    marker = tmp_path / "container"
+    marker.write_text("ghcr.io/robert-patrick-texas/texas2step\n")
+    monkeypatch.setattr(update, "CONTAINER", marker)
+    for argv in (["--check"], ["--yes"], ["--auto"]):
+        with pytest.raises(update.UpdateError, match="pull it and recreate the container"):
+            run(mirror, *argv)
+    assert not update.CACHE.exists()
+
+
 def test_one_update_at_a_time(mirror, host):
     fd = update.lock()
     try:

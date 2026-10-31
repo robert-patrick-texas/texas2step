@@ -176,6 +176,20 @@ def test_cli_set_previews_then_writes_with_a_backup(settings_file, capsys):
     assert "unchanged" in capsys.readouterr().out
 
 
+def test_cli_set_in_the_container_says_to_restart_it(settings_file, capsys, monkeypatch):
+    from texas2step import update
+
+    marker = settings_file.with_name("container")
+    marker.write_text("ghcr.io/robert-patrick-texas/texas2step\n")
+    monkeypatch.setattr(update, "CONTAINER", marker)
+    main(["config", "set", "server_id=houston", "--config", str(settings_file)])
+    assert "To apply: texas2step config set server_id=houston --write" in capsys.readouterr().out
+    main(["config", "set", "server_id=houston", "--config", str(settings_file), "--write"])
+    out = capsys.readouterr().out
+    assert "Apply the settings: restart the container (docker restart texas2step)" in out
+    assert "systemctl" not in out
+
+
 def test_cli_set_rejects_bad_input(settings_file):
     with pytest.raises(SystemExit, match="KEY=VALUE"):
         main(["config", "set", "server_name", "--config", str(settings_file)])

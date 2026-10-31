@@ -1,0 +1,44 @@
+# texas2step as a systemd service under Podman 4.4 or later (Quadlet; docs/container.md).
+# Set the server's details below, then:
+#
+#     sudo cp texas2step.container /etc/containers/systemd/
+#     sudo systemctl daemon-reload
+#     sudo systemctl start texas2step
+#
+# Updates: sudo systemctl enable --now podman-auto-update.timer, or podman auto-update.
+
+[Unit]
+Description=texas2step network measurement server (container)
+Documentation=https://robert-patrick-texas.github.io/texas2step/docs/container.html
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=ghcr.io/robert-patrick-texas/texas2step:2
+ContainerName=texas2step
+# The UDP test gives the browser the server's own address, so no NAT: the host's network,
+# or a macvlan network (docs/container.md, Networking).
+Network=host
+Volume=texas2step-etc:/etc/texas2step
+Volume=texas2step-data:/var/lib/texas2step
+Environment=TEXAS2STEP_SERVER_ID=houston
+Environment=TEXAS2STEP_SERVER_NAME=houston.example.net
+Environment="TEXAS2STEP_SERVER_LOCATION=Houston, TX"
+# Any other setting in docs/configuration.md, as TEXAS2STEP_<NAME>, and the container's
+# own (docs/container.md, The container's settings):
+#Environment=TEXAS2STEP_ACCESS_CODE=daily
+#Environment=HTTPS_PORT=443 HTTP_PORT=80 HTTP3=off
+AutoUpdate=registry
+# Podman reads no HEALTHCHECK from an OCI image, so the image's check is named here.
+HealthCmd=/usr/lib/texas2step/healthcheck
+HealthInterval=30s
+HealthTimeout=10s
+HealthStartPeriod=20s
+
+[Service]
+Restart=always
+# The first start pulls the image.
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

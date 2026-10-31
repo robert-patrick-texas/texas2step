@@ -50,6 +50,7 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make docs-watch` | Re-render `html/` whenever a `.md` file changes |
 | `make sheet` | Print the one-page sheet, `docs/at-a-glance.pdf` (US Letter) and `docs/at-a-glance-a4.pdf` (A4), from `scripts/at-a-glance.html` |
 | `make deb` | Build `dist/texas2step-<version>-1-amd64.deb` and `dist/texas2step-setup` |
+| `make image` | Build the container image `texas2step:<version>` for this machine's architecture |
 | `make version` | Print the version |
 | `make upgrade` | Move every Python, npm and Go dependency to its newest release, then rebuild the UI |
 | `make t2s` | Build t2s for Linux, macOS and Windows (amd64, arm64) into `dist/` |
@@ -88,9 +89,11 @@ tests/                 pytest: stats, config, API, store, WebRTC, end-to-end
 docs/                  the documentation, in Markdown
 scripts/build_docs.py  Markdown → html/ (the GitHub Pages site)
 deploy/                files the package installs: systemd units, defaults, nginx snippets
+deploy/container/      the container image's entrypoint and nginx.conf, Compose and Quadlet
+Dockerfile             the container image (docs/container.md)
 packaging/             Debian packaging: build-deb.sh, control, maintainer scripts,
                        and texas2step-setup.py, the operators' check-and-install tool
-.github/workflows/     GitHub Pages publishing
+.github/workflows/     GitHub Pages, PyPI, the container image and t2s's tests
 legacy/                the original single-file prototype, kept for reference
 ```
 
@@ -255,6 +258,35 @@ to see the firewall step. `packaging/texas2step-setup.py` keeps its checks in pu
 functions, which `tests/test_setup.py` covers with sample `nginx -T`, ufw, iptables and
 nftables output.
 
+## Build the container image
+
+```bash
+make image        # or: docker build -t texas2step:<version> --build-arg VERSION=<version> .
+```
+
+The [Dockerfile](../Dockerfile) builds in two stages, both on Ubuntu 26.04:
+
+* The first builds the wheel and a virtualenv at `/opt/texas2step/venv` with the exact
+  versions in `uv.lock`, as `packaging/build-deb.sh` does.
+* The second adds Ubuntu's `python3`, `nginx`, `tini` and `openssl`, the virtualenv, the
+  nginx snippets from `deploy/nginx/`, and `deploy/container/`: `nginx.conf` and
+  `entrypoint.sh`, which writes the site from the container's settings at each start
+  and runs the server and nginx. `/usr/share/texas2step/container` tells the command line
+  it is in the image, for `texas2step update` and the restart hints.
+
+To try it, run it on the host's network with ports nothing else uses, then open
+`https://localhost:8443/texas2step/`:
+
+```bash
+docker run --rm --name t2s-image --network host -e HTTPS_PORT=8443 -e HTTP_PORT=8088 \
+    -e LISTEN_PORT=8090 texas2step:$(make -s version)
+```
+
+`.github/workflows/container.yml` builds it for amd64 and arm64, each on a runner of its
+own architecture, and tests each the same way: the page, the redirects, a UDP loss test
+from inside, `texas2step update`'s refusal and a clean stop. A published release also
+pushes them (see [Release](#release)).
+
 ## Release
 
 1. Set the version in `src/texas2step/__init__.py`, the only place it is written. Everything
@@ -306,6 +338,17 @@ pypi → Run workflow, or `gh workflow run pypi.yml`.
 PyPI's copy of the README has its links made absolute, to GitHub, by
 `hatch-fancy-pypi-readme` (`pyproject.toml`).
 
+7. Publishing the release also publishes the [container image](container.md):
+   `.github/workflows/container.yml` checks the tag the same way, builds and tests the
+   image on amd64 and arm64, pushes both to `ghcr.io/robert-patrick-texas/texas2step`
+   under `<version>`, `<major>.<minor>`, `<major>` and `latest`, and attests the build.
+   Watch it too. Unlike PyPI, a failed run can be run again, and a run by hand
+   (`gh workflow run container.yml`) builds and tests without pushing.
+
+```bash
+gh run watch "$(gh run list --workflow container.yml --event release --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
+```
+
 ### Trusted publishing: the one-time setup
 
 PyPI accepts the workflow's uploads because the project trusts it:
@@ -315,6 +358,11 @@ PyPI accepts the workflow's uploads because the project trusts it:
   `pypi`.
 * On GitHub, under **Settings → Environments**, an environment named `pypi` whose
   deployments are limited to tags matching `v*`, so only a release tag can publish.
+
+The container registry needs no setup: the workflow pushes with its own `GITHUB_TOKEN`.
+After the first push, check the package's visibility on GitHub (the profile's
+**Packages**, then the package's **Package settings**) and make it public if it is
+private, so that anyone can pull it without logging in.
 
 Without the workflow, a maintainer with a PyPI API token can still publish by hand:
 

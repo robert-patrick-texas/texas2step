@@ -1,4 +1,4 @@
-.PHONY: dev web web-watch test lint fmt check docs docs-watch sheet deb version upgrade t2s t2s-test
+.PHONY: dev web web-watch test lint fmt check docs docs-watch sheet deb image version upgrade t2s t2s-test
 
 # t2s, the Go client: the platforms it is built for (Go's names; darwin is macOS), each a
 # file of its own in dist/.
@@ -17,13 +17,13 @@ test:
 	uv run pytest
 
 lint:
-	uv run ruff check src tests scripts packaging
-	uv run ruff format --check src tests scripts packaging
+	uv run ruff check src tests scripts packaging deploy
+	uv run ruff format --check src tests scripts packaging deploy
 	cd web && npx tsc --noEmit
 
 fmt:
-	uv run ruff format src tests scripts packaging
-	uv run ruff check --fix src tests scripts packaging
+	uv run ruff format src tests scripts packaging deploy
+	uv run ruff check --fix src tests scripts packaging deploy
 
 check: lint test t2s-test
 
@@ -46,6 +46,9 @@ upgrade:        ## move every dependency to its newest release, then rebuild the
 	    "Object.keys(require('./package.json').devDependencies).map((d) => d + '@latest').join(' ')")
 	$(MAKE) web
 	cd t2s && go get -u ./... && go mod tidy
+
+image:          ## build the container image texas2step:<version> for this machine (docs/container.md)
+	@v=$$($(MAKE) -s version); docker build -t texas2step:$$v --build-arg VERSION=$$v .
 
 version:        ## print the version; it is set only in src/texas2step/__init__.py
 	@sed -n 's/^__version__ = "\(.*\)"$$/\1/p' src/texas2step/__init__.py

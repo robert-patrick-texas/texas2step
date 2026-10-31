@@ -21,6 +21,22 @@ def _fmt(value: float | None, unit: str = "", digits: int = 2) -> str:
     return "—" if value is None else f"{value:,.{digits}f}{unit}"
 
 
+def _restart() -> str:
+    """How to restart the service after a change: its systemd unit, or its container."""
+    from . import update
+
+    if update.in_container():
+        return "restart the container (docker restart texas2step)"
+    return "sudo systemctl restart texas2step"
+
+
+def _sudo() -> str:
+    """The sudo before a command that needs root; none in the container, which runs as root."""
+    from . import update
+
+    return "" if update.in_container() else "sudo "
+
+
 class _Live:
     """One-line progress on stderr when attached to a terminal."""
 
@@ -320,7 +336,7 @@ def cmd_config_merge(args: argparse.Namespace) -> None:
     if merged.retired:
         print(f"No longer used, kept as comments: {', '.join(merged.retired)}")
     if not args.write:
-        print("Nothing written. To apply: sudo texas2step config merge --write")
+        print(f"Nothing written. To apply: {_sudo()}texas2step config merge --write")
         return
 
     _write_settings(path, merged.text)
@@ -330,7 +346,7 @@ def cmd_config_merge(args: argparse.Namespace) -> None:
     ):
         if leftover.exists():
             print(f"{leftover} is no longer needed and can be deleted.")
-    print("Apply the settings: sudo systemctl restart texas2step")
+    print(f"Apply the settings: {_restart()}")
 
 
 def _apply_edit(args: argparse.Namespace, edit: Callable[[str], Any], again: str) -> None:
@@ -353,10 +369,10 @@ def _apply_edit(args: argparse.Namespace, edit: Callable[[str], Any], again: str
     for change in edited.changes:
         print(f"  {change}")
     if not args.write:
-        print(f"Nothing written. To apply: sudo {again} --write")
+        print(f"Nothing written. To apply: {_sudo()}{again} --write")
         return
     _write_settings(path, edited.text)
-    print("Apply the settings: sudo systemctl restart texas2step")
+    print(f"Apply the settings: {_restart()}")
 
 
 def cmd_config_set(args: argparse.Namespace) -> None:
@@ -625,9 +641,9 @@ def cmd_access_key(args: argparse.Namespace) -> None:
         sys.exit(f"texas2step: can't write {path}: {exc.strerror}{hint}")
     if args.new:
         print(f"Wrote {path}. Copy it to the organization's other servers, then on each:")
-        print("  sudo systemctl restart texas2step")
+        print(f"  {_restart()}")
     elif args.import_:
-        print(f"Wrote {path}. Then: sudo systemctl restart texas2step")
+        print(f"Wrote {path}. Then: {_restart()}")
 
 
 def _phrase_when(phrase: Any, zone: str) -> str:
@@ -662,9 +678,9 @@ def _write_phrases(path: Path, text: str, copy: bool = True) -> None:
     if copy:
         print(f"Wrote {path}. To copy it to the organization's other servers, on each:")
         print(f"  ssh <this server> sudo cat {path} | sudo texas2step access phrase import")
-        print("Then restart the service here and on each: sudo systemctl restart texas2step")
+        print(f"Then restart the service here and on each: {_restart()}")
     else:
-        print(f"Wrote {path}. Then: sudo systemctl restart texas2step")
+        print(f"Wrote {path}. Then: {_restart()}")
 
 
 def cmd_access_phrase_list(args: argparse.Namespace) -> None:
@@ -1195,12 +1211,13 @@ def _cpu_lines(report: dict[str, Any], hostname: str) -> list[str]:
 
     from .cpu import NOW, SAMPLE
     from .traffic import size
+    from .update import in_container
 
     now, busy = report["now"], report["busy"]
     if now is None:
+        status = "docker logs texas2step" if in_container() else "systemctl status texas2step"
         return [
-            f"No worker has written in the last {3 * SAMPLE:g}s: is the service running? "
-            "(systemctl status texas2step)"
+            f"No worker has written in the last {3 * SAMPLE:g}s: is the service running? ({status})"
         ]
     cores = now["cores"]
     lines = [

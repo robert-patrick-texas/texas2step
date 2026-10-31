@@ -7,8 +7,9 @@ publishing it at a path on that site:
 * `https://www.example.net/texas2step/`
 * optionally `https://www.example.net/speedtest`, which redirects to the address above.
 
-Replace `www.example.net` with your site throughout. To build the package yourself or
-work on the code, see [Development](development.md).
+Replace `www.example.net` with your site throughout. To run texas2step in a container
+with Docker or Podman instead, see [Container](container.md). To build the package
+yourself or work on the code, see [Development](development.md).
 
 ## What you need
 

@@ -55,6 +55,9 @@ PLAN = "texas2step-plan.json"
 SCRIPT = "texas2step-install.sh"
 AVAILABLE = 100  # --check's exit status when a newer release is out, as dnf check-update
 UNATTENDED = {"package", "settings"}  # what --auto installs with nobody there
+# Written by the container image (Dockerfile). A server in a container is updated by a
+# newer image, not by this.
+CONTAINER = Path("/usr/share/texas2step/container")
 
 
 class UpdateError(Exception):
@@ -376,11 +379,21 @@ def _shown(version: str, other: str) -> str:
     return version if version != other and app == other.rsplit("-", 1)[0] else app
 
 
+def in_container() -> bool:
+    """Whether this is texas2step's container image."""
+    return CONTAINER.exists()
+
+
 def main(args: argparse.Namespace, settings: Settings) -> int:
     def say(text: str, warning: bool = False) -> None:
         # From the timer, "<4>" makes journald file the line as a warning.
         print(("<4>" if warning and args.auto else "") + text, flush=True)
 
+    if in_container():
+        raise UpdateError(
+            "this server runs in texas2step's container image, which a newer image updates: "
+            "pull it and recreate the container (docs/container.md, Update)"
+        )
     installed = installed_version()
     if installed is None:
         raise UpdateError(

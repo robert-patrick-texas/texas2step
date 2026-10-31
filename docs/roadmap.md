@@ -156,6 +156,14 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
   or one made at first start. It needs host networking or macvlan: the UDP test gives the
   browser the container's own address, which Docker's default NAT hides. A new image takes
   the place of `texas2step update`.
+- [ ] **Let's Encrypt in the container.** The image takes a mounted certificate or makes
+  a self-signed one. An ACME client in it could get and renew one for the server's name
+  over `HTTP_PORT`, for servers the Internet can reach.
+- [ ] **The container on a bridge network.** A setting naming the addresses the UDP test
+  offers, as other WebRTC servers' "announced address", with a pinned port range
+  published by `-p`, would let the image run behind Docker's NAT and on Docker Desktop.
+  Visitors' IPv6 addresses would still need a bridge network with IPv6, so that Docker's
+  proxy doesn't replace them.
 - [ ] **cloud-init for LXC containers and virtual machines.** The package already runs
   unchanged in an Ubuntu 26.04 system container (Incus, LXD, Proxmox) or virtual machine.
   A cloud-init file in `deploy/` would install nginx, fetch the latest release, and run

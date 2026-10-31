@@ -50,6 +50,7 @@ LEADING: list[tuple[str, str | None]] = [
     ("README.md", "Overview"),
     ("docs/at-a-glance.md", "At a glance"),
     ("docs/install.md", "Install"),
+    ("docs/container.md", "Container"),
     ("docs/t2s.md", "t2s client"),
     ("docs/configuration.md", None),
     ("docs/access.md", None),

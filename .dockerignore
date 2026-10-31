@@ -1,0 +1,14 @@
+# The container image (Dockerfile) is built from these files only.
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE.md
+!src/
+!deploy/container/
+!deploy/nginx/
+**/__pycache__
+**/*.py[cod]
+**/*.db
+**/*.db-shm
+**/*.db-wal

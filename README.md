@@ -82,6 +82,15 @@ there. The [install guide](docs/install.md) covers the rest: the setup
 tool's options, the optional `/speedtest` address, configuration, the firewall rule for
 the UDP test, updates, clearing saved results, cloning a server and removal.
 
+Or run the container image, with Docker or Podman on any Linux host, amd64 or arm64.
+It brings its own nginx; see [Container](docs/container.md):
+
+```bash
+docker run -d --name texas2step --network host --restart unless-stopped \
+    -v texas2step-etc:/etc/texas2step -v texas2step-data:/var/lib/texas2step \
+    ghcr.io/robert-patrick-texas/texas2step:2     # → https://<this host>/texas2step/
+```
+
 To run it from source instead:
 
 ```bash
@@ -162,6 +171,8 @@ For servers open to the Internet, see [Access codes](docs/access.md).
   page, also as a PDF to print on [US Letter](docs/at-a-glance.pdf) or
   [A4](docs/at-a-glance-a4.pdf).
 * [Install](docs/install.md): the Ubuntu package, nginx, firewall, upgrades.
+* [Container](docs/container.md): the image for Docker and Podman, its settings,
+  certificate, networking and updates.
 * [t2s](docs/t2s.md): the command-line client for Linux, macOS and Windows: tests,
   Monitor and Diag from any computer, and how it updates itself.
 * [Configuration](docs/configuration.md): every setting.
