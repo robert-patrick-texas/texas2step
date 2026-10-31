@@ -7,7 +7,7 @@ and real UDP packet loss over WebRTC, then shows every figure as discrete metric
 graphs. The same measurements are available as a REST API, a command-line client, and
 server-to-server functions.
 
-![Download in progress](docs/images/hero-dark.jpg)
+![texas2step: network speed and diagnostics](docs/images/texas2step-dual-path-network-testing.png)
 
 Inspired by [speed.cloudflare.com](https://speed.cloudflare.com)
 ([cloudflare/speedtest](https://github.com/cloudflare/speedtest)), but self-hosted: a
