@@ -71,7 +71,8 @@ type Method struct {
 	seq        int
 	recheck    float64
 	next       float64
-	busy       bool
+	busy       bool    // a connection is being opened again
+	answered   float64 // when the latest attempt that was answered was made
 	client     *http.Client
 	h3         *http3.Transport
 	ws         *engine.WsProber
@@ -273,7 +274,7 @@ func (d *Diag) loop(m *Method, phase time.Duration) {
 		case <-timer.C:
 		}
 		d.mu.Lock()
-		if m.Tone != "off" && !m.busy {
+		if m.Tone != "off" {
 			d.tick(m)
 		}
 		d.mu.Unlock()
@@ -310,8 +311,9 @@ func (d *Diag) event(m *Method, text string) {
 }
 
 // record is an attempt's outcome. Once a row has answered, a miss counts as loss; why is
-// what the log says when answers stop. Called with d.mu held.
-func (d *Diag) record(m *Method, ok bool, rtt float64, why string) {
+// what the log says when answers stop; sent is when the attempt was made. Called with d.mu
+// held.
+func (d *Diag) record(m *Method, ok bool, rtt float64, why string, sent float64) {
 	if m.Tone == "off" || d.ctx.Err() != nil {
 		return
 	}
@@ -321,8 +323,15 @@ func (d *Diag) record(m *Method, ok bool, rtt float64, why string) {
 	for len(m.Samples) > 0 && m.Samples[0].T < now-keepMs {
 		m.Samples = m.Samples[1:]
 	}
+	// Attempts overlap, one a second: one made before an attempt already answered times
+	// out after that answer. It was lost, but in the outage that answer ended, so it
+	// starts no new one.
+	if !ok && sent < m.answered {
+		return
+	}
 	switch {
 	case ok:
+		m.answered = math.Max(m.answered, sent)
 		m.Restricted = false
 		if m.Tone == "trying" {
 			d.event(m, "answering, "+ms(rtt))
@@ -375,26 +384,23 @@ func (d *Diag) tick(m *Method) {
 		if m.Kind == "http3" && m.h3 == nil && !d.altSvc(m) {
 			return
 		}
-		m.busy = true
-		go d.https(m)
+		go d.https(m) // one a second, whether the last has answered or not
 	case "ws":
 		if m.ws != nil && m.ws.Ready() {
-			ws := m.ws
-			m.busy = true
+			ws, sent := m.ws, wall()
 			go func() {
 				rtt, ok := ws.Ping(1500 * time.Millisecond)
 				d.mu.Lock()
 				defer d.mu.Unlock()
-				m.busy = false
-				d.record(m, ok, rttOr(rtt, ok), "no answer")
+				d.record(m, ok, rttOr(rtt, ok), "no answer", sent)
 			}()
 			return
 		}
-		// Not open: the second goes unanswered, and the socket is opened again.
+		// Not open: the second goes unanswered, as each does while it opens again.
 		if !m.Restricted {
-			d.record(m, false, math.NaN(), "the socket closed")
+			d.record(m, false, math.NaN(), "the socket closed", wall())
 		}
-		if wall() < m.next {
+		if m.busy || wall() < m.next {
 			return
 		}
 		m.next = wall() + wsRetryMs
@@ -406,8 +412,7 @@ func (d *Diag) tick(m *Method) {
 			m.udpSeq++
 			ch := make(chan float64, 1)
 			m.waiting[seq] = ch
-			rtc := m.rtc
-			m.busy = true
+			rtc, sent := m.rtc, wall()
 			go func() {
 				rtc.Send(seq, 64)
 				var rtt float64
@@ -420,8 +425,7 @@ func (d *Diag) tick(m *Method) {
 				d.mu.Lock()
 				defer d.mu.Unlock()
 				delete(m.waiting, seq)
-				m.busy = false
-				d.record(m, ok, rttOr(rtt, ok), "no answer")
+				d.record(m, ok, rttOr(rtt, ok), "no answer", sent)
 			}()
 			return
 		}
@@ -430,9 +434,9 @@ func (d *Diag) tick(m *Method) {
 			m.rtc = nil
 		}
 		if !m.Restricted {
-			d.record(m, false, math.NaN(), "the UDP session closed")
+			d.record(m, false, math.NaN(), "the UDP session closed", wall())
 		}
-		if wall() < m.next {
+		if m.busy || wall() < m.next {
 			return
 		}
 		m.next = wall() + udpRetryMs
@@ -497,7 +501,6 @@ func (d *Diag) https(m *Method) {
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	m.busy = false
 	var se *engine.StatusError
 	if errors.As(err, &se) && se.Status == 401 {
 		// Not lost: refused for want of a pass; with --code, entered once in a while.
@@ -509,7 +512,7 @@ func (d *Diag) https(m *Method) {
 		return
 	}
 	if err != nil {
-		d.record(m, false, math.NaN(), "no answer")
+		d.record(m, false, math.NaN(), "no answer", sent)
 		return
 	}
 	http := map[int]string{1: "HTTP/1.1", 2: "HTTP/2", 3: "HTTP/3"}[r.ProtoMajor]
@@ -566,7 +569,7 @@ func (d *Diag) https(m *Method) {
 			s.MAC = iface.MACOf(ip, a.Server.IP)
 		}
 	}
-	d.record(m, true, rtt, "no answer")
+	d.record(m, true, rtt, "no answer", sent)
 }
 
 // viaProxy is whether the request went through an HTTP proxy, whose address the

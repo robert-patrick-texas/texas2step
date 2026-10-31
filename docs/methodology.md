@@ -564,6 +564,9 @@ events stay, and the timelines show the gap.
   `transport` statistics).
 
 An attempt not answered within 2 s (1.5 s for WebSocket and UDP) counts as missed. A
+row makes one about every second, whether the last has answered or not, and each second
+its WebSocket or UDP session is closed or being opened again counts as missed too: a
+minute's outage is about 60 lost, on the page and in t2s alike. A
 method that has answered before shows a miss as loss (red). One that hasn't answered
 yet stays grey and keeps trying. One the server turns out not to offer, such as UDP in
 a family it has no address in, is grey and isn't tried again.
