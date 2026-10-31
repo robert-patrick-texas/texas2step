@@ -33,7 +33,7 @@ docs:           ## render every .md file into the static site in html/
 docs-watch:     ## re-render html/ whenever a .md file changes
 	uv run python scripts/build_docs.py --watch
 
-sheet:          ## print docs/at-a-glance.pdf, the one-page sheet, with Playwright's Chromium
+sheet:          ## print the one-page sheet on US Letter and A4 (docs/at-a-glance*.pdf) with Playwright's Chromium
 	uv run --with playwright python scripts/build_sheet.py
 
 deb:            ## build dist/texas2step-<version>-1-amd64.deb and dist/texas2step-setup (Ubuntu 26.04)

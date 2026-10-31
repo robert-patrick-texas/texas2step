@@ -48,7 +48,7 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make check` | lint and test, and t2s's tests |
 | `make docs` | Render every `.md` file into the static site in `html/` |
 | `make docs-watch` | Re-render `html/` whenever a `.md` file changes |
-| `make sheet` | Print `docs/at-a-glance.pdf`, the one-page sheet, from `scripts/at-a-glance.html` |
+| `make sheet` | Print the one-page sheet, `docs/at-a-glance.pdf` (US Letter) and `docs/at-a-glance-a4.pdf` (A4), from `scripts/at-a-glance.html` |
 | `make deb` | Build `dist/texas2step-<version>-1-amd64.deb` and `dist/texas2step-setup` |
 | `make version` | Print the version |
 | `make upgrade` | Move every Python, npm and Go dependency to its newest release, then rebuild the UI |
@@ -184,12 +184,13 @@ theme: its blue gradient in `scripts/docs.css`, and the app's own tab icon, the 
 on blue in `web/public/favicon.svg`, as the logo. Take new screenshots in that theme, at
 1366 pixels wide.
 
-Every PDF under `docs/` is published with the site. One is `docs/at-a-glance.pdf`: the
-[at-a-glance](at-a-glance.md) page condensed onto one US Letter page to print. Its source
-is `scripts/at-a-glance.html`, so change it along with the page, then run `make sheet` and
-commit the PDF. `make sheet` prints with Playwright's Chromium, installed once with
-`uv run --with playwright playwright install chromium`, and fails if the sheet runs over
-one page. It wants two fonts installed: JetBrains Mono (`fonts-jetbrains-mono`) and
+Every PDF under `docs/` is published with the site. Two are the
+[at-a-glance](at-a-glance.md) page condensed onto one page to print: `docs/at-a-glance.pdf`
+on US Letter and `docs/at-a-glance-a4.pdf` on A4. Their source is
+`scripts/at-a-glance.html`, so change it along with the page, then run `make sheet` and
+commit both PDFs. `make sheet` prints with Playwright's Chromium, installed once with
+`uv run --with playwright playwright install chromium`, and fails, writing neither, if the
+sheet runs over one page on either paper. It wants two fonts installed: JetBrains Mono (`fonts-jetbrains-mono`) and
 Inter's TrueType files, from `extras/ttf/` in an [Inter release](https://github.com/rsms/inter/releases).
 Chromium embeds the OpenType build of Inter that Ubuntu's `fonts-inter` installs as Type 3
 fonts, whose text loses spaces when copied; `make sheet` warns when that happens.

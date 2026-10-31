@@ -54,6 +54,39 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
   name that shares its IP address and is covered by the same certificate, and a wildcard
   certificate makes that likely.
 
+### Monitoring and alerts
+
+Figures for the tools a network team already watches, gathered without anyone running a
+test. Today a script runs t2s or the API from cron and keeps the JSON itself.
+
+- [ ] **A `/metrics` page for Prometheus.** Figures in the OpenMetrics text format, for
+  Prometheus or Grafana Agent to collect: the latest saved results by server and client
+  network, measurements between servers, the sessions `texas2step clients` lists, and the
+  traffic counted toward the [traffic limits](traffic.md). Open to `internal_networks`
+  only, as History is. To decide: which figures become series, and keeping the client
+  label to a network, a /24 or /48 as lockouts count them, so it doesn't grow a series for
+  every address.
+- [ ] **Servers measuring each other on a schedule.** Each server already measures another
+  on request (`/api/v1/measure/*`, with a pass it issues itself). A setting such as
+  `mesh_minutes` would have each server measure every server in `[[locations]]` on a timer
+  and keep the results, and History would show a table of each pair's latency, loss and
+  call score. A full test moves gigabytes, so the frequent runs would be latency and the
+  UDP probe, with throughput less often, all counted toward the traffic limits. A new
+  circuit's first test would become a baseline that keeps being checked.
+- [ ] **Alerts.** When a scheduled measurement crosses a threshold, such as loss over 1 % or
+  a call score below Good, the server would write a warning to the journal and run a
+  program the operator names, as `access_lockout_hook` does for lockouts, with the path,
+  the figure and the threshold. One alert when a path goes bad and one when it recovers,
+  not one for each measurement. It builds on the schedule above.
+
+### History
+
+- [ ] **Filters and a CSV download.** History shows the latest 200 saved tests, newest
+  first, and opens one by its Result ID; `/api/v1/results` pages back through them by time.
+  Filters by date, server and client network, and a CSV download of what they show, would
+  serve the desk's reports and spreadsheets. `/api/v1/results` could take the same filters,
+  and `format=csv`.
+
 ### Security
 
 - [ ] **DTLS 1.3 for the UDP probe.** The probe's data channel uses DTLS 1.2
@@ -138,6 +171,21 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
   before macOS opens it. Signing and notarizing each release's with a Developer ID, from
   Apple's Developer Program, would end that; `rcodesign` does both from Linux or GitHub
   Actions, with no Mac.
+- [ ] **Name who issued the server's certificate, in `t2s diag`.** A firewall that inspects
+  TLS replaces the server's certificate with one from its own authority, which the
+  organization's computers are set to trust, and its decrypting often slows transfers. A
+  web page can't see the certificate; t2s can. `t2s diag` reports the TLS version and
+  cipher today. It could also show the issuer, and whether the chain leads to a public
+  authority, from a built-in copy of Mozilla's list, or only to one this computer was
+  given: an inspecting firewall, or the organization's own PKI. To decide: whether the
+  server should also publish a hash of its certificate, to tell those two apart, though a
+  renewal can change it. (`t2s update --insecure` is for such firewalls today.)
+- [ ] **Wi-Fi details.** For walking a building with Monitor on a laptop: `t2s monitor`
+  could show the signal strength, channel, band and access point beside its round trip and
+  loss, so a loss spike shows with the signal it came with. A browser can't read these.
+  Each platform has its own source: nl80211 on Linux, the WLAN API on Windows, and
+  CoreWLAN on macOS, which shows the network's name and access point only to programs
+  allowed Location Services.
 
 - [ ] **MAC address on macOS and Windows for `texas2step run`.** The Python command line
   reports the MAC address of the NIC its connection leaves by on Linux, from iproute2's
@@ -145,6 +193,16 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
   it on each platform, from the interface that holds the local address. The `psutil`
   library could do the same for the Python one: `psutil.net_if_addrs()` lists each
   interface's link-layer address.
+
+### Languages
+
+- [ ] **Spanish.** The pages, the code screen and their messages in Spanish as well as
+  English, chosen by the browser's language or a picker in the header, for service desks
+  whose callers speak Spanish. Every label and message is written into the TypeScript and
+  the server's page code today, so they would first move into one table per language. The
+  operator's own text (`brand_notice`, `access_note`, the footer) stays as written, and the
+  documentation stays in English. A large job, and each new label needs its translation
+  from then on.
 
 ### Documentation
 

@@ -9,7 +9,8 @@ for engineers. Free and open source under the Apache License 2.0.
 [Install guide](https://robert-patrick-texas.github.io/texas2step/docs/install.html) ·
 [Latest release](https://github.com/robert-patrick-texas/texas2step/releases/latest) ·
 [Source on GitHub](https://github.com/robert-patrick-texas/texas2step) ·
-[One page to print (PDF)](https://robert-patrick-texas.github.io/texas2step/docs/at-a-glance.pdf)
+One page to print: [US Letter](https://robert-patrick-texas.github.io/texas2step/docs/at-a-glance.pdf)
+or [A4](https://robert-patrick-texas.github.io/texas2step/docs/at-a-glance-a4.pdf) (PDF)
 
 ![The Test page during a download](https://robert-patrick-texas.github.io/texas2step/docs/images/hero-dark.jpg)
 
