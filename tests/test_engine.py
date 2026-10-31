@@ -43,6 +43,40 @@ async def test_download_and_upload(live_server):
     assert up["bytes"] > 0
 
 
+async def test_a_late_answer_under_load_doesnt_put_later_probes_out_of_step(monkeypatch):
+    """An answer that comes after its probe was counted lost is set aside: the probes
+    after it still find their own."""
+    import asyncio
+
+    from websockets.asyncio.server import serve
+
+    held = set()
+
+    async def late(ws, message):
+        await asyncio.sleep(0.4)  # past the probe's timeout
+        await ws.send(message)
+
+    async def echo(ws):
+        async for message in ws:
+            if engine.PROBE.unpack_from(message)[0] == 2:
+                held.add(asyncio.create_task(late(ws, message)))
+            else:
+                await ws.send(message)
+
+    monkeypatch.setattr(engine, "PROBE_TIMEOUT", 0.2)
+    async with serve(echo, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        monkeypatch.setattr(engine, "_ws_url", lambda base: f"ws://127.0.0.1:{port}/")
+        prober = engine._WsProber("http://127.0.0.1", interval=0.02)
+        stop = asyncio.Event()
+        task = asyncio.create_task(prober.run(stop))
+        await asyncio.sleep(1.5)
+        stop.set()
+        await task
+    assert prober.lost == 1
+    assert len(prober.samples) >= 15  # about 1.5 s of probes, 20 ms apart, less the late one
+
+
 async def test_udp_loss_over_webrtc(live_server):
     r = await engine.measure_loss(live_server, packets=100, interval_ms=2, wait_ms=1500)
     assert r["transport"] == "webrtc"

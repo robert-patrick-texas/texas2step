@@ -33,6 +33,7 @@ BIN_MS = 100
 PROBE = struct.Struct("<Id")  # sequence number, sender clock (ms)
 STAMP = struct.Struct("<dI")  # with stamps on: the server's clock on arrival (ms), its count
 PROBE_BYTES = 200  # at least a voice packet: a path that can't carry these can't carry calls
+PROBE_TIMEOUT = 3.0  # seconds a latency probe waits for its answer before it counts as lost
 USER_AGENT = f"texas2step-engine/{__version__}"
 
 Progress = Callable[[str, dict[str, Any]], Awaitable[None] | None]
@@ -123,7 +124,10 @@ async def _emit(progress: Progress | None, phase: str, data: dict[str, Any]) -> 
 
 
 async def measure_latency(
-    target: str, count: int = 20, request_timeout: float = 2.0, progress: Progress | None = None
+    target: str,
+    count: int = 20,
+    request_timeout: float = PROBE_TIMEOUT,
+    progress: Progress | None = None,
 ) -> dict[str, Any]:
     """Idle round-trip time over HTTP, server processing time removed via Server-Timing.
 
@@ -229,7 +233,9 @@ class _NewConnections:
 
 
 class _WsProber:
-    """RTT probes over a dedicated WebSocket, used to measure latency under load."""
+    """RTT probes over a dedicated WebSocket, used to measure latency under load. Each
+    answer finds its probe by number, so one that comes after its probe was counted lost
+    doesn't put the probes after it out of step."""
 
     def __init__(self, base: str, interval: float = 0.25) -> None:
         self.url = _ws_url(base)
@@ -242,19 +248,42 @@ class _WsProber:
 
         try:
             async with connect(self.url, open_timeout=5, max_size=1 << 16) as ws:
-                seq = 0
-                while not stop.is_set():
-                    t0 = time.perf_counter()
-                    await ws.send(PROBE.pack(seq, t0 * 1000))
+                waiting: dict[int, asyncio.Future[float]] = {}
+
+                async def read() -> None:
                     try:
-                        reply = await asyncio.wait_for(ws.recv(), timeout=2.0)
-                        if PROBE.unpack_from(reply)[0] == seq:
-                            self.samples.append((time.perf_counter() - t0) * 1000)
-                    except TimeoutError:
-                        self.lost += 1
-                    seq += 1
-                    with contextlib.suppress(TimeoutError):
-                        await asyncio.wait_for(stop.wait(), self.interval)
+                        async for reply in ws:
+                            now = time.perf_counter()
+                            if isinstance(reply, bytes) and len(reply) >= PROBE.size:
+                                found = waiting.get(PROBE.unpack_from(reply)[0])
+                                if found is not None and not found.done():
+                                    found.set_result(now)
+                    finally:  # the socket closed: no answer is coming
+                        for found in waiting.values():
+                            if not found.done():
+                                found.set_exception(ConnectionError("the socket closed"))
+
+                reader = asyncio.create_task(read())
+                try:
+                    seq = 0
+                    while not stop.is_set():
+                        answer = waiting[seq] = asyncio.get_running_loop().create_future()
+                        t0 = time.perf_counter()
+                        try:
+                            await ws.send(PROBE.pack(seq, t0 * 1000))
+                            got = await asyncio.wait_for(answer, timeout=PROBE_TIMEOUT)
+                            self.samples.append((got - t0) * 1000)
+                        except TimeoutError:
+                            self.lost += 1
+                        finally:
+                            del waiting[seq]
+                        seq += 1
+                        with contextlib.suppress(TimeoutError):
+                            await asyncio.wait_for(stop.wait(), self.interval)
+                finally:
+                    reader.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await reader
         except Exception:  # loaded latency is best effort
             return
 
