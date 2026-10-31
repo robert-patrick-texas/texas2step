@@ -40,10 +40,12 @@
   --sun-2: #e8467c;
   --sun-3: #7c5cff;
   --brand: linear-gradient(120deg, var(--sun-1), var(--sun-2) 55%, var(--sun-3));
-  --mark-1: var(--sun-1);
-  --mark-2: var(--sun-2);
-  --mark-3: var(--sun-3);
+  /* The star on blue, as in the tab icon; the other themes colour it their own way. */
+  --mark-1: #1fd2ff;
+  --mark-2: #1f5fe0;
+  --mark-3: #7440f0;
   --mark-star: #ffffff;
+  --mark-glow: var(--mark-2);
   --on-brand: #ffffff;
 
   --radius: 18px;
@@ -85,10 +87,11 @@
     --sun-2: #e8467c;
     --sun-3: #7c5cff;
     --brand: linear-gradient(120deg, var(--sun-1), var(--sun-2) 55%, var(--sun-3));
-    --mark-1: var(--sun-1);
-    --mark-2: var(--sun-2);
-    --mark-3: var(--sun-3);
+    --mark-1: #1fd2ff;
+    --mark-2: #1f5fe0;
+    --mark-3: #7440f0;
     --mark-star: #ffffff;
+    --mark-glow: var(--mark-2);
     --notice: #1b1e25;
     --notice-ink: #d4d8df;
   }
@@ -117,10 +120,11 @@
   --sun-2: #e8467c;
   --sun-3: #7c5cff;
   --brand: linear-gradient(120deg, var(--sun-1), var(--sun-2) 55%, var(--sun-3));
-  --mark-1: var(--sun-1);
-  --mark-2: var(--sun-2);
-  --mark-3: var(--sun-3);
+  --mark-1: #1fd2ff;
+  --mark-2: #1f5fe0;
+  --mark-3: #7440f0;
   --mark-star: #ffffff;
+  --mark-glow: var(--mark-2);
   --notice: #1b1e25;
   --notice-ink: #d4d8df;
 }
@@ -154,6 +158,7 @@
   --mark-2: #1a2d74;
   --mark-3: #0d132d;
   --mark-star: #ffbd00;
+  --mark-glow: var(--sun-2);
   --on-brand: #ffffff;
   --radius: 6px;
   --radius-sm: 4px;
@@ -192,6 +197,7 @@
   --mark-2: #4b1f5c;
   --mark-3: #bf0a30;
   --mark-star: #ffffff;
+  --mark-glow: var(--sun-2);
   --on-brand: #ffffff;
   --radius: 12px;
   --radius-sm: 7px;
@@ -230,6 +236,7 @@
   --mark-2: #0a3161;
   --mark-3: #b31942;
   --mark-star: #ffffff;
+  --mark-glow: var(--sun-2);
   --on-brand: #ffffff;
   --radius: 10px;
   --radius-sm: 6px;
@@ -270,6 +277,7 @@
   --mark-2: #1f5fe0;
   --mark-3: #7440f0;
   --mark-star: #ffffff;
+  --mark-glow: var(--sun-2);
   --on-brand: #ffffff;
   --radius: 8px;
   --radius-sm: 5px;
@@ -309,6 +317,7 @@
   --mark-2: #4b5320;
   --mark-3: #2c3320;
   --mark-star: #ece3c4;
+  --mark-glow: var(--sun-2);
   --on-brand: #ffffff;
   --radius: 4px;
   --radius-sm: 3px;
@@ -414,7 +423,7 @@ button {
 .brand-mark {
   width: 30px;
   height: 30px;
-  filter: drop-shadow(0 4px 10px color-mix(in srgb, var(--sun-2) 35%, transparent));
+  filter: drop-shadow(0 4px 10px color-mix(in srgb, var(--mark-glow) 35%, transparent));
 }
 
 .brand-word em {
