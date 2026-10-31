@@ -35,25 +35,13 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
 
 ### Test page
 
-- [ ] **Choosing the HTTP version for a test.** A web page can't choose the HTTP version of
-  its requests: the browser and the server settle it during TLS (ALPN), and a server with
-  HTTP/2 enabled gets HTTP/2. Over HTTP/2 the Test page's parallel streams share one TCP
-  connection; over HTTP/1.1 each is a connection of its own, closer to many applications
-  and to some other speed tests; over HTTP/3 they share one QUIC connection over UDP,
-  which firewalls and QoS often treat apart from TCP.
-
-  The [names Diag uses for each HTTP version](install.md#names-for-each-http-version)
-  make the choice possible: each has an address of its own, so a browser opens a
-  connection of its own to it rather than reusing the page's HTTP/2 one. An
-  "HTTP: Auto / HTTP/1.1 / HTTP/3" choice in Test options would send the test's
-  transfers to that version's name for the address family in use, wherever one is set,
-  over HTTP/3 once a few requests have brought the browser to it. The result would say
-  which version each transfer used.
-
-  A server with a single address can't do it that way: browsers reuse an HTTP/2
-  connection for any name on the same address that the same certificate covers. For one,
-  a second HTTPS port, such as 8443, in an nginx `server` block without `http2 on`, with a
-  setting such as `http1_port` and a firewall rule like 443's.
+- [ ] **HTTP/1.1 on a server with one address.** Test options choose HTTP/1.1 or HTTP/3
+  through the server's [names for each HTTP version](install.md#names-for-each-http-version),
+  which need an address each, or a certificate each: browsers reuse an HTTP/2 connection
+  for any name on the same address that the same certificate covers. A server with one
+  address and one certificate could offer HTTP/1.1 on a second HTTPS port instead, such
+  as 8443, in an nginx `server` block without `http2 on`, with a setting such as
+  `http1_port` and a firewall rule like 443's.
 
 ### Monitoring and alerts
 
@@ -245,6 +233,15 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
 ## Done
 
 Newest first. Each release's notes have the details and its upgrade steps.
+
+### [2.11.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.11.0) (2026-10-31)
+
+- [x] **The HTTP version of a test:** where the server has names that serve only HTTP/1.1
+  or offer HTTP/3, the ones Diag tests, Test options choose HTTP/1.1, where each stream is
+  a connection of its own, or HTTP/3, over UDP, and the result says which the test went
+  over.
+- [x] **Deployment ideas:** a container image, cloud-init for LXC and virtual machines,
+  Cisco IOx app hosting and ready-made images are on the roadmap.
 
 ### [2.10.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.10.0) (2026-10-30)
 
