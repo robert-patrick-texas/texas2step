@@ -243,6 +243,19 @@ Worth considering, not urgent, and perhaps not needed.
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.14.3](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.14.3) (2026-10-31)
+
+- [x] **Fixes from a review of the whole code:** latency under load from the command line
+  and `/api/v1/measure` after one late answer, the browser's call score when every call
+  packet is lost (now checked against the same cases as the Python engine and t2s), one
+  test per press of Start, the setup tool's checks before it runs anything, the visitor's
+  address behind `$proxy_add_x_forwarded_for`, and late answers in Diag and the server
+  picker.
+- [x] **The clients agree:** latency probes wait 3 s everywhere, Monitor's jitter goes by
+  the order probes were sent, t2s's Diag counts a lost attempt each second as the page
+  does, and both send small probes once a traffic limit holds a call.
+- [x] **A raised `access_pass_hours`** reaches passes already in browsers.
+
 ### [2.14.2](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.14.2) (2026-10-31)
 
 - [x] **Plain words for the device's figures:** "server waited 98%", "browser busy/late",
