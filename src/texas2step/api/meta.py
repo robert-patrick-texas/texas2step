@@ -14,6 +14,7 @@ from starlette.requests import HTTPConnection
 
 from .. import __version__, rtc
 from ..access import is_internal
+from ..tcpinfo import DIAG, Ends
 
 router = APIRouter(prefix="/api/v1", tags=["meta"])
 
@@ -75,8 +76,10 @@ async def info(request: Request) -> dict[str, Any]:
             "stamps": s.webrtc_enabled and rtc.AVAILABLE,
             "results": s.results_enabled,
             "measure": s.measure_enabled,
-            # GET /api/v1/tests/{id}: whether the server's CPU held a transfer back.
+            # GET /api/v1/tests/{id}: whether the server's CPU held a transfer back, and
+            # how long the client held each download back (device_window).
             "test_cpu": True,
+            "test_window": s.device_window and DIAG.available,
         },
         "limits": {
             "max_download_bytes": s.max_download_bytes,
@@ -95,6 +98,13 @@ async def info(request: Request) -> dict[str, Any]:
             "seconds": s.default_seconds,
             "packets": s.default_packets,
             "one_stream": s.default_one_stream,
+        },
+        # The Test page's own figures for when the device is the limit, and the share of a
+        # download held back that reads "Device-bound" (0: never).
+        "device": {
+            "check": s.device_check,
+            "details": s.device_details,
+            "bound_percent": s.device_bound_percent,
         },
         # Monitor's profile until a visitor picks one, and whether the call ones are offered.
         "monitor": {
@@ -165,6 +175,28 @@ def _ms(value: str | None) -> float | None:
     except ValueError:
         return None
     return round(micros / 1000, 3) if 0 < micros < 600_000_000 else None
+
+
+def connection_ends(request: HTTPConnection) -> Ends | None:
+    """Both ends of the TCP connection that carries this request to the client: nginx's,
+    from the headers the package's snippet sets, believed only from ``trusted_proxies``;
+    or our own. None over HTTP/3, which isn't TCP, or when a proxy doesn't say."""
+    h = request.headers
+    proxied = "x-forwarded-for" in h or "x-real-ip" in h or any(n in h for n in PROXY_HEADERS)
+    if from_trusted_proxy(request) and proxied:
+        if (h.get("x-client-protocol") or "").upper().startswith("HTTP/3"):
+            return None
+        ip, port = _ip(client_address(request)[0]), _port(h.get("x-client-port"))
+        server_ip, server_port = _ip(h.get("x-server-addr")), _port(h.get("x-server-port"))
+        if ip is None or port is None or server_ip is None or server_port is None:
+            return None
+        return server_ip, server_port, ip, port
+    local, peer = request.scope.get("server"), request.client
+    if not local or peer is None or _ip(local[0]) is None or _ip(peer.host) is None:
+        return None
+    if _port(local[1]) is None or _port(peer.port) is None:
+        return None
+    return local[0], local[1], peer.host, peer.port
 
 
 @router.get("/diag/http", summary="Both ends of this HTTP connection, for the Diag tab")

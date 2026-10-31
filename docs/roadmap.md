@@ -16,9 +16,8 @@ is. Call quality, responsiveness, one stream and Monitor's call profiles came in
   distant one: if both are bad, it's the local network or Wi-Fi; if only the distant one
   is, it's the WAN or the ISP. It would build on the server picker and Monitor's
   two-server mode.
-- [ ] **When the device is the limit.** A busy browser or a slow laptop can't keep up with
-  a fast link. Watching the page's own timers and long tasks during a transfer could
-  tell that apart from a slow network.
+- [ ] **Device-bound on Monitor.** Mark the stretches when the page ran late on Monitor's
+  loss strip, as the Test page says when the device set a transfer's rate.
 - [ ] **A path trace from the server.** For the service desk only: the server traces the
   path back to the caller's address with `tracepath`, which needs no privileges, and shows
   each hop and the largest packet the path carries. Rate-limited, and only toward the

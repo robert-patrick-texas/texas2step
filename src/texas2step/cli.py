@@ -96,16 +96,33 @@ def _limit_line(t: dict[str, Any] | None) -> list[str]:
 
 
 def _bound_line(t: dict[str, Any] | None) -> list[str]:
-    """A transfer the server's CPU held back, under its line; nothing otherwise."""
+    """A transfer the server's CPU or this computer held back, under its line; nothing
+    otherwise. The server's first: when it set the rate, this computer didn't."""
     from .cpu import BOUND
 
-    cpu = (t or {}).get("server_cpu")
-    if not isinstance(cpu, int | float) or cpu < BOUND:
+    t = t or {}
+    cpu = t.get("server_cpu")
+    if isinstance(cpu, int | float) and cpu >= BOUND:
+        return [
+            f"  {'':<14} server CPU-bound: a worker ran at {cpu * 100:.0f}% of a core, so the "
+            "server, not the network, set this rate"
+        ]
+    if not t.get("device_bound"):
         return []
-    return [
-        f"  {'':<14} server CPU-bound: a worker ran at {cpu * 100:.0f}% of a core, so the "
-        "server, not the network, set this rate"
-    ]
+    lines = []
+    held = t.get("device_window")
+    if t["device_bound"] == "window" and isinstance(held, int | float):
+        lines.append(
+            f"  {'':<14} device-bound: this computer held the server back {held * 100:.0f}% "
+            "of the time, so it, not the network, set this rate"
+        )
+    mine = t.get("device_cpu")
+    if isinstance(mine, int | float) and mine >= BOUND:
+        lines.append(
+            f"  {'':<14} client CPU-bound: texas2step ran at {mine * 100:.0f}% of a core, so "
+            "this computer, not the network, set this rate"
+        )
+    return lines
 
 
 def _one_stream_line(result: dict[str, Any]) -> list[str]:

@@ -60,7 +60,9 @@ async def metrics(request: Request) -> PlainTextResponse:
     return PlainTextResponse(text, media_type="text/plain; version=0.0.4")
 
 
-@router.get("/tests/{test}", summary="Whether the server's CPU held a test's transfers back")
+@router.get(
+    "/tests/{test}", summary="Whether the server's CPU or the client held a test's transfers back"
+)
 async def test(
     request: Request,
     test: Annotated[str, Path(max_length=64, pattern=r"^[A-Za-z0-9_-]+$")],
@@ -69,11 +71,20 @@ async def test(
     this server served for a second or more, by the ``?test=`` its requests carried: the
     highest share of a core among the worker processes that served it, and ``bound``,
     whether that was 90 % or more, so the server's CPU, not the network, set its rate.
+
+    For a download over HTTP/1.1 or HTTP/2 (``device_window``), ``window``: the share of
+    its time the client held the server back (``held``: nothing in flight, ``idle``, plus
+    limited by the client's receive window, ``rwnd``), over ``seconds``; the kernel's
+    round-trip time while it ran and the lowest it saw (``rtt_ms``, ``min_rtt_ms``); and
+    ``bound``, whether ``held`` reached ``device_bound_percent`` while the server's CPU
+    didn't set the rate: the device, not the network, did.
+
     Kept an hour; a transfer the server has no figure for is left out.
     """
     monitor: CpuMonitor = request.app.state.cpu
+    percent = request.app.state.settings.device_bound_percent
     try:
-        parts = await asyncio.to_thread(monitor.test, test)
+        parts = await asyncio.to_thread(monitor.test, test, percent)
     except (OSError, sqlite3.Error):
         parts = {}
     return {"test": test, **parts}

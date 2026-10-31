@@ -86,12 +86,53 @@ function putBound(t: Tile, cpu: number, sub: string): void {
 
 const BOUND_NOTE = "A worker process on the server ran at a full core, so the server's CPU, not the network, set this rate.";
 
-/** A tile's tooltip: its rate limit and whether the server's CPU held it back. */
+const share = (v: number) => `${Math.round(v * 100)}%`;
+
+/** A transfer the device held back, in its tile's small print: what showed it. */
+function deviceShort(t: ThroughputResult): string {
+  if (t.device_bound === "window") return `${share(t.device_window ?? 0)}\u00a0held back`;
+  if (t.device_bound === "cpu") return `${share(t.device_cpu ?? 0)}\u00a0of a\u00a0core`;
+  return "page\u00a0fell\u00a0behind";
+}
+
+/** The device, not the network, set the rate (docs/methodology.md#when-the-device-is-the-limit). */
+function deviceNote(t: ThroughputResult): string {
+  if (t.device_bound === "window") return `Device-bound: this device held the server back ${share(t.device_window ?? 0)} of the time: it didn't take the data as fast as the server could send it, so the device, not the network, set this rate.`;
+  if (t.device_bound === "cpu") return `Device-bound: the command line ran at ${share(t.device_cpu ?? 0)} of a core, so the computer, not the network, set this rate.`;
+  return `Device-bound: the page read ${share(t.device_full_reads ?? 0)} of the data in full reads, so the bytes waited for this device, not the other way round: the device, not the network, set this rate.`;
+}
+
+/** A transfer the device held back, in its tile's small print, above what it had. */
+function putDevice(tile: Tile, t: ThroughputResult, sub: string): void {
+  tile.sub.classList.add("wraps");
+  tile.sub.replaceChildren(h("span", { class: "grade limit" }, "Device-bound"), ` ${deviceShort(t)}`, h("br"), sub.replace(/(\d) /g, "$1\u00a0"));
+}
+
+/** A tile's tooltip: its rate limit and whether the server's CPU or the device held it back. */
 function tileNote(t: ThroughputResult, before = ""): string {
   const limit = t.rate_limit ? `Rate limit: ${limitText(t.rate_limit)}. ${LIMIT_NOTE}` : "";
-  const cpu = bound(t) ? `Server CPU-bound: ${coreText(t.server_cpu!)}. ${BOUND_NOTE}` : "";
+  const cpu = bound(t) ? `Server CPU-bound: ${coreText(t.server_cpu!)}. ${BOUND_NOTE}` : t.device_bound ? deviceNote(t) : "";
   return [before, limit, cpu].filter(Boolean).join(" ");
 }
+
+/** What the device did during a transfer, for All measurements. */
+function deviceText(t: ThroughputResult): string | null {
+  const parts = [
+    t.device_window !== undefined ? `held the server back ${share(t.device_window)} of the time` : "",
+    t.device_cpu !== undefined ? `the command line at ${share(t.device_cpu)} of a core` : "",
+    t.device_busy !== undefined ? `the page ran late ${share(t.device_busy)} of it (95th percentile ${text(ms(t.device_lag_ms ?? 0))})` : "",
+    t.device_full_reads !== undefined ? `${share(t.device_full_reads)} read in full reads` : "",
+    t.device_long_ms !== undefined ? `long tasks ${Math.round(t.device_long_ms).toLocaleString()} ms` : "",
+  ].filter(Boolean);
+  if (!parts.length) return null;
+  return `${t.device_bound && !bound(t) ? "Device-bound: " : ""}${parts.join(" · ")}`;
+}
+
+/** The server kernel's round-trip time on the connection while it carried a download. */
+const serverRttText = (t: ThroughputResult) => (t.server_rtt_ms !== undefined ? `${text(ms(t.server_rtt_ms))} while it ran${t.server_min_rtt_ms !== undefined ? ` · lowest ${text(ms(t.server_min_rtt_ms))}` : ""}` : null);
+
+/** The page ran late this share of the call test or more: its timing may read worse than the path. */
+const CALL_BUSY = 0.25;
 
 const HTTP_NAME: Record<HttpVersion, string> = { http1: "HTTP/1.1", http3: "HTTP/3" };
 
@@ -644,6 +685,7 @@ export class TestView implements View {
       put(this.tiles[dir], rate(t.mbps), sub);
       if (t.rate_limit) putLimit(this.tiles[dir], t.rate_limit);
       else if (bound(t)) putBound(this.tiles[dir], t.server_cpu!, sub);
+      else if (t.device_bound) putDevice(this.tiles[dir], t, sub);
       this.tiles[dir].el.title = tileNote(t);
       this.throughput.set(dir, { timeline: t.timeline, binMs: t.bin_ms, warmupS: t.warmup_s, durationS: t.duration_s, stable: t.mbps, limit: t.rate_limit ?? null });
       this.latency.setStats(dir, t.loaded_latency);
@@ -658,6 +700,7 @@ export class TestView implements View {
       put(this.tiles.one, rate(one.mbps), sub);
       if (one.rate_limit) putLimit(this.tiles.one, one.rate_limit);
       else if (bound(one)) putBound(this.tiles.one, one.server_cpu!, sub);
+      else if (one.device_bound) putDevice(this.tiles.one, one, sub);
       this.tiles.one.el.title = tileNote(one, `One stream's download, after the download over several: what a single file copy, backup or remote-desktop session gets.${shared(r) ? " Over HTTP/2 or 3 the several streams shared one connection too." : ""}`);
       this.throughput.set("one", { timeline: one.timeline, binMs: one.bin_ms, warmupS: one.warmup_s, durationS: one.duration_s, stable: one.mbps, limit: one.rate_limit ?? null });
       railValue("one", text(rate(one.mbps)));
@@ -681,17 +724,23 @@ export class TestView implements View {
         .join(" "),
     );
     const bloat = r.bufferbloat;
-    if (bloat?.grade) {
+    if (bloat?.grade || bloat?.withheld) {
       const worst = Math.max(bloat.added_download_ms ?? -Infinity, bloat.added_upload_ms ?? -Infinity);
       const f = ms(Math.abs(worst));
       put(this.tiles.bloat, { value: `${worst >= 0 ? "+" : "−"}${f.value}`, unit: f.unit }, "");
-      const chip = h("span", { class: "grade", "data-grade": bloat.grade[0]! }, `Grade ${bloat.grade}`);
-      this.tiles.bloat.sub.replaceChildren(chip, " bufferbloat");
+      if (bloat.grade) {
+        const chip = h("span", { class: "grade", "data-grade": bloat.grade[0]! }, `Grade ${bloat.grade}`);
+        this.tiles.bloat.sub.replaceChildren(chip, " bufferbloat");
+        this.tiles.bloat.el.title = "";
+      } else {
+        setText(this.tiles.bloat.sub, "No grade: device busy");
+        this.tiles.bloat.el.title = "No bufferbloat grade: the page itself ran late under load by about as much as latency rose, so the rise measured this device's work more than the network's queue. All measurements has the figures, with the server's own round-trip time.";
+      }
     }
     // Results saved before call quality and responsiveness get them from their own figures.
     const call = r.call ?? callQuality(r.loss);
     const rpm = r.responsiveness ?? responsiveness(r);
-    if (call) this.renderCall(call);
+    if (call) this.renderCall(call, r.loss);
     if (rpm) this.renderRpm(rpm);
     if (r.loss) this.renderLoss(r.loss, railValue, call);
     else if (!partial && r.config.packets === 0) {
@@ -708,7 +757,7 @@ export class TestView implements View {
     }
   }
 
-  private renderCall(call: CallQuality): void {
+  private renderCall(call: CallQuality, loss?: TestResult["loss"]): void {
     put(this.tiles.call, { value: call.mos.toFixed(1), unit: "MOS" });
     const chip = h("span", { class: "grade", "data-rating": call.rating }, RATING[call.rating]);
     const seconds = (call.packets * call.interval_ms) / 1000;
@@ -720,7 +769,9 @@ export class TestView implements View {
     else if (each) sub = ` ${ways(call, (c) => c.mos.toFixed(1))}`;
     this.tiles.call.sub.replaceChildren(chip, sub);
     const about = each ? `You hear ${call.down!.mos.toFixed(1)} (${rated(call.down!)}); the other end hears ${call.up!.mos.toFixed(1)} (${rated(call.up!)}).` : gapped(call) ? `The E-model scores this ${RATING[call.mos_rating].toLowerCase()}, but its longest gap, ${call.longest_gap_ms} ms, is long enough for a caller to hear, so it is rated ${RATING[call.rating].toLowerCase()}.` : "";
-    this.tiles.call.el.title = `A G.711 voice call scored with the ITU-T E-model, over the packet-loss test's ${seconds.toLocaleString()} seconds. ${about}`.trim();
+    const busy = loss?.device_busy;
+    const lateNote = busy !== undefined && busy >= CALL_BUSY ? ` The page ran late ${share(busy)} of the call test: this device was busy, which can make the call read worse than the path is.` : "";
+    this.tiles.call.el.title = `A G.711 voice call scored with the ITU-T E-model, over the packet-loss test's ${seconds.toLocaleString()} seconds. ${about}${lateNote}`.trim();
   }
 
   private renderRpm(rpm: Responsiveness): void {
@@ -784,6 +835,7 @@ export class TestView implements View {
     add("Server", [r.server.name, r.server.location, r.server.url].filter(Boolean).join(" · "));
     add("Client", [r.client.ip, r.client.family, httpWord(r.client.protocol)].filter(Boolean).join(" · "));
     add("This computer", r.client.local_ip);
+    add("This device", [r.client.cores ? `${r.client.cores} cores` : "", r.client.pressure ? `CPU pressure ${r.client.pressure} at most` : ""].filter(Boolean).join(" · "));
     // Browser results from before mac_source read theirs from EUI-64 too.
     add("MAC", r.client.mac && `${r.client.mac}, ${r.client.mac_source === "nic" ? "of the NIC the connection left by" : "read from the IPv6 address (EUI-64)"}`);
     add("Started", when(r.started_at));
@@ -797,6 +849,8 @@ export class TestView implements View {
       add(label, `${text(rate(t.mbps))} stable · peak ${text(rate(t.peak_mbps))} · ${bytes(t.bytes)} in ${t.duration_s}s · ${t.streams} streams`);
       if (t.rate_limit) add(`${label} rate limit`, limitText(t.rate_limit));
       if (t.server_cpu !== undefined) add(`${label} server CPU`, cpuText(t));
+      add(`${label} device`, deviceText(t));
+      add(`${label} server RTT`, serverRttText(t));
       if (loaded) add(`Latency during ${d}`, `median ${text(ms(loaded.median))} · p90 ${text(ms(loaded.p90))} · jitter ${text(ms(loaded.jitter))} · ${loaded.count} probes`);
     };
     tp(r.download, "download");
@@ -804,10 +858,14 @@ export class TestView implements View {
     if (one) add("One stream", `${text(rate(one.mbps))} stable · peak ${text(rate(one.peak_mbps))} · ${bytes(one.bytes)} in ${one.duration_s}s${r.download?.mbps ? ` · ${Math.round((one.mbps / r.download.mbps) * 100)} % of the ${r.download.streams}-stream rate` : ""}`);
     if (one?.rate_limit) add("One stream rate limit", limitText(one.rate_limit));
     if (one?.server_cpu !== undefined) add("One stream server CPU", cpuText(one));
+    if (one) add("One stream device", deviceText(one));
+    if (one) add("One stream server RTT", serverRttText(one));
     tp(r.upload, "upload");
     if (r.bufferbloat?.grade) add("Bufferbloat", `grade ${r.bufferbloat.grade}`);
+    else if (r.bufferbloat?.withheld) add("Bufferbloat", "no grade: the page's own lateness made most of the rise (device busy)");
     const l = r.loss;
     if (l) add("Packet loss", `${text(pct(l.loss_pct))} (${l.lost}/${l.sent}) over ${l.transport === "webrtc" ? "UDP" : "TCP"}${l.up_loss_pct !== null ? ` · up ${text(pct(l.up_loss_pct))} · down ${text(pct(l.down_loss_pct))}` : ""} · ${l.out_of_order} out of order · RTT ${text(ms(l.rtt.median))} · jitter ${text(ms(l.rtt.jitter))}`);
+    if (l?.device_busy !== undefined) add("Packet loss device", `the page ran late ${share(l.device_busy)} of it (95th percentile ${text(ms(l.device_lag_ms ?? 0))})`);
     const call = r.call ?? callQuality(l);
     const side = (c: CallSide) => `${c.mos.toFixed(2)} MOS, ${rated(c)} · R ${c.r.toFixed(1)} · ${text(pct(c.impaired_pct))} lost or late (${c.late} late) · longest gap ${c.longest_gap_ms} ms · burst ratio ${c.burst_ratio?.toFixed(2) ?? "—"}`;
     if (call?.basis === "each way" && call.up && call.down) {

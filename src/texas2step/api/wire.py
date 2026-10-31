@@ -20,9 +20,10 @@ from starlette.requests import ClientDisconnect
 from .. import payload
 from ..cpu import CpuMonitor, Watched
 from ..rtc import RtcBusy, RtcUnavailable
+from ..tcpinfo import Window
 from ..traffic import Closed, TrafficMeter
 from .access import WS_PROTOCOL, pass_issued
-from .meta import client_address
+from .meta import client_address, connection_ends
 
 router = APIRouter(prefix="/api/v1", tags=["wire"])
 
@@ -74,14 +75,23 @@ async def _admit(request: Request, test: str | None) -> tuple[TrafficMeter, str]
 
 
 async def _watched(
-    body: AsyncIterator[bytes], monitor: CpuMonitor, test: str | None, part: str, tasks: set
+    body: AsyncIterator[bytes],
+    monitor: CpuMonitor,
+    test: str | None,
+    part: str,
+    tasks: set,
+    window: Window | None,
 ) -> AsyncIterator[bytes]:
     """Counts what a download sends, for the CPU figures, and times this worker's CPU
-    while it does, for GET /api/v1/tests/{id}."""
-    watch = Watched(monitor, test, part)
+    while it does, and how long the client held the connection back, for GET
+    /api/v1/tests/{id}."""
+    watch = Watched(monitor, test, part, window)
     try:
         async for chunk in body:
+            handed = time.monotonic()
             yield chunk
+            if window is not None:
+                window.waited += time.monotonic() - handed
             monitor.work.sent += len(chunk)
             watch.moved()
     finally:
@@ -143,7 +153,9 @@ async def down(
         headers["Content-Length"] = str(n)
     if metered:
         body = _metered(body, *metered)
-    body = _watched(body, request.app.state.cpu, test, transfer, request.app.state.tasks)
+    ends = connection_ends(request) if test and settings.device_window else None
+    window = Window(ends) if ends else None
+    body = _watched(body, request.app.state.cpu, test, transfer, request.app.state.tasks, window)
     headers["Server-Timing"] = _timing(app=(time.perf_counter() - t0) * 1000)
     return StreamingResponse(body, headers=headers)
 

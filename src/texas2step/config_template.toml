@@ -117,6 +117,12 @@ results_path = "/var/lib/texas2step/results.db"
 #                                       # 0 = never (texas2step and nginx don't count)
 # cpu_busy_seconds = 30                 # averaged over this long
 
+# --- When the device is the limit (docs/methodology.md#when-the-device-is-the-limit) -------
+# device_window = true                  # time how long the client held each download back
+# device_check = true                   # the Test page times its own lateness and reads
+# device_details = true                 # save Chromium's long tasks, CPU pressure and cores
+# device_bound_percent = 10             # held back this % of a download: "Device-bound"; 0 = never
+
 # --- Branding and themes -------------------------------------------------------------------
 # brand_name = "texas2step"             # header and browser tab
 # brand_organization = ""               # shown beside the name and in the footer

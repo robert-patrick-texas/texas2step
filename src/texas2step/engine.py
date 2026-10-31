@@ -298,6 +298,7 @@ async def _throughput(
         cap = int(info.get("limits", {}).get(f"max_{direction}_bytes", 1 << 30))
 
         start = time.perf_counter()
+        cpu_start = time.process_time()
         deadline = start + seconds
         bins = _Bins(start, seconds)
 
@@ -359,6 +360,8 @@ async def _throughput(
         errors = [r for r in results if isinstance(r, BaseException)]
         if len(errors) == streams:
             raise errors[0]
+        took = time.perf_counter() - start
+        cpu = time.process_time() - cpu_start
 
     elapsed = min(time.perf_counter() - start, seconds)
     complete = bins.bytes[: max(1, int(elapsed * 1000 // BIN_MS))]
@@ -368,6 +371,9 @@ async def _throughput(
         "streams": streams,
         "per_stream_mbps": [b * 8 / (elapsed * 1e6) for b in per_stream],
         "loaded_latency": prober.summary() if prober else None,
+        # This program's share of a core while it ran: at 0.9 or more, this computer's CPU,
+        # not the network, set the rate (docs/methodology.md#when-the-device-is-the-limit).
+        "device_cpu": round(cpu / took, 3) if took > 0 else None,
     }
     if connections:
         out["connections"] = connections.summary()
@@ -641,6 +647,8 @@ async def run_all(
         TEST.reset(test)
     if info.get("capabilities", {}).get("test_cpu"):
         await server_cpu(base, test_id, result)
+    else:
+        device_verdict(result)
     if loss and info.get("capabilities", {}).get("webrtc"):
         try:
             result["loss"] = await measure_loss(base, packets, interval_ms, progress=progress)
@@ -658,18 +666,49 @@ async def run_all(
 async def server_cpu(base: str, test: str, result: dict[str, Any]) -> None:
     """Each transfer's ``server_cpu``: the busiest share of a core among the server's
     workers that served it. At 0.9 or more, the server's CPU set its rate (docs/cpu.md).
-    Left out where the server can't say."""
+    For a download, what the server saw of its connection: ``device_window``, the share
+    of the time this computer held it back, and the kernel's RTT while it ran. Left out
+    where the server can't say. Then ``device_bound`` (device_verdict)."""
     try:
         async with _client() as client:
             r = await client.get(f"{base}{API}/tests/{test}")
             r.raise_for_status()
             parts = r.json()
     except (httpx.HTTPError, ValueError):
-        return
+        parts = {}
     for name in ("download", "one_stream", "upload"):
-        cpu = (parts.get(name) or {}).get("cpu")
-        if name in result and isinstance(cpu, int | float):
+        if name not in result or not isinstance(parts, dict):
+            continue
+        part = parts.get(name) or {}
+        cpu = part.get("cpu")
+        if isinstance(cpu, int | float):
             result[name]["server_cpu"] = cpu
+        window = part.get("window")
+        if isinstance(window, dict) and isinstance(window.get("held"), int | float):
+            result[name]["device_window"] = window["held"]
+            for key, field in (("rtt_ms", "server_rtt_ms"), ("min_rtt_ms", "server_min_rtt_ms")):
+                if isinstance(window.get(key), int | float):
+                    result[name][field] = window[key]
+            if window.get("bound"):
+                result[name]["device_bound"] = "window"
+    device_verdict(result)
+
+
+def device_verdict(result: dict[str, Any]) -> None:
+    """``device_bound`` on each transfer this computer held back, and how it shows:
+    "window", the server said its connection was held back (``device_window``); "cpu",
+    this program ran at a full core (``device_cpu``). Not while the server's CPU set the
+    rate."""
+    from .cpu import BOUND
+
+    for name in ("download", "one_stream", "upload"):
+        t = result.get(name)
+        if not isinstance(t, dict):
+            continue
+        if (t.get("server_cpu") or 0) >= BOUND:
+            t.pop("device_bound", None)  # the server's CPU set it: "Server CPU-bound"
+        elif (t.get("device_cpu") or 0) >= BOUND and not t.get("device_bound"):
+            t["device_bound"] = "cpu"
 
 
 def bufferbloat(result: dict[str, Any]) -> dict[str, Any]:

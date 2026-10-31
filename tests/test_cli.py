@@ -54,6 +54,41 @@ def test_report_says_when_the_servers_cpu_set_the_rate():
     assert sum("CPU-bound" in line for line in lines) == 1
 
 
+def test_report_says_when_this_computer_set_the_rate():
+    # The same lines as t2s's, in t2s/report_test.go.
+    download = {"mbps": 120.0, "peak_mbps": 400.0, "streams": 4}
+    held = {**download, "device_window": 0.72, "device_bound": "window", "device_cpu": 0.31}
+    mine = {**download, "device_window": 0.03, "device_bound": "cpu", "device_cpu": 0.96}
+    both = {**download, "device_window": 0.4, "device_bound": "window", "device_cpu": 0.95}
+    server = {**held, "server_cpu": 0.93}
+    lines = lambda t: cli._bound_line(t)  # noqa: E731
+    assert lines(held) == [
+        "                 device-bound: this computer held the server back 72% of the time, "
+        "so it, not the network, set this rate"
+    ]
+    assert lines(mine) == [
+        "                 client CPU-bound: texas2step ran at 96% of a core, so this computer, "
+        "not the network, set this rate"
+    ]
+    assert len(lines(both)) == 2
+    assert [line.split(":")[0].strip() for line in lines(server)] == ["server CPU-bound"]
+    assert lines({**download, "device_window": 0.05, "device_cpu": 0.2}) == []
+
+
+def test_the_verdict_goes_to_the_server_first_then_this_computer():
+    from texas2step.engine import device_verdict
+
+    result = {
+        "download": {"device_cpu": 0.95},
+        "one_stream": {"device_cpu": 0.95, "server_cpu": 0.92, "device_bound": "window"},
+        "upload": {"device_cpu": 0.5},
+    }
+    device_verdict(result)
+    assert result["download"]["device_bound"] == "cpu"
+    assert "device_bound" not in result["one_stream"]  # Server CPU-bound instead
+    assert "device_bound" not in result["upload"]
+
+
 def test_report_gives_a_rate_limit_under_its_transfer():
     download = {
         "mbps": 485.4,

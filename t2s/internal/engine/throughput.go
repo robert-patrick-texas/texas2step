@@ -38,6 +38,17 @@ type Throughput struct {
 	// The busiest share of a core among the server's workers that served it; at Bound or
 	// more, the server's CPU set the rate. Nil where the server doesn't say.
 	ServerCPU *float64 `json:"server_cpu,omitempty"`
+	// When the device is the limit (docs/methodology.md#when-the-device-is-the-limit):
+	// the share of a download this computer held the server back, from the server's
+	// kernel, and its round-trip time on the connection while it ran, and the lowest.
+	DeviceWindow   *float64 `json:"device_window,omitempty"`
+	ServerRTTMs    *float64 `json:"server_rtt_ms,omitempty"`
+	ServerMinRTTMs *float64 `json:"server_min_rtt_ms,omitempty"`
+	// This program's CPU while it ran, in cores (more than 1 with several streams).
+	DeviceCPU *float64 `json:"device_cpu,omitempty"`
+	// The device, not the network, set the rate, and what showed it: "window" (the
+	// server's figure) or "cpu" (this program's); empty otherwise.
+	DeviceBound string `json:"device_bound,omitempty"`
 }
 
 // Bound is the share of a core at which a server worker held a transfer back (cpu.py).
@@ -155,6 +166,7 @@ func MeasureThroughput(ctx context.Context, t *Target, direction string, seconds
 	}
 
 	start := time.Now()
+	cpuStart := processCPU()
 	deadline := start.Add(time.Duration(seconds * float64(time.Second)))
 	b := newBins(start, seconds)
 	perStream := make([]atomic.Int64, streams)
@@ -274,6 +286,7 @@ func MeasureThroughput(ctx context.Context, t *Target, direction string, seconds
 		workers.Go(func() { errs[i] = worker(i) })
 	}
 	workers.Wait()
+	took, cpuEnd := time.Since(start).Seconds(), processCPU()
 	stopSide()
 	wg.Wait()
 	failed := 0
@@ -289,6 +302,10 @@ func MeasureThroughput(ctx context.Context, t *Target, direction string, seconds
 	elapsed := min(time.Since(start).Seconds(), seconds)
 	complete := b.upTo(max(1, int(elapsed*1000/BinMs)))
 	out := &Throughput{Throughput: stats.SummarizeThroughput(complete, BinMs, seconds), Direction: direction, Streams: streams}
+	if cpuStart >= 0 && cpuEnd >= cpuStart && took > 0 {
+		v := roundPy((cpuEnd-cpuStart)/took, 3)
+		out.DeviceCPU = &v
+	}
 	for i := range perStream {
 		out.PerStreamMbps = append(out.PerStreamMbps, float64(perStream[i].Load())*8/(elapsed*1e6))
 	}

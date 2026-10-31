@@ -19,7 +19,7 @@ headers. Measurement endpoints add `Server-Timing` so clients can subtract serve
 | GET | `/api/v1/ping` | Minimal response for round-trip timing. `Server-Timing: app;dur=…` |
 | GET | `/api/v1/down?bytes=N` | Exactly N bytes (≤ `max_download_bytes`) with `Content-Length`: [five founding documents](methodology.md#what-the-tests-send) as text, then random bytes |
 | GET | `/api/v1/down?seconds=S` | The documents, then random bytes for S seconds (chunked, ≤ `max_stream_seconds`) |
-| GET | `/api/v1/tests/{id}` | Whether the server's CPU held a test's transfers back (below) |
+| GET | `/api/v1/tests/{id}` | Whether the server's CPU or the client held a test's transfers back (below) |
 | POST | `/api/v1/up` | Read and discard the body; returns `{"bytes", "rx_ms", "mbps"}` measured server-side |
 | WS | `/api/v1/ws` | Echo every message unchanged; closed with code `4001` once `session_max_runtime` is up |
 | POST | `/api/v1/rtc/offer` | WebRTC signalling for the UDP probe (see below) |
@@ -67,6 +67,20 @@ its CPU, not the network, set the rate:
 The transfers are `download`, `upload` and `one_stream`: add `&transfer=one_stream` to
 the one stream's `/down` requests, after the download, to keep it apart. The figures are
 kept an hour; `capabilities.test_cpu` in `/api/v1/info` says a server keeps them.
+
+For a download over HTTP/1.1 or HTTP/2, `window` says how long the client held the server
+back ([When the device is the limit](methodology.md#when-the-device-is-the-limit)):
+`held`, the share of its `seconds` with nothing in flight (`idle`) or limited by the
+client's TCP receive window (`rwnd`); `ready`, the share the server had the next bytes
+ready; the kernel's round-trip time while it ran and the lowest it saw (`rtt_ms`,
+`min_rtt_ms`); and `bound`, whether `held` reached `device_bound_percent` while the
+server's CPU didn't set the rate and its bytes were ready at least half the time:
+
+```json
+{"test": "k7q2m9xd3p", "download": {"cpu": 0.21, "bound": false, "window": {"held": 0.72, "idle": 0.7, "rwnd": 0.02, "seconds": 10.1, "rtt_ms": 18.4, "min_rtt_ms": 11.2, "ready": 0.98, "bound": true}}}
+```
+
+`capabilities.test_window` says a server keeps these (`device_window`, on Linux).
 
 Any request may also carry `?session=<id>` (4 to 32 letters, digits, `-` and `_`) and
 `?page=<name>` (`test`, `monitor`, `diag`, `history`, `help`, `api`, `cli` or `server`).
@@ -124,7 +138,7 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/v1/info` | name, version (left out for clients outside `internal_networks`), server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes; `test_cpu`: it answers `/api/v1/tests/{id}`), limits (`max_session_seconds`: `session_max_runtime`; `max_monitor_seconds`, `max_diag_seconds`: `page_monitor_max_runtime` and `page_diag_max_runtime`, which pages from other servers keep while they test this one; `0` for none), ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `monitor` (`profile`: Monitor's until a visitor picks; `voice`, `video`: whether the Voice call and Video call profiles are offered); with a [traffic limit](traffic.md), `traffic` (below) |
+| GET | `/api/v1/info` | name, version (left out for clients outside `internal_networks`), server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes; `test_cpu`: it answers `/api/v1/tests/{id}`; `test_window`: with the client's `window` for downloads), limits (`max_session_seconds`: `session_max_runtime`; `max_monitor_seconds`, `max_diag_seconds`: `page_monitor_max_runtime` and `page_diag_max_runtime`, which pages from other servers keep while they test this one; `0` for none), ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `device` (`check`, `details`: `device_check` and `device_details`; `bound_percent`: `device_bound_percent`), `monitor` (`profile`: Monitor's until a visitor picks; `voice`, `video`: whether the Voice call and Video call profiles are offered); with a [traffic limit](traffic.md), `traffic` (below) |
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |
@@ -302,7 +316,16 @@ after (`to_mbps`); `null` when it held, and left out of results from before it. 
 [Rate limit](methodology.md#rate-limit). Each transfer's `server_cpu` is the busiest
 share of a core among the server's workers that served it (`GET /api/v1/tests/{id}`);
 at 0.9 or more the server's CPU set the rate. It is left out where the server doesn't
-say: before 2.12.0, or a transfer under a second. `config.http` is the HTTP version a browser test
+say: before 2.12.0, or a transfer under a second. A download's `device_window` is the
+share of it the client held the server back, and `server_rtt_ms` and `server_min_rtt_ms`
+the kernel's round-trip time on its connection while it ran, and the lowest, from the
+same answer; a browser's transfers carry the page's `device_busy`, `device_lag_ms`,
+`device_full_reads` (downloads) and, from Chromium, `device_long_ms`; the command line's
+carry `device_cpu`, its own CPU in cores. `device_bound` says the device, not the
+network, set the rate, and what showed it: `"window"`, `"page"` or `"cpu"`. `loss` carries
+the page's `device_busy` and `device_lag_ms` too, `client` its `cores` and `pressure`
+(`device_details`), and `bufferbloat.withheld` is `"device busy"` when the grade is
+withheld, with `grade` `null` ([When the device is the limit](methodology.md#when-the-device-is-the-limit)). `config.http` is the HTTP version a browser test
 was held to, `"http1"` or `"http3"`, through the server's name for it; it is left out
 for Auto ([Streams and HTTP versions](methodology.md#streams-and-http-versions)). `call.mos_rating` is the score's own
 rating, and `call.rating` the one shown: lower when a gap is long enough for a caller to

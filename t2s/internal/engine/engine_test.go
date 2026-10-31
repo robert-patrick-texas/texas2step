@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/cases"
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/num"
@@ -117,5 +118,31 @@ func TestAWrongCodeSaysWhatTheServerSaid(t *testing.T) {
 	}
 	if _, err := NewTarget(srv.URL).Unlock(context.Background(), ""); err != ErrNeedsCode {
 		t.Errorf("no code: got %v", err)
+	}
+}
+
+func TestDeviceVerdictGoesToTheServerFirstThenThisProgram(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	r := &Result{
+		Download:  &Throughput{Streams: 1, DeviceCPU: f(0.95)},
+		OneStream: &Throughput{Streams: 1, DeviceCPU: f(0.95), ServerCPU: f(0.92), DeviceBound: "window"},
+		Upload:    &Throughput{Streams: 1, DeviceCPU: f(0.5)},
+	}
+	DeviceVerdict(r)
+	if r.Download.DeviceBound != "cpu" || r.OneStream.DeviceBound != "" || r.Upload.DeviceBound != "" {
+		t.Errorf("DeviceVerdict: %q %q %q", r.Download.DeviceBound, r.OneStream.DeviceBound, r.Upload.DeviceBound)
+	}
+}
+
+func TestProcessCPUCountsThisProgramsWork(t *testing.T) {
+	before := processCPU()
+	if before < 0 {
+		t.Skip("no CPU figure on this system")
+	}
+	for x, end := 0, time.Now().Add(100*time.Millisecond); time.Now().Before(end); x++ {
+		_ = x * x
+	}
+	if used := processCPU() - before; used < 0.05 {
+		t.Errorf("processCPU rose %.3f s over 100 ms of work", used)
 	}
 }

@@ -245,6 +245,18 @@ class Settings:
     cpu_busy_percent: float = 0.0
     cpu_busy_seconds: float = 30.0
 
+    # When the device is the limit (docs/methodology.md#when-the-device-is-the-limit).
+    # device_window: the server times how long the client held each download back, from
+    # the kernel's figures for its connection (HTTP/1.1 and HTTP/2), with the round-trip
+    # time while it ran. device_check: the Test page times how late it runs and how full
+    # its reads come. device_details: Chromium's extra figures (long tasks, CPU pressure,
+    # cores) are saved with results, which anyone with a Result ID can open. A download
+    # held back device_bound_percent of the time or more reads "Device-bound"; 0: never.
+    device_window: bool = True
+    device_check: bool = True
+    device_details: bool = True
+    device_bound_percent: float = 10.0
+
     # Other servers offered in the location picker (this server is always first).
     locations: list[Location] = field(default_factory=list)
 
@@ -327,6 +339,8 @@ class Settings:
             raise ValueError("cpu_busy_percent: expected 0 (never refuse) to 100 percent")
         if not 10 <= self.cpu_busy_seconds <= 3600:
             raise ValueError("cpu_busy_seconds: expected 10 to 3600 seconds")
+        if not 0 <= self.device_bound_percent <= 100:
+            raise ValueError("device_bound_percent: expected 0 (never) to 100 percent")
         if not 1 <= self.access_pass_hours <= 168:
             raise ValueError("access_pass_hours: expected 1 to 168 hours")
         if not 1 <= self.access_lockout_after <= 100:

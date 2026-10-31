@@ -129,6 +129,14 @@ server's `default_one_stream`, unless the visitor chooses in Test options or the
 line with `--one-stream` or `--no-one-stream`. Why one stream can get less than several is in
 [Quality and user experience](experience.md#one-stream).
 
+The browser's own window can set one stream's rate. Over HTTP/2, Safari on an iPhone
+(iOS 18) let one stream have only about 2 to 2.5 MB in flight, so at a 43 ms round trip
+its one stream stopped near 330 Mbps, 61 % of the download, at rest and in Low Power
+Mode alike, where Chrome on an Android phone and Edge on a desktop reached the full rate
+on the same path. The server always had data in flight, so this isn't
+[Device-bound](#when-the-device-is-the-limit): it is the browser's flow control, which a
+faster device doesn't change.
+
 ### Streams and HTTP versions
 
 Browsers open at most **six HTTP/1.1 connections** per server, so more than six streams
@@ -178,6 +186,109 @@ bottleneck and add queueing delay of its own. Running with `--workers 2` or more
 reduces this. A transfer the server's CPU held back says so: "Server CPU-bound" on the
 Test page and a line under it from the command line, when the busiest worker serving it
 ran at 90 % of a core or more ([Server CPU](cpu.md#server-cpu-bound-results)).
+
+A busy device makes latency under load read high too: when the page itself runs late,
+every probe's answer waits for it. The grade is then withheld, "No grade: device busy"
+([When the device is the limit](#when-the-device-is-the-limit)).
+
+## When the device is the limit
+
+Everything a browser test does runs on the page's main thread: reading the downloads,
+timing the probes, pacing the UDP test and drawing the charts. A busy or slow device
+reads more slowly than the network delivers, and adds its own lateness to every
+latency it times, so a good path can look slow. Each test says when that happened:
+"Device-bound" on the transfer's tile, in the style of "Server CPU-bound", with the
+figures under All measurements. The server's CPU comes first: when it set the rate, the
+device didn't.
+
+**The server's figure** (`device_window`, on by default). While it sends a download, the
+server asks the kernel for the connection's TCP figures every quarter second, as `ss -ti`
+does. Behind nginx the connection is nginx's, which the server finds by the addresses
+and ports the package's snippet passes on (`X-Client-Port`, `X-Server-Addr`,
+`X-Server-Port`, believed only from `trusted_proxies`); serving on its own, it asks for its
+own. Any user may read these figures, and a lookup takes a few tens of microseconds. The
+**share of the download the client held the server back** is the time with nothing in
+flight plus the time the client's TCP receive window limited what could be sent. A
+browser that can't keep up stops reading; over HTTP/2 it then stops granting the server
+room on the stream, so the connection goes idle, and over HTTP/1.1 its TCP receive
+window fills. When that share reaches `device_bound_percent` (10 % by default), the
+download is Device-bound, unless the server's CPU set the rate, or the server had the
+next bytes ready less than half the time, which would mean the server itself couldn't
+keep up. The server can't say this of HTTP/3, which isn't TCP, or of uploads, where it is
+the receiver. The same lookups give **the kernel's round-trip time** on the connection
+while the download ran, and the lowest it saw, saved as `server_rtt_ms` and
+`server_min_rtt_ms`.
+
+**The page's figures** (`device_check`, on by default). A 50 ms timer runs through the
+test, and each phase keeps how late it ran: the share of the phase it was late
+(`device_busy`) and its 95th percentile (`device_lag_ms`). Chromium hands a download's body
+to the page up to 2 MiB at a time, and reads that come full mean the bytes were waiting
+for the page: `device_full_reads` is the share of the download read that way. Where the
+server has no figure for a download, over HTTP/3 or from an older server, 93 % or more in
+full reads makes it Device-bound. Other browsers' reads never come full, so they get no
+verdict there. With `device_details` (on by default), Chromium's long tasks
+(`device_long_ms`), the highest CPU pressure it reported (`client.pressure`, desktop
+Chromium) and the browser's logical cores (`client.cores`) are saved too. Anyone with a
+Result ID can open a saved result, so turn `device_details` off if those shouldn't be in it.
+
+**The command line.** `texas2step run` and t2s time their own CPU for each transfer
+(`device_cpu`, in cores), and say "client CPU-bound" when it reached 90 % of the cores the
+transfer's streams could use: one for `texas2step run`, which runs on one core; for t2s,
+the streams or the computer's cores, whichever is fewer. They also take the server's
+figure, and say "device-bound" by it.
+
+`device_bound` in a result says what showed it: `"window"` (the server), `"page"` (full
+reads) or `"cpu"` (the command line).
+
+**Uploads** are flagged far less often. The browser sends from its own network process, so
+a slow page barely slows an upload, and the server, as the receiver, has no figure for
+it. In calibration, headless Chromium's upload stopped near 200 Mbps, where Firefox
+reached 283 to 473 Mbps and the command line 560, with nothing in the page to show it.
+The page's lateness during the upload is kept under All measurements.
+
+**Latency under load.** The page's lateness adds to each probe it times. When the median
+lateness under load, beyond what it was at idle, explains at least half the rise in a
+direction, and taking it away would change the grade, a grade of B or worse is withheld:
+the tile shows the rise with "No grade: device busy". An A or A+ stands, as the
+lateness could only have made it look worse. The server's round-trip time under load is
+kept beside it, as a figure the page's lateness can't touch.
+
+**Calls** keep their score. When the page ran late a quarter of the call test or more,
+the call tile says so: a busy device can make the call read worse than the path is.
+
+### How the thresholds were set
+
+Two rounds of calibration, in October 2026, against two servers on HTTP/2.
+
+Round 1 slowed a browser on purpose: headless Chromium and Firefox on a 4-core server,
+testing a second server about 550 Mbps away and itself over loopback, with Chromium's CPU
+throttling at 4×, 6× and 20×, programs keeping the computer's cores busy, and the page
+itself kept 30, 60 and 90 % busy.
+
+| Run | Download / one stream, Mbps | Held back by the client | Page's full reads |
+|---|---|---|---|
+| At rest | 559 / 559 | 0-2 % | 0-1 % |
+| 4× throttling | 554 / 526 | 3-5 % | 57-77 % |
+| 6× throttling | 548 / **327** | 8 / **32 %** | 67 / **98.5 %** |
+| 20× throttling | **115 / 57** | **77 / 88 %** | **98.5 / 100 %** |
+| Loopback, 4× | **1,040 / 603** | **47 / 73 %** | **99 / 93 %** |
+| Cores busy (2, 4, 8 programs) | 545-552 | 0-3 % | 1-62 % |
+| Page 90 % busy | 551 / **331** | 1 / **32 %** | 18 / **99.5 %** |
+| Firefox, page 60 % busy | 554 / **447** | 2 / **18 %** | 0-1 % |
+| Firefox, cores busy | 584 / **465** | 3 / **14 %** | 9-15 % |
+
+Whenever the network set the rate, the client held the server back 0 to 5 % of the time;
+whenever the device held the rate down, 14 to 97 %, roughly the share of the rate lost.
+The page's timer, on the other hand, ran late under any load, even in runs whose rate
+didn't move (at 4×, half the time), so it informs latency and calls, not the rate.
+
+Round 2 took real devices over a home connection of about 570 Mbps down, Wi-Fi for the
+phones: a Windows desktop in Edge, at rest and with every core kept busy; an iPhone in
+Safari, at rest and in Low Power Mode; a Samsung phone in Chrome, at rest and in Power
+saving. None was Device-bound, slowed or not: the client held the server back 0 to 1.1 %
+of the time in all 24 downloads, the rates held, and the page's latency under load
+matched the kernel's round-trip time within about 3 ms. Today's phones and computers keep
+up with a link this fast; a faster link or an older device is where Device-bound shows.
 
 ## Responsiveness
 

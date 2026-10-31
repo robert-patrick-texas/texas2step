@@ -78,6 +78,10 @@ file up to date with the new version's template and keeps your values; see
 | `cpu_file` | `/var/lib/texas2step/cpu.db` | The server's CPU figures: the workers', nginx's and the rest of the host's, beside what the tests move. Shared by the workers, `texas2step cpu`, `/api/v1/cpu` and `/api/v1/metrics`; kept 30 days. See [Server CPU](cpu.md). |
 | `cpu_busy_percent` | 0 | Refuse new download and upload tests, tests toward other servers and Monitor's Video call while other work on the host uses this share of all its cores; open Video calls go on as Voice calls, and running tests finish. texas2step and nginx don't count as other work. 0 never refuses; up to 100. See [Keep tests off a busy host](cpu.md#keep-tests-off-a-busy-host). |
 | `cpu_busy_seconds` | 30 | How long other work's share is averaged over, 10 to 3600 seconds |
+| `device_window` | true | The server times how long the client held each download back, from the kernel's figures for its connection (HTTP/1.1 and HTTP/2), with the round-trip time while it ran. See [When the device is the limit](methodology.md#when-the-device-is-the-limit). |
+| `device_check` | true | The Test page times how late it runs during each phase, and how full its download reads come. |
+| `device_details` | true | Chromium's long tasks, CPU pressure and the browser's cores are saved with results, which anyone with a Result ID can open. |
+| `device_bound_percent` | 10 | A download held back this share of its time or more reads "Device-bound"; 0 never does; up to 100. |
 | `brand_name` | `texas2step` | Name in the header and the browser tab |
 | `brand_organization` | `""` | Organization shown beside the name and in the footer |
 | `brand_url` | `""` | The organization's website; the organization name links to it |

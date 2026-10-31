@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http/httptrace"
 	"net/url"
+	"runtime"
 	"time"
 
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/iface"
@@ -178,6 +179,8 @@ func RunAll(ctx context.Context, t *Target, o Options, progress Progress) (*Resu
 	}
 	if info.Capabilities.TestCPU {
 		ServerCPU(ctx, &test, r)
+	} else {
+		DeviceVerdict(r)
 	}
 	if o.Loss && info.Capabilities.WebRTC {
 		loss, err := MeasureLoss(ctx, t, info, o.Packets, o.IntervalMs, ProbeBytes, 2*time.Second, progress)
@@ -199,25 +202,62 @@ func RunAll(ctx context.Context, t *Target, o Options, progress Progress) (*Resu
 }
 
 // ServerCPU asks the server how busy its CPU was while it served each of the test's
-// transfers, and sets their ServerCPU; a transfer it can't say of is left as it is.
+// transfers, and sets their ServerCPU; a transfer it can't say of is left as it is. For
+// a download, what the server saw of its connection too: DeviceWindow, the share of the
+// time this computer held it back, and the kernel's RTT while it ran. Then DeviceVerdict.
 func ServerCPU(ctx context.Context, t *Target, r *Result) {
+	type window struct {
+		Held     *float64 `json:"held"`
+		RTTMs    *float64 `json:"rtt_ms"`
+		MinRTTMs *float64 `json:"min_rtt_ms"`
+		Bound    bool     `json:"bound"`
+	}
 	type part struct {
-		CPU *float64 `json:"cpu"`
+		CPU    *float64 `json:"cpu"`
+		Window *window  `json:"window"`
 	}
 	var parts struct {
 		Download  part `json:"download"`
 		OneStream part `json:"one_stream"`
 		Upload    part `json:"upload"`
 	}
-	if _, err := t.GetJSON(ctx, t.Client(1), "/tests/"+url.PathEscape(t.Test), nil, &parts); err != nil {
-		return
+	if _, err := t.GetJSON(ctx, t.Client(1), "/tests/"+url.PathEscape(t.Test), nil, &parts); err == nil {
+		for _, p := range []struct {
+			tr *Throughput
+			p  part
+		}{{r.Download, parts.Download}, {r.OneStream, parts.OneStream}, {r.Upload, parts.Upload}} {
+			if p.tr == nil {
+				continue
+			}
+			if p.p.CPU != nil {
+				p.tr.ServerCPU = p.p.CPU
+			}
+			if w := p.p.Window; w != nil && w.Held != nil {
+				p.tr.DeviceWindow, p.tr.ServerRTTMs, p.tr.ServerMinRTTMs = w.Held, w.RTTMs, w.MinRTTMs
+				if w.Bound {
+					p.tr.DeviceBound = "window"
+				}
+			}
+		}
 	}
-	for _, p := range []struct {
-		tr  *Throughput
-		cpu *float64
-	}{{r.Download, parts.Download.CPU}, {r.OneStream, parts.OneStream.CPU}, {r.Upload, parts.Upload.CPU}} {
-		if p.tr != nil && p.cpu != nil {
-			p.tr.ServerCPU = p.cpu
+	DeviceVerdict(r)
+}
+
+// DeviceVerdict sets DeviceBound on each transfer this computer held back: "window" as
+// the server said, or "cpu" where this program ran at Bound of the cores its streams
+// could use; never while the server's CPU set the rate ("Server CPU-bound").
+func DeviceVerdict(r *Result) {
+	for _, t := range []*Throughput{r.Download, r.OneStream, r.Upload} {
+		if t == nil {
+			continue
+		}
+		if t.ServerCPU != nil && *t.ServerCPU >= Bound {
+			t.DeviceBound = ""
+			continue
+		}
+		usable := float64(min(max(t.Streams, 1), runtime.GOMAXPROCS(0)))
+		if t.DeviceBound == "" && t.DeviceCPU != nil && *t.DeviceCPU >= Bound*usable {
+			t.DeviceBound = "cpu"
 		}
 	}
 }

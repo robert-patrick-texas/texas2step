@@ -1,11 +1,34 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/engine"
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/stats"
 )
+
+// The same lines as texas2step run's, in tests/test_cli.py (with t2s's name).
+func TestDeviceBoundReadsAsTexas2stepRuns(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	held := &engine.Throughput{Streams: 1, DeviceWindow: f(0.72), DeviceBound: "window", DeviceCPU: f(0.31)}
+	want := "                 device-bound: this computer held the server back 72% of the time, so it, not the network, set this rate"
+	if got := boundLine(held); len(got) != 1 || got[0] != want {
+		t.Errorf("boundLine(window):\n got %q\nwant %q", got, want)
+	}
+	mine := &engine.Throughput{Streams: 1, DeviceWindow: f(0.03), DeviceBound: "cpu", DeviceCPU: f(0.96)}
+	want = "                 client CPU-bound: t2s ran at 96% of a core, so this computer, not the network, set this rate"
+	if got := boundLine(mine); len(got) != 1 || got[0] != want {
+		t.Errorf("boundLine(cpu):\n got %q\nwant %q", got, want)
+	}
+	server := &engine.Throughput{Streams: 1, ServerCPU: f(0.93), DeviceWindow: f(0.72), DeviceBound: "window"}
+	if got := boundLine(server); len(got) != 1 || !strings.Contains(got[0], "server CPU-bound") {
+		t.Errorf("boundLine with the server's CPU full: %q", got)
+	}
+	if got := boundLine(&engine.Throughput{Streams: 1, DeviceWindow: f(0.05), DeviceCPU: f(0.2)}); got != nil {
+		t.Errorf("boundLine held back a little: %q", got)
+	}
+}
 
 // The same line as texas2step run's, in tests/test_cli.py.
 func TestServerCPUBoundReadsAsTexas2stepRuns(t *testing.T) {

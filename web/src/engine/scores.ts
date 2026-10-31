@@ -30,6 +30,23 @@ export function bufferbloat(r: TestResult): Bufferbloat {
   };
 }
 
+/** The grade withheld ("device busy") where the page's own lateness made most of a rise
+ * that graded B or worse, and moved the grade: how much it added under load, beyond idle,
+ * from `inflation`. An A or A+ stands: the lateness could only have made it look worse. */
+export function withheld(b: Bufferbloat, inflation: { download: number; upload: number }): Bufferbloat {
+  const sides = [
+    [b.added_download_ms, inflation.download],
+    [b.added_upload_ms, inflation.upload],
+  ].filter((s): s is [number, number] => s[0] !== null);
+  if (!sides.length || b.grade === null || b.grade.startsWith("A")) return b;
+  const worst = sides.reduce((a, c) => (c[0] > a[0] ? c : a));
+  const corrected = Math.max(...sides.map(([added, lag]) => Math.max(0, added - lag)));
+  if (worst[1] * 2 >= worst[0] && bufferbloatGrade(corrected) !== b.grade) {
+    return { ...b, grade: null, withheld: "device busy" };
+  }
+  return b;
+}
+
 interface Metrics {
   down?: number;
   up?: number;
@@ -112,7 +129,7 @@ export function readiness(r: TestResult): Readiness[] {
     latency: r.latency?.median ?? undefined,
     jitter: r.latency?.jitter ?? undefined,
     loss: r.loss && !r.loss.error ? r.loss.loss_pct : undefined,
-    bloat: added.length ? Math.max(...added) : undefined,
+    bloat: added.length && !bloat.withheld ? Math.max(...added) : undefined,
     call: r.call ? RANK[r.call.rating] : undefined,
   };
   const levels: Level[] = ["great", "good", "fair"];

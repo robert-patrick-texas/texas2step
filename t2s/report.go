@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -64,13 +65,24 @@ func limitLine(t *engine.Throughput) []string {
 		"", fv(l.FromMbps, " Mbps", 1), strconv.FormatFloat(l.AtS, 'g', -1, 64), before, fv(l.ToMbps, " Mbps", 1))}
 }
 
-// boundLine says when the server's CPU, not the network, set a transfer's rate; nothing
-// otherwise.
+// boundLine says when the server's CPU or this computer, not the network, set a
+// transfer's rate; nothing otherwise. The server's first: when it set the rate, this
+// computer didn't.
 func boundLine(t *engine.Throughput) []string {
-	if t == nil || t.ServerCPU == nil || *t.ServerCPU < engine.Bound {
+	if t == nil {
 		return nil
 	}
-	return []string{fmt.Sprintf("  %-14s server CPU-bound: a worker ran at %.0f%% of a core, so the server, not the network, set this rate", "", *t.ServerCPU*100)}
+	if t.ServerCPU != nil && *t.ServerCPU >= engine.Bound {
+		return []string{fmt.Sprintf("  %-14s server CPU-bound: a worker ran at %.0f%% of a core, so the server, not the network, set this rate", "", *t.ServerCPU*100)}
+	}
+	var lines []string
+	if t.DeviceBound == "window" && t.DeviceWindow != nil {
+		lines = append(lines, fmt.Sprintf("  %-14s device-bound: this computer held the server back %.0f%% of the time, so it, not the network, set this rate", "", *t.DeviceWindow*100))
+	}
+	if t.DeviceBound != "" && t.DeviceCPU != nil && *t.DeviceCPU >= engine.Bound*float64(min(max(t.Streams, 1), runtime.GOMAXPROCS(0))) {
+		lines = append(lines, fmt.Sprintf("  %-14s client CPU-bound: t2s ran at %.0f%% of a core, so this computer, not the network, set this rate", "", *t.DeviceCPU*100))
+	}
+	return lines
 }
 
 func oneStreamLine(r *engine.Result) []string {

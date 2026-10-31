@@ -124,8 +124,10 @@ def test_info_whoami_locations(client):
         "measure",
         "stamps",
         "test_cpu",
+        "test_window",
     }
     assert info["defaults"] == {"streams": 4, "seconds": 10.0, "packets": 500, "one_stream": True}
+    assert info["device"] == {"check": True, "details": True, "bound_percent": 10.0}
     assert info["monitor"] == {"profile": "path", "voice": True, "video": True}
 
     me = client.get("/api/v1/whoami", headers={"user-agent": "pytest"}).json()

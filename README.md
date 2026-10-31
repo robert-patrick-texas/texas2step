@@ -26,6 +26,7 @@ where it helps, on one page.
 | **Download / upload** | N parallel streams for T seconds, 100 ms timeline, ramp-up excluded | HTTP |
 | **One stream** | One stream's download for the same time: what a single file copy gets | HTTP |
 | **Rate limit** | A rate that holds, then steps down and stays down: a shaper, a policer or the end of a speed boost | derived |
+| **Device-bound** | Whether this device, not the network, set a transfer's rate: the server's kernel times how long the client held each download back; the page times how late it ran | TCP, derived |
 | **Latency under load** | Probes every 250 ms on a separate connection during each transfer, graded A+ to F | WebSocket |
 | **Packet loss** | Numbered probes on an unreliable data channel, echoed and stamped by the server; each direction's loss and delay apart | UDP (WebRTC) |
 | **Stream fairness** | Per-stream rates and Jain's index | HTTP |

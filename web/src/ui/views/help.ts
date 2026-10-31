@@ -45,6 +45,7 @@ const TOPICS: Topic[] = [
         [b("Call quality"), ": how a voice call would sound, from the packet-loss step, scored 1 to 5 and rated Excellent, Good, Fair, Poor or Bad. Each direction is scored, and the worse is shown."],
         [b("Rate limit"), ": a speed that holds, then drops partway and stays down, as when a provider's speed boost ends or a firewall limits a transfer. The tile shows the lower speed, when it came, and the speed before. A longer test, under Test options, catches a boost a short one ends inside."],
         [b("Server CPU-bound"), ": the server ran at a full core while it served the transfer, so the server, not the network, set its speed. Fast links can outrun a server; the path may carry more."],
+        [b("Device-bound"), ": this device couldn't take the data as fast as the server sent it, so the device, not the network, set its speed. Close other tabs and programs, or test from a faster device; the path may carry more. When the page itself ran late under load, Under load shows no grade: device busy."],
       ]),
       p(
         b("Readiness"),

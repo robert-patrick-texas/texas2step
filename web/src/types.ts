@@ -43,6 +43,27 @@ export interface ThroughputResult {
    * transfer (GET /api/v1/tests/{id}); 0.9 or more, its CPU set the rate. Absent where
    * the server doesn't say (before 2.12.0, or under a second). */
   server_cpu?: number;
+  /** When the device is the limit (docs/methodology.md#when-the-device-is-the-limit).
+   * `device_window`: the share of a download the client held the server back (nothing in
+   * flight, or its receive window full), from the server's kernel (device_window, HTTP/1.1
+   * and HTTP/2); `server_rtt_ms` and `server_min_rtt_ms`: the kernel's round-trip time on
+   * the connection while it ran, and the lowest it saw. */
+  device_window?: number;
+  server_rtt_ms?: number;
+  server_min_rtt_ms?: number;
+  /** The page's own figures (device_check): the share of the transfer it ran late, its
+   * lateness at the 95th percentile, Chromium's long tasks (device_details), and for a
+   * download the share of bytes it read in full-size reads (Chromium). */
+  device_busy?: number;
+  device_lag_ms?: number;
+  device_long_ms?: number;
+  device_full_reads?: number;
+  /** The command line's share of a core while the transfer ran (texas2step run, t2s). */
+  device_cpu?: number;
+  /** The device, not the network, set the rate, and what showed it: the server's figure
+   * (`window`), the page's full reads where the server had none (`page`), or the command
+   * line's CPU (`cpu`). Absent otherwise, and while the server's CPU set it. */
+  device_bound?: "window" | "page" | "cpu";
 }
 
 /** A rate that held, then stepped down and stayed down to the end of the transfer: a shaper,
@@ -87,6 +108,9 @@ export interface LossResult {
   lost_upstream?: number[];
   note?: string;
   error?: string;
+  /** The page's lateness while the probes ran (ThroughputResult's `device_busy`). */
+  device_busy?: number;
+  device_lag_ms?: number;
 }
 
 export type CallRating = "excellent" | "good" | "fair" | "poor" | "bad";
@@ -153,6 +177,8 @@ export interface Bufferbloat {
   added_download_ms: number | null;
   added_upload_ms: number | null;
   grade: string | null;
+  /** "device busy": no grade, as the page's own lateness made most of the rise. */
+  withheld?: "device busy";
 }
 
 export interface TestResult {
@@ -165,8 +191,10 @@ export interface TestResult {
   server: { id?: string; name?: string; location?: string; url: string; version?: string };
   /** `local_ip`: this computer's own address: the browser's on the UDP path, where it
    *  reveals it, or the CLI's on its connection. `mac`: of the NIC the CLI's connection
-   *  left by (`mac_source` "nic"), or read from an EUI-64 IPv6 address ("eui64"). */
-  client: { ip?: string; family?: string | null; protocol?: string; user_agent?: string; local_ip?: string; mac?: string; mac_source?: "nic" | "eui64" };
+   *  left by (`mac_source` "nic"), or read from an EUI-64 IPv6 address ("eui64").
+   *  `cores` and `pressure` (device_details): the browser's logical cores, and the highest
+   *  CPU pressure Chromium reported during the test. */
+  client: { ip?: string; family?: string | null; protocol?: string; user_agent?: string; local_ip?: string; mac?: string; mac_source?: "nic" | "eui64"; cores?: number; pressure?: "nominal" | "fair" | "serious" | "critical" };
   /** `one_stream`: whether the run measured one stream's download too. */
   /** `http`: the HTTP version the test was held to, through the server's name for it; left
    * out for Auto, as the browser and the server agree. */
@@ -209,8 +237,9 @@ export interface ServerInfo {
   version?: string;
   server: { id: string; name: string; location: string };
   /** `stamps`: the UDP probe's echoes can carry the server's stamps; `test_cpu`: it says
-   * whether its CPU held a test's transfers back. Older servers leave them out. */
-  capabilities: { websocket: boolean; webrtc: boolean; results: boolean; measure: boolean; stamps?: boolean; test_cpu?: boolean };
+   * whether its CPU held a test's transfers back; `test_window`: how long the client held
+   * each download back. Older servers leave them out. */
+  capabilities: { websocket: boolean; webrtc: boolean; results: boolean; measure: boolean; stamps?: boolean; test_cpu?: boolean; test_window?: boolean };
   /** `max_session_seconds`: session_max_runtime; `max_monitor_seconds`, `max_diag_seconds`:
    * page_monitor_max_runtime and page_diag_max_runtime. 0 for none; older servers leave them out. */
   limits: {
@@ -225,6 +254,9 @@ export interface ServerInfo {
   /** `one_stream`: whether a test measures one stream's download unless the visitor
    * chooses; older servers leave it out. */
   defaults: { streams: number; seconds: number; packets: number; one_stream?: boolean };
+  /** The page's own figures (device_check, device_details), and the share of a download
+   * held back that reads "Device-bound" (0: never); older servers leave it out. */
+  device?: { check: boolean; details: boolean; bound_percent: number };
   /** With a traffic limit: whether this visitor may start a test; if not, the site's
    * message, and a link to continue elsewhere if it gave one. */
   traffic?: { open: boolean; message: string | null; url: string | null };

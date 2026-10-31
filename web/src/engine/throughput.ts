@@ -1,6 +1,7 @@
 // Time-boxed, multi-stream throughput. Bytes are credited to 100 ms bins as they are
 // observed (download: as the body reader yields; upload: as XHR progress reports), so
 // the timeline shows ramp-up and the stable figure can exclude it.
+import { FULL_READ } from "./device";
 import { type Endpoint, linked, nonce, Refused, refusal } from "./net";
 
 export const BIN_MS = 100;
@@ -27,6 +28,9 @@ export interface ThroughputRaw {
   perStream: number[];
   elapsed: number;
   errors: number;
+  /** Downloads: bytes read, and those in reads of FULL_READ or more (device.ts). */
+  readBytes?: number;
+  fullBytes?: number;
 }
 
 class Meter {
@@ -83,6 +87,8 @@ export async function measureDownload(ep: Endpoint, opts: ThroughputOptions): Pr
   const meter = new Meter(opts.seconds, opts.streams);
   const stop = ticker(meter, opts);
   let errors = 0;
+  let readBytes = 0;
+  let fullBytes = 0;
 
   const stream = async (i: number) => {
     while (performance.now() < meter.deadline && !opts.signal.aborted) {
@@ -104,6 +110,8 @@ export async function measureDownload(ep: Endpoint, opts: ThroughputOptions): Pr
             return;
           }
           meter.add(i, value.byteLength, now);
+          readBytes += value.byteLength;
+          if (value.byteLength >= FULL_READ) fullBytes += value.byteLength;
         }
       } catch (err) {
         if (err instanceof Refused) throw err;
@@ -119,7 +127,7 @@ export async function measureDownload(ep: Endpoint, opts: ThroughputOptions): Pr
   } finally {
     stop();
   }
-  return meter.raw(errors);
+  return { ...meter.raw(errors), readBytes, fullBytes };
 }
 
 // ---- Upload ------------------------------------------------------------------------

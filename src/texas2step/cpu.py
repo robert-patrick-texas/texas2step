@@ -44,6 +44,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .store import create_owned, prepare
+from .tcpinfo import Held, Window
 from .traffic import TEST_SECONDS
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ RAW_KEEP = 7200.0  # seconds the rows are kept
 KEEP_DAYS = 30  # days of minutes kept
 SCAN = 60.0  # seconds between looks through /proc for nginx's processes
 BOUND = 0.9  # a worker at this share of a core held a transfer back: "Server CPU-bound"
+READY = 0.5  # the share of a download the server waited with bytes ready: the client held it
 CLEAR = 0.9  # tests kept out are let in again under this share of cpu_busy_percent
 QUIET_CPU = 0.10  # the workers' share of a core, with nothing to serve, worth a warning...
 QUIET_MINUTES = 10  # ...for this many minutes in a row
@@ -106,6 +108,20 @@ CREATE TABLE IF NOT EXISTS tests (
     worker  INTEGER NOT NULL,
     cpu     REAL NOT NULL,    -- seconds of CPU the worker used while it served the transfer's
     seconds REAL NOT NULL,    -- requests, each from its first byte to its last, and those seconds
+    at      REAL NOT NULL,
+    PRIMARY KEY (id, part, worker)
+);
+CREATE TABLE IF NOT EXISTS windows (
+    id      TEXT NOT NULL,    -- a test's ?test=
+    part    TEXT NOT NULL,    -- download or one_stream
+    worker  INTEGER NOT NULL,
+    seconds REAL NOT NULL,    -- the requests' seconds on their connections, summed (tcpinfo.py)
+    idle    REAL NOT NULL,    -- of those, with nothing in flight
+    rwnd    REAL NOT NULL,    -- and held back by the client's TCP receive window
+    rtt_sum REAL NOT NULL,    -- the kernel's RTTs while they ran, in ms, summed
+    rtt_n   INTEGER NOT NULL, -- and counted
+    min_rtt REAL,             -- the lowest RTT the kernel saw on the connections, ms
+    ready   REAL NOT NULL,    -- seconds the server had the next bytes ready, waiting on them
     at      REAL NOT NULL,
     PRIMARY KEY (id, part, worker)
 );
@@ -415,20 +431,47 @@ class CpuFile:
                 (now - 3 * SAMPLE,),
             ).fetchall()
 
-    def test(self, test: str) -> dict[str, dict[str, Any]]:
+    def test(self, test: str, bound_percent: float = 0.0) -> dict[str, dict[str, Any]]:
         """Each transfer of a test that a worker served for a second or more: the busiest
-        such worker's share of a core while it did, and whether that held it back."""
+        such worker's share of a core while it did, and whether that held it back. For a
+        download, also how long the client held the server back, and the kernel's RTT
+        while it did (``window``): the device, not the network, set its rate when that was
+        ``bound_percent`` of the time or more, unless the server's CPU had (0: never)."""
         with self._lock:
             rows = self._db.execute(
                 "SELECT part, max(cpu / seconds) FROM tests WHERE id = ? AND seconds >= 1 "
                 "GROUP BY part",
                 (test,),
             ).fetchall()
-        return {
+            windows = self._db.execute(
+                "SELECT part, sum(seconds), sum(idle), sum(rwnd), sum(rtt_sum), sum(rtt_n), "
+                "min(min_rtt), sum(ready) FROM windows WHERE id = ? GROUP BY part "
+                "HAVING sum(seconds) >= 1",
+                (test,),
+            ).fetchall()
+        out: dict[str, dict[str, Any]] = {
             part: {"cpu": round(cpu, 3), "bound": cpu >= BOUND}
             for part, cpu in rows
             if part in PARTS
         }
+        for part, seconds, idle, rwnd, rtt_sum, rtt_n, min_rtt, ready in windows:
+            if part not in PARTS:
+                continue
+            held = min(1.0, (idle + rwnd) / seconds)
+            # Held back by the client, not by a server that couldn't keep up: its CPU
+            # wasn't full, and it had the next bytes ready most of the time.
+            ours = out.get(part, {}).get("bound", False) or ready < READY * seconds
+            out.setdefault(part, {})["window"] = {
+                "held": round(held, 3),
+                "idle": round(idle / seconds, 3),
+                "rwnd": round(rwnd / seconds, 3),
+                "seconds": round(seconds, 1),
+                "rtt_ms": round(rtt_sum / rtt_n, 3) if rtt_n else None,
+                "min_rtt_ms": round(min_rtt, 3) if min_rtt is not None else None,
+                "ready": round(ready / seconds, 3),
+                "bound": bool(bound_percent) and held * 100 >= bound_percent and not ours,
+            }
+        return out
 
     def noted_busy(self, percent: float, seconds: float) -> dict[str, Any] | None:
         """Whether other work keeps tests out, as the workers last told the journal: for
@@ -718,6 +761,7 @@ class CpuMonitor(CpuFile):
             self._db.execute("DELETE FROM samples WHERE at < ?", (now - RAW_KEEP,))
             self._db.execute("DELETE FROM minutes WHERE minute < ?", (now - KEEP_DAYS * 86400,))
             self._db.execute("DELETE FROM tests WHERE at < ?", (now - TESTS_KEEP,))
+            self._db.execute("DELETE FROM windows WHERE at < ?", (now - TESTS_KEEP,))
             self._db.execute("DELETE FROM admitted WHERE at < ?", (now - TEST_SECONDS,))
             self._admitted = {t: at for t, at in self._admitted.items() if now - at < TEST_SECONDS}
         self._pruned = now
@@ -835,6 +879,34 @@ class CpuMonitor(CpuFile):
                 (test, part, self.worker, cpu, seconds, time.time()),
             )
 
+    def record_window(self, test: str, part: str, held: Held) -> None:
+        """How long the client held one request of a download back, added to the
+        transfer's other requests here (tcpinfo.Window)."""
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO windows VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (id, part, worker) DO UPDATE SET "
+                "seconds = seconds + excluded.seconds, idle = idle + excluded.idle, "
+                "rwnd = rwnd + excluded.rwnd, rtt_sum = rtt_sum + excluded.rtt_sum, "
+                "rtt_n = rtt_n + excluded.rtt_n, "
+                "min_rtt = min(coalesce(min_rtt, excluded.min_rtt), "
+                "coalesce(excluded.min_rtt, min_rtt)), ready = ready + excluded.ready, "
+                "at = excluded.at",
+                (
+                    test,
+                    part,
+                    self.worker,
+                    held.seconds,
+                    held.idle,
+                    held.rwnd,
+                    held.rtt_sum_ms,
+                    held.rtt_n,
+                    held.min_rtt_ms,
+                    held.ready,
+                    time.time(),
+                ),
+            )
+
     # --- The journal ---------------------------------------------------------------
 
     def _watch(self, now: float) -> None:
@@ -903,12 +975,16 @@ class Watched:
     """Times one request of a test's transfer: this worker's CPU from its first byte to its
     last, recorded when it ends, so the client can ask whether the server held it back."""
 
-    def __init__(self, monitor: CpuMonitor | None, test: str | None, part: str) -> None:
+    def __init__(
+        self, monitor: CpuMonitor | None, test: str | None, part: str, window: Window | None = None
+    ) -> None:
         self.monitor = monitor if test else None
         self.test = test
         self.part = part
         self.first: tuple[float, float] | None = None
         self.last: tuple[float, float] | None = None
+        # A download's connection, timed for how long the client held it back.
+        self.window = window if self.monitor is not None else None
 
     def moved(self) -> None:
         if self.monitor is None:
@@ -917,6 +993,8 @@ class Watched:
         if self.first is None:
             self.first = mark
         self.last = mark
+        if self.window is not None:
+            self.window.moved()
 
     def _figures(self) -> tuple[str, str, float, float] | None:
         """What to record: the CPU and the seconds from its first byte to its last."""
@@ -931,12 +1009,19 @@ class Watched:
         """Record it in the background, as a download ends with its client gone."""
         if (figures := self._figures()) is None or self.monitor is None:
             return
+        held = self.window.held() if self.window is not None else None
         task = asyncio.get_running_loop().create_task(
-            asyncio.to_thread(self.monitor.record, *figures)
+            asyncio.to_thread(self._record, figures, held)
         )
         tasks.add(task)
         task.add_done_callback(tasks.discard)
         task.add_done_callback(_quiet)
+
+    def _record(self, figures: tuple[str, str, float, float], held: Held | None) -> None:
+        assert self.monitor is not None
+        self.monitor.record(*figures)
+        if held is not None:
+            self.monitor.record_window(figures[0], figures[1], held)
 
     async def save(self) -> None:
         """Record it before the answer goes, so the client finds it when it asks."""
