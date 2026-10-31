@@ -90,6 +90,35 @@ From the 100 ms timeline:
 * **Per-stream rate** is each stream's bytes over the test, and **fairness** is
   Jain's index over streams: (Σx)² / (n·Σx²). 100 % means every flow got an equal share.
 
+### Rate limit
+
+A rate that holds, then steps down and stays down to the end of the transfer, is marked as
+a **rate limit**. It is what a shaper or a policer does once a flow has used its
+allowance, and what an ISP's speed boost does when it ends: the first seconds, or the first
+few hundred megabytes, go faster than the line's lasting rate. The test reports the rate
+before, when it fell, how much the transfer had moved by then, and the rate after; the
+stable rate stays the mean after ramp-up, so it then blends the two.
+
+The 100 ms bins after the ramp-up window are split in two, a higher level then a lower
+one, where two levels fit them best (the split that leaves the two parts' means furthest
+apart for their sizes). It is a rate limit when all of these hold:
+
+* the higher part lasts at least 1 s and the lower part at least 2 s, to the end;
+* the lower level is above zero and at most 75 % of the higher;
+* the lower part's 90th percentile is below the higher part's median, so a rate that
+  wobbles between two levels, as over Wi-Fi, isn't one;
+* the last second is at most 75 % of the higher level too, so a dip that recovered isn't
+  one.
+
+It is found in each transfer: the download, one stream and the upload. A test that ends
+before the allowance runs out sees only the faster rate and finds nothing, so a longer
+test, 30 s from the Test page or `--seconds 30` from the command line, catches boosts a
+10 s test ends inside. A transfer that starts with the allowance already spent, as one
+stream often does right after the download, runs at the lower rate throughout and isn't
+marked: compare it with the download's rate limit. What causes it, a shaper's queue or a
+policer's dropped packets, isn't named: latency under load rises behind a shaper and not
+behind a policer, but a shaper with modern queue management keeps it low as well.
+
 ### One stream
 
 After the download, the test downloads over **one stream** for the same time, measured in

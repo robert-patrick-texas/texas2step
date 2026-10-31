@@ -1,6 +1,6 @@
 // Throughput over time: download, upload and one stream's download on one Mbps axis,
-// ramp-up shaded.
-import type { Direction } from "../../types";
+// ramp-up shaded, and a mark where a rate limit set in.
+import type { Direction, RateLimit } from "../../types";
 import { clear, h, onResize, pointerIn, s } from "../dom";
 import { mbpsTick, rate, text } from "../format";
 import { hideTip, showTip } from "../tooltip";
@@ -12,6 +12,7 @@ export interface ThroughputSeries {
   warmupS: number;
   durationS: number;
   stable: number | null; // null while still running
+  limit?: RateLimit | null; // where the rate stepped down and stayed down, once done
 }
 
 export type Series = Direction | "one";
@@ -21,6 +22,8 @@ const COLOR: Record<Series, string> = { download: "var(--dl)", upload: "var(--ul
 const ORDER: Series[] = ["download", "one", "upload"]; // for the stable rates' labels
 const LABEL_STEP = 15; // baseline to baseline for the 12px direct labels
 const LABEL_TOP = 11; // the highest baseline that keeps a label inside the chart
+const RAMP_LABEL = 110; // about how wide "ramp-up, excluded" runs
+const LIMIT_LABEL = 64; // and "rate limit"
 
 export class ThroughputChart {
   readonly el: HTMLElement;
@@ -97,6 +100,23 @@ export class ThroughputChart {
         labels.push({ dir, y: sy - 7, label: `${LABEL[dir]} ${text(rate(d.stable))}` });
       }
     }
+    // A rate limit is a dashed mark where the rate stepped down, named at its top: a row
+    // lower when the name would run into the ramp-up's. Marks closer than a name's width
+    // share one, beyond the last of them, their colours telling them apart.
+    const marks = series.flatMap(([dir, d]) => (d.limit ? [{ lx: x(d.limit.at_s), color: COLOR[dir] }] : [])).sort((a, b) => a.lx - b.lx);
+    marks.forEach(({ lx, color }, i) => {
+      svg.append(s("line", { x1: lx, x2: lx, y1: m.top, y2: H - m.bottom, class: "limit-mark", style: `stroke:${color}` }));
+      const next = marks[i + 1];
+      if (next && next.lx - lx < LIMIT_LABEL + 8) return; // the next mark names both
+      let j = i;
+      while (j > 0 && marks[j]!.lx - marks[j - 1]!.lx < LIMIT_LABEL + 8) j--;
+      const first = marks[j]!;
+      const right = lx + 5 + LIMIT_LABEL <= W - m.right;
+      const from = right ? lx + 5 : first.lx - 5 - LIMIT_LABEL;
+      const row = warm > 0 && from < x(0) + 8 + RAMP_LABEL ? 1 : 0;
+      svg.append(s("text", { x: right ? lx + 5 : first.lx - 5, y: m.top + 14 + row * 15, class: "annot", "text-anchor": right ? "start" : "end" }, "rate limit"));
+    });
+
     // Each stable rate is labelled just above its line, Download first. A later label that
     // would overlap one already placed stacks above it, or below if the chart has no room.
     const placed: number[] = [];

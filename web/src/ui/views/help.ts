@@ -43,6 +43,7 @@ const TOPICS: Topic[] = [
         [b("Under load"), ": how much the delay grows while the connection is busy, graded A+ to F. A big rise is why calls break up while someone else on the network downloads."],
         [b("Responsiveness"), ": round trips per minute while busy (RPM); higher is better."],
         [b("Call quality"), ": how a voice call would sound, from the packet-loss step, scored 1 to 5 and rated Excellent, Good, Fair, Poor or Bad. Each direction is scored, and the worse is shown."],
+        [b("Rate limit"), ": a speed that holds, then drops partway and stays down, as when a provider's speed boost ends or a firewall limits a transfer. The tile shows the lower speed, when it came, and the speed before. A longer test, under Test options, catches a boost a short one ends inside."],
       ]),
       p(
         b("Readiness"),

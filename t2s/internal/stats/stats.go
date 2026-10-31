@@ -92,13 +92,23 @@ func WarmupSeconds(duration float64) float64 {
 
 // Throughput is a transfer's timeline, and its stable and peak rates in Mb/s.
 type Throughput struct {
-	Mbps      float64   `json:"mbps"`
-	PeakMbps  float64   `json:"peak_mbps"`
-	Bytes     int64     `json:"bytes"`
-	DurationS float64   `json:"duration_s"`
-	WarmupS   float64   `json:"warmup_s"`
-	BinMs     float64   `json:"bin_ms"`
-	Timeline  []float64 `json:"timeline"`
+	Mbps      float64    `json:"mbps"`
+	PeakMbps  float64    `json:"peak_mbps"`
+	Bytes     int64      `json:"bytes"`
+	DurationS float64    `json:"duration_s"`
+	WarmupS   float64    `json:"warmup_s"`
+	BinMs     float64    `json:"bin_ms"`
+	Timeline  []float64  `json:"timeline"`
+	RateLimit *RateLimit `json:"rate_limit"`
+}
+
+// RateLimit is where a transfer's rate stepped down and stayed down to the end: a shaper, a
+// policer or the end of an ISP's speed boost. BeforeBytes is what the transfer moved first.
+type RateLimit struct {
+	FromMbps    float64 `json:"from_mbps"`
+	ToMbps      float64 `json:"to_mbps"`
+	AtS         float64 `json:"at_s"`
+	BeforeBytes int64   `json:"before_bytes"`
 }
 
 // SummarizeThroughput turns per-bin byte counts into a timeline and rates.
@@ -127,7 +137,63 @@ func SummarizeThroughput(bins []int64, binMs, duration float64) Throughput {
 	for i, v := range timeline {
 		out.Timeline[i] = num.Round(v, 3)
 	}
+	out.RateLimit = Limit(timeline, bins, binMs, first)
 	return out
+}
+
+// A rate limit's rules, as stats.py's.
+const (
+	limitHighS = 1.0  // the higher rate lasts at least this long after ramp-up
+	limitLowS  = 2.0  // and the lower rate at least this long, to the end
+	limitShare = 0.75 // the lower rate is at most this share of the higher
+)
+
+// Limit is where a transfer's rate stepped down and stayed down; nil when it didn't. The bins
+// after ramp-up (from first) are split where a higher level then a lower one fit them best,
+// and the split must pass stats.py's rate_limit tests.
+func Limit(timeline []float64, bins []int64, binMs float64, first int) *RateLimit {
+	xs := timeline[first:]
+	n := len(xs)
+	high := int(math.Ceil(limitHighS * 1000 / binMs))
+	low := int(math.Ceil(limitLowS * 1000 / binMs))
+	if n < high+low {
+		return nil
+	}
+	// Running sums, added left to right, so this splits where stats.py does.
+	heads := make([]float64, n)
+	sum := 0.0
+	for i, v := range xs {
+		sum += v
+		heads[i] = sum
+	}
+	total := heads[n-1]
+	best, split := 0.0, 0
+	// Sought everywhere, then held to the two lengths.
+	for k := 1; k < n; k++ {
+		head := heads[k-1]
+		rest := total - head
+		if head/float64(k) <= rest/float64(n-k) {
+			continue // not a step down
+		}
+		if fit := head*head/float64(k) + rest*rest/float64(n-k); fit > best {
+			best, split = fit, k
+		}
+	}
+	if split < high || n-split < low {
+		return nil
+	}
+	from := heads[split-1] / float64(split)
+	to := (total - heads[split-1]) / float64(n-split)
+	last := (total - heads[n-high-1]) / float64(high)
+	if !(0 < to && to <= limitShare*from && Percentile(xs[split:], 90) < Percentile(xs[:split], 50) && last <= limitShare*from) {
+		return nil
+	}
+	at := first + split
+	var before int64
+	for _, b := range bins[:at] {
+		before += b
+	}
+	return &RateLimit{FromMbps: from, ToMbps: to, AtS: float64(at) * binMs / 1000, BeforeBytes: before}
 }
 
 var bloatLimits = []struct {

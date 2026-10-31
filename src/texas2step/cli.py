@@ -66,6 +66,19 @@ def _throughput_line(label: str, t: dict[str, Any] | None, idle: float | None) -
     )
 
 
+def _limit_line(t: dict[str, Any] | None) -> list[str]:
+    """A transfer's rate limit, under its line; nothing when it had none."""
+    limit = (t or {}).get("rate_limit")
+    if not limit:
+        return []
+    moved = limit["before_bytes"] / 1e6
+    before = f"{moved:,.0f} MB" if moved < 1000 else f"{moved / 1000:,.1f} GB"
+    return [
+        f"  {'':<14} rate limit: {_fmt(limit['from_mbps'], ' Mbps', 1)} until {limit['at_s']:g}s,"
+        f" {before} in, then {_fmt(limit['to_mbps'], ' Mbps', 1)} to the end"
+    ]
+
+
 def _one_stream_line(result: dict[str, Any]) -> list[str]:
     """One stream's download, beside the multi-stream rate; nothing when not measured."""
     one, multi = result.get("one_stream"), result.get("download") or {}
@@ -78,7 +91,8 @@ def _one_stream_line(result: dict[str, Any]) -> list[str]:
     )
     return [
         f"  {'One stream':<14} {_fmt(one['mbps'], ' Mbps', 1):>14}"
-        f"   peak {_fmt(one['peak_mbps'], '', 1)}   (a single file copy{share})"
+        f"   peak {_fmt(one['peak_mbps'], '', 1)}   (a single file copy{share})",
+        *_limit_line(one),
     ]
 
 
@@ -149,8 +163,10 @@ def _report(result: dict[str, Any]) -> str:
         "",
         _latency_line("Latency", result.get("latency")),
         _throughput_line("Download", result.get("download"), idle),
+        *_limit_line(result.get("download")),
         *_one_stream_line(result),
         _throughput_line("Upload", result.get("upload"), idle),
+        *_limit_line(result.get("upload")),
         _loss_line(result.get("loss")),
     ]
     if client.get("local_ip"):

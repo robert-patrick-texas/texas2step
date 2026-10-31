@@ -2,7 +2,7 @@
 import { appPath, NeedsCode, Refused, REFUSED } from "../../engine/net";
 import { callQuality, responsiveness } from "../../engine/quality";
 import { type Phase, PHASES, type RunEvents, TestRun } from "../../engine/runner";
-import type { CallQuality, CallRating, CallSide, Direction, Level, Readiness, Responsiveness, ResponsivenessSide, TestResult, ThroughputResult } from "../../types";
+import type { CallQuality, CallRating, CallSide, Direction, Level, RateLimit, Readiness, Responsiveness, ResponsivenessSide, TestResult, ThroughputResult } from "../../types";
 import type { App, Settings, View } from "../app";
 import { awakeSwitch } from "../awake";
 import { LatencyChart } from "../charts/latency";
@@ -48,7 +48,27 @@ function put(t: Tile, f: Formatted, sub = ""): void {
   setText(t.value, f.value);
   setText(t.unit, f.value === "—" ? "" : f.unit);
   setText(t.sub, sub);
+  t.sub.classList.remove("wraps");
 }
+
+/** When a transfer's rate fell, as "4.2s" or "12s". */
+const fellAt = (l: RateLimit) => `${l.at_s.toLocaleString(undefined, { maximumFractionDigits: 1 })}s`;
+
+/** A rate with a non-breaking space, for small print that may wrap. */
+const nb = (mbps: number) => text(rate(mbps)).replace(" ", "\u00a0");
+
+/** A rate limit in words: the rate before, when it fell and to what. */
+const limitText = (l: RateLimit) => `${text(rate(l.from_mbps))} until ${fellAt(l)}, ${bytes(l.before_bytes)} in, then ${text(rate(l.to_mbps))} to the end`;
+
+/** A transfer's rate limit in its tile's small print, in place of its peak: the lower rate
+ * and when it came, then the rate before. It wraps, as a phone's narrow tile needs, but never
+ * between a figure and its unit. */
+function putLimit(t: Tile, l: RateLimit): void {
+  t.sub.classList.add("wraps");
+  t.sub.replaceChildren(h("span", { class: "grade limit" }, "Rate limit"), ` ${nb(l.to_mbps)} after\u00a0${fellAt(l)}`, h("br"), `${nb(l.from_mbps)} before`);
+}
+
+const LIMIT_NOTE = "The rate held, then stepped down and stayed down: a shaper, a policer or the end of a speed boost. The big figure is the mean after ramp-up, both rates together.";
 
 function card(title: string, subtitle: string, body: HTMLElement, extra = ""): HTMLElement {
   return h(
@@ -257,7 +277,7 @@ export class TestView implements View {
         "div",
         { class: "opt-grid" },
         seg("streams", "Parallel streams", [[1, "1"], [2, "2"], [4, "4"], [6, "6"], [8, "8"]], "Concurrent transfers. Browsers allow six HTTP/1.1 connections per server; HTTP/2 multiplexes on one."),
-        seg("seconds", "Duration", [[5, "5s"], [10, "10s"], [15, "15s"], [20, "20s"]], "Length of each of the download and upload phases."),
+        seg("seconds", "Duration", [[5, "5s"], [10, "10s"], [15, "15s"], [20, "20s"], [30, "30s"]], "Length of each of the download and upload phases. A longer one shows a speed boost that ends after several seconds."),
         seg("packets", "UDP probes", [[0, "Skip"], [200, "200"], [500, "500"], [1000, "1000"]], "Packets sent in the loss test."),
         seg("intervalMs", "Probe spacing", [[5, "5 ms"], [10, "10 ms"], [20, "20 ms"]], "Time between UDP probes."),
         seg("oneStream", "One stream", [[true, "Download"], [false, "Skip"]], "After the download, one stream for the same time: what a single file copy gets. Skipped when the test uses one stream. Until you choose, as the server says.", () => this.oneStream()),
@@ -533,7 +553,9 @@ export class TestView implements View {
       const t = r[dir];
       if (!t) continue;
       put(this.tiles[dir], rate(t.mbps), `peak ${text(rate(t.peak_mbps))} · ${t.streams} stream${t.streams > 1 ? "s" : ""}`);
-      this.throughput.set(dir, { timeline: t.timeline, binMs: t.bin_ms, warmupS: t.warmup_s, durationS: t.duration_s, stable: t.mbps });
+      if (t.rate_limit) putLimit(this.tiles[dir], t.rate_limit);
+      this.tiles[dir].el.title = t.rate_limit ? `Rate limit: ${limitText(t.rate_limit)}. ${LIMIT_NOTE}` : "";
+      this.throughput.set(dir, { timeline: t.timeline, binMs: t.bin_ms, warmupS: t.warmup_s, durationS: t.duration_s, stable: t.mbps, limit: t.rate_limit ?? null });
       this.latency.setStats(dir, t.loaded_latency);
       this.streams.set(dir, t.per_stream_mbps);
       railValue(dir, text(rate(t.mbps)));
@@ -543,8 +565,10 @@ export class TestView implements View {
       const multi = r.download?.mbps;
       const share = multi ? `${Math.round((one.mbps / multi) * 100)} % of ${r.download!.streams} streams · ` : "";
       put(this.tiles.one, rate(one.mbps), `${share}peak ${text(rate(one.peak_mbps))}`);
-      this.tiles.one.el.title = `One stream's download, after the download over several: what a single file copy, backup or remote-desktop session gets.${shared(r) ? " Over HTTP/2 or 3 the several streams shared one connection too." : ""}`;
-      this.throughput.set("one", { timeline: one.timeline, binMs: one.bin_ms, warmupS: one.warmup_s, durationS: one.duration_s, stable: one.mbps });
+      if (one.rate_limit) putLimit(this.tiles.one, one.rate_limit);
+      const limit = one.rate_limit ? ` Rate limit: ${limitText(one.rate_limit)}. ${LIMIT_NOTE}` : "";
+      this.tiles.one.el.title = `One stream's download, after the download over several: what a single file copy, backup or remote-desktop session gets.${shared(r) ? " Over HTTP/2 or 3 the several streams shared one connection too." : ""}${limit}`;
+      this.throughput.set("one", { timeline: one.timeline, binMs: one.bin_ms, warmupS: one.warmup_s, durationS: one.duration_s, stable: one.mbps, limit: one.rate_limit ?? null });
       railValue("one", text(rate(one.mbps)));
     } else if (!partial) {
       railValue("one", "");
@@ -678,12 +702,15 @@ export class TestView implements View {
     const tp = (t: ThroughputResult | undefined, d: Direction) => {
       if (!t) return;
       const loaded = t.loaded_latency;
-      add(d === "download" ? "Download" : "Upload", `${text(rate(t.mbps))} stable · peak ${text(rate(t.peak_mbps))} · ${bytes(t.bytes)} in ${t.duration_s}s · ${t.streams} streams`);
+      const label = d === "download" ? "Download" : "Upload";
+      add(label, `${text(rate(t.mbps))} stable · peak ${text(rate(t.peak_mbps))} · ${bytes(t.bytes)} in ${t.duration_s}s · ${t.streams} streams`);
+      if (t.rate_limit) add(`${label} rate limit`, limitText(t.rate_limit));
       if (loaded) add(`Latency during ${d}`, `median ${text(ms(loaded.median))} · p90 ${text(ms(loaded.p90))} · jitter ${text(ms(loaded.jitter))} · ${loaded.count} probes`);
     };
     tp(r.download, "download");
     const one = r.one_stream;
     if (one) add("One stream", `${text(rate(one.mbps))} stable · peak ${text(rate(one.peak_mbps))} · ${bytes(one.bytes)} in ${one.duration_s}s${r.download?.mbps ? ` · ${Math.round((one.mbps / r.download.mbps) * 100)} % of the ${r.download.streams}-stream rate` : ""}`);
+    if (one?.rate_limit) add("One stream rate limit", limitText(one.rate_limit));
     tp(r.upload, "upload");
     if (r.bufferbloat?.grade) add("Bufferbloat", `grade ${r.bufferbloat.grade}`);
     const l = r.loss;

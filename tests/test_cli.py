@@ -42,6 +42,32 @@ def test_report_without_this_computer():
     assert "this computer 10.8.0.2" in cli._report(no_mac).splitlines()
 
 
+def test_report_gives_a_rate_limit_under_its_transfer():
+    download = {
+        "mbps": 485.4,
+        "peak_mbps": 990.0,
+        "streams": 4,
+        "rate_limit": {
+            "from_mbps": 938.2,
+            "to_mbps": 312.9,
+            "at_s": 4.2,
+            "before_bytes": 427_000_000,
+        },
+    }
+    upload = {**download, "rate_limit": None}
+    lines = cli._report({**RESULT, "download": download, "upload": upload}).splitlines()
+    i = next(n for n, line in enumerate(lines) if line.startswith("  Download"))
+    assert lines[i + 1] == (
+        "                 rate limit: 938.2 Mbps until 4.2s, 427 MB in, then 312.9 Mbps to the end"
+    )
+    assert sum("rate limit" in line for line in lines) == 1
+    boost = {
+        **download,
+        "rate_limit": {**download["rate_limit"], "at_s": 12.0, "before_bytes": 1_409_600_000},
+    }
+    assert "until 12s, 1.4 GB in" in cli._report({**RESULT, "download": boost})
+
+
 def test_report_gives_call_quality_and_responsiveness():
     lines = cli._report(RESULT).splitlines()
     assert "  Call quality   —" in lines

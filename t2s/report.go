@@ -49,6 +49,21 @@ func throughputLine(label string, t *engine.Throughput, idle *float64) string {
 		label, fv(t.Mbps, " Mbps", 1), fv(t.PeakMbps, "", 1), t.Streams, added)
 }
 
+// limitLine is a transfer's rate limit, under its line; nothing when it had none.
+func limitLine(t *engine.Throughput) []string {
+	if t == nil || t.RateLimit == nil {
+		return nil
+	}
+	l := t.RateLimit
+	moved := float64(l.BeforeBytes) / 1e6
+	before := fmt.Sprintf("%s MB", fv(moved, "", 0))
+	if moved >= 1000 {
+		before = fmt.Sprintf("%s GB", fv(moved/1000, "", 1))
+	}
+	return []string{fmt.Sprintf("  %-14s rate limit: %s until %ss, %s in, then %s to the end",
+		"", fv(l.FromMbps, " Mbps", 1), strconv.FormatFloat(l.AtS, 'g', -1, 64), before, fv(l.ToMbps, " Mbps", 1))}
+}
+
 func oneStreamLine(r *engine.Result) []string {
 	one, multi := r.OneStream, r.Download
 	if one == nil {
@@ -58,8 +73,8 @@ func oneStreamLine(r *engine.Result) []string {
 	if multi != nil && multi.Mbps != 0 {
 		share = fmt.Sprintf(" · %.0f %% of %d streams", one.Mbps/multi.Mbps*100, multi.Streams)
 	}
-	return []string{fmt.Sprintf("  %-14s %14s   peak %s   (a single file copy%s)",
-		"One stream", fv(one.Mbps, " Mbps", 1), fv(one.PeakMbps, "", 1), share)}
+	return append([]string{fmt.Sprintf("  %-14s %14s   peak %s   (a single file copy%s)",
+		"One stream", fv(one.Mbps, " Mbps", 1), fv(one.PeakMbps, "", 1), share)}, limitLine(one)...)
 }
 
 func lossLine(l *engine.Loss) string {
@@ -164,8 +179,11 @@ func report(r *engine.Result) string {
 		latency = &r.Latency.Summary
 	}
 	lines = append(lines, "", latencyLine("Latency", latency), throughputLine("Download", r.Download, idle))
+	lines = append(lines, limitLine(r.Download)...)
 	lines = append(lines, oneStreamLine(r)...)
-	lines = append(lines, throughputLine("Upload", r.Upload, idle), lossLine(r.Loss), callLine(r.Call), rpmLine(r.Responsiveness))
+	lines = append(lines, throughputLine("Upload", r.Upload, idle))
+	lines = append(lines, limitLine(r.Upload)...)
+	lines = append(lines, lossLine(r.Loss), callLine(r.Call), rpmLine(r.Responsiveness))
 	if g := r.Bufferbloat.Grade; g != nil {
 		lines = append(lines, fmt.Sprintf("  %-14s %14s", "Bufferbloat", *g))
 	}

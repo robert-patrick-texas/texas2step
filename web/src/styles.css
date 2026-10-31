@@ -1585,6 +1585,10 @@ a.brand-org:hover,
   white-space: nowrap;
 }
 
+.tile-sub.wraps {
+  white-space: normal;
+}
+
 .grade {
   display: inline-flex;
   align-items: center;
@@ -1596,7 +1600,8 @@ a.brand-org:hover,
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--good) 45%, transparent);
 }
 
-.grade[data-grade="B"] {
+.grade[data-grade="B"],
+.grade.limit {
   background: color-mix(in srgb, var(--warning) 22%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 55%, transparent);
 }
@@ -1911,6 +1916,12 @@ a.brand-org:hover,
 .chart-svg .ref {
   stroke-width: 1;
   opacity: 0.75;
+}
+
+/* Where a rate limit set in. */
+.chart-svg .limit-mark {
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
 }
 
 .chart-svg .dot {

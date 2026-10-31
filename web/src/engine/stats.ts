@@ -1,5 +1,5 @@
 // Mirrors src/texas2step/stats.py; keep the definitions identical.
-import type { LatencyStats } from "../types";
+import type { LatencyStats, RateLimit } from "../types";
 
 export function percentile(values: readonly number[], q: number): number {
   if (!values.length) return NaN;
@@ -72,7 +72,51 @@ export function summarizeThroughput(binBytes: readonly number[], binMs: number, 
     warmup_s: warm,
     bin_ms: binMs,
     timeline: timeline.map((v) => Math.round(v * 1000) / 1000),
+    rate_limit: rateLimit(timeline, binBytes, binMs, first),
   };
+}
+
+// A rate limit: a rate that holds, then steps down and stays down to the end, as a shaper,
+// a policer or the end of an ISP's speed boost makes it.
+const LIMIT_HIGH_S = 1; // the higher rate lasts at least this long after ramp-up
+const LIMIT_LOW_S = 2; // and the lower rate at least this long, to the end
+const LIMIT_SHARE = 0.75; // the lower rate is at most this share of the higher
+
+/** Where a transfer's rate stepped down and stayed down; null when it didn't. The rules are
+ * stats.py's rate_limit. */
+export function rateLimit(timeline: readonly number[], binBytes: readonly number[], binMs: number, first: number): RateLimit | null {
+  const xs = timeline.slice(first);
+  const n = xs.length;
+  const high = Math.ceil((LIMIT_HIGH_S * 1000) / binMs);
+  const low = Math.ceil((LIMIT_LOW_S * 1000) / binMs);
+  if (n < high + low) return null;
+  // Running sums, added left to right, so this splits where stats.py does.
+  const heads: number[] = [];
+  let sum = 0;
+  for (const v of xs) heads.push((sum += v));
+  const total = heads[n - 1]!;
+  // The best split leaves the two parts' means furthest apart for their sizes. It is sought
+  // everywhere, then held to the two lengths.
+  let best = 0;
+  let split = 0;
+  for (let k = 1; k < n; k++) {
+    const head = heads[k - 1]!;
+    const rest = total - head;
+    if (head / k <= rest / (n - k)) continue; // not a step down
+    const fit = (head * head) / k + (rest * rest) / (n - k);
+    if (fit > best) {
+      best = fit;
+      split = k;
+    }
+  }
+  if (split < high || n - split < low) return null;
+  const fromMbps = heads[split - 1]! / split;
+  const toMbps = (total - heads[split - 1]!) / (n - split);
+  const lastMbps = (total - heads[n - high - 1]!) / high;
+  const holds = 0 < toMbps && toMbps <= LIMIT_SHARE * fromMbps && percentile(xs.slice(split), 90) < percentile(xs.slice(0, split), 50) && lastMbps <= LIMIT_SHARE * fromMbps;
+  if (!holds) return null;
+  const at = first + split;
+  return { from_mbps: fromMbps, to_mbps: toMbps, at_s: (at * binMs) / 1000, before_bytes: binBytes.slice(0, at).reduce((a, b) => a + b, 0) };
 }
 
 /** Jain's fairness index: 1 = perfectly even, 1/n = one stream took everything. */

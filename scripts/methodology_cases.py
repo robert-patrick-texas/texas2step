@@ -122,6 +122,27 @@ def cases() -> dict[str, list[dict]]:
                 "want": stats.summarize_throughput(series, 100, seconds),
             }
         )
+    # Rates that step down partway, and some that only seem to: the rate limit's cases.
+    for seconds, levels in (
+        (10.0, ((30, 940.0), (70, 310.0))),  # holds for 3 s, then 310 to the end
+        (10.0, ((30, 940.0), (30, 300.0), (40, 940.0))),  # a dip that recovers
+        (20.0, ((120, 940.0), (80, 500.0))),  # a speed boost that ends at 12 s
+        (10.0, ((85, 940.0), (15, 300.0))),  # a drop too late to tell
+        (10.0, ((100, 650.0),)),  # one level
+    ):
+        series = [
+            int(mbps * (1 + rng.gauss(0, 0.08)) * 12_500)  # Mb/s to bytes in 100 ms
+            for count, mbps in levels
+            for _ in range(count)
+        ]
+        out["summarize_throughput"].append(
+            {
+                "bins": series,
+                "bin_ms": 100,
+                "seconds": seconds,
+                "want": stats.summarize_throughput(series, 100, seconds),
+            }
+        )
 
     for idle, down, up in (
         (20.0, 22.0, 80.0),

@@ -238,7 +238,9 @@ Browser runs, `texas2step run --json` and `/measure/full` share one shape (snake
   "download": {"mbps": 941.2, "peak_mbps": 948.0, "bytes": …, "timeline": [ …per 100 ms… ],
                "per_stream_mbps": [ … ], "loaded_latency": { …latency stats… },
                "connections": {"setup_ms": [30.3, …], "lost": 0, "tls": true},
-               "loaded_probes": [17.1, …], …},
+               "loaded_probes": [17.1, …],
+               "rate_limit": {"from_mbps": 938.2, "to_mbps": 312.9, "at_s": 4.2,
+                              "before_bytes": 427000000}, …},
   "one_stream": { …same as download, with one stream and no loaded latency… },
   "upload": { …same as download… },
   "loss": {"transport": "webrtc", "sent": 500, "received": 499, "loss_pct": 0.2,
@@ -271,7 +273,11 @@ Without stamps, `call.basis` is `"round trip"` and there are no `up` and `down`.
 `responsiveness.basis` is `"ippm"` when new connections were timed during the transfers
 (`connections`; from the command line also `tcp_ms`, `tls_ms` and `http_ms`), and
 `"latency under load"` for results from before. `one_stream` is left out when the test
-used one stream or skipped it. `call.mos_rating` is the score's own
+used one stream or skipped it. Each transfer's `rate_limit` is where its rate stepped down
+and stayed down: the rate before (`from_mbps`), when it fell, in seconds from the start of
+the transfer (`at_s`), what the transfer had moved by then (`before_bytes`) and the rate
+after (`to_mbps`); `null` when it held, and left out of results from before it. See
+[Rate limit](methodology.md#rate-limit). `call.mos_rating` is the score's own
 rating, and `call.rating` the one shown: lower when a gap is long enough for a caller to
 hear ([Quality and user experience](experience.md#adjustments-for-what-callers-hear)). Each is left out without the figures it
 comes from: `call` without echoed UDP probes, `responsiveness` without latency-under-load

@@ -37,6 +37,17 @@ export interface ThroughputResult {
    * on the loaded connection itself (HTTP/2 or 3 only). */
   connections?: NewConnections;
   loaded_probes?: number[];
+  /** Where the rate stepped down and stayed down; absent from results saved before it. */
+  rate_limit?: RateLimit | null;
+}
+
+/** A rate that held, then stepped down and stayed down to the end of the transfer: a shaper,
+ * a policer or the end of a speed boost. `before_bytes` is what the transfer moved first. */
+export interface RateLimit {
+  from_mbps: number;
+  to_mbps: number;
+  at_s: number;
+  before_bytes: number;
 }
 
 /** New connections opened while a transfer ran: each one's open time (TCP connect, TLS
