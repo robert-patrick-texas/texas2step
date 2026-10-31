@@ -48,7 +48,8 @@ from . import __version__
 from .config import Settings
 
 CACHE = Path("/var/cache/texas2step/update")
-LOCK = Path("/run/lock/texas2step-update.lock")
+# In a folder only root writes: in /run/lock anyone could take it first and hold it.
+LOCK = CACHE.parent / "update.lock"
 PYTHON = "/usr/bin/python3"  # the setup tool runs on the system's Python, as by hand
 SETUP = "texas2step-setup"
 PLAN = "texas2step-plan.json"

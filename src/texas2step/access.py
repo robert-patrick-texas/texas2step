@@ -468,7 +468,7 @@ class Codes:
         """When the pass was issued, if it is ours and still good: issued after ``ended``,
         within access_pass_hours, and not more than PASS_AHEAD seconds ahead of now."""
         stamp, _, sig = (token or "").partition(".")
-        if not stamp.isdigit() or len(stamp) > 12:
+        if not (stamp.isascii() and stamp.isdigit()) or len(stamp) > 12:  # not "²"
             return None
         issued = int(stamp)
         now = now if now is not None else time.time()

@@ -146,6 +146,9 @@ def test_forwarded_for_only_from_trusted_proxy(client, settings):
     assert me["ip"] == "203.0.113.9"
     assert me["family"] == "IPv4"
     assert me["via_proxy"] is True
+    # Behind $proxy_add_x_forwarded_for: what the visitor sent, then the address nginx saw.
+    added = {"x-forwarded-for": "127.0.0.1, 10.1.2.3, 203.0.113.9"}
+    assert client.get("/api/v1/whoami", headers=added).json()["ip"] == "203.0.113.9"
 
 
 def test_diag_http_direct(client):
@@ -263,6 +266,8 @@ def test_results_round_trip(client):
 
 def test_results_validation(client):
     assert client.post("/api/v1/results", json={"version": 2}).status_code == 422
+    for odd in ({"server": "x"}, {"tool": {"a": 1}}, {"tool": 7}):
+        assert client.post("/api/v1/results", json={"version": 1, **odd}).status_code == 422
     assert client.post("/api/v1/results", content=b"nope").status_code == 400
     assert client.get("/api/v1/results/missing").status_code == 404
 

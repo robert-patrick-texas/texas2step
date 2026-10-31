@@ -31,7 +31,9 @@ def client_address(request: HTTPConnection) -> tuple[str, int | None]:
         forwarded = request.headers.get("x-forwarded-for")
         real = request.headers.get("x-real-ip")
         if forwarded:
-            return forwarded.split(",")[0].strip(), None
+            # The last address is the one the proxy saw. nginx's $proxy_add_x_forwarded_for
+            # adds it after any the visitor sent, which the visitor can make up.
+            return forwarded.split(",")[-1].strip(), None
         if real:
             return real.strip(), None
         if any(name in request.headers for name in PROXY_HEADERS):

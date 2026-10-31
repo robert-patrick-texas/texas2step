@@ -35,6 +35,10 @@ async def save(request: Request) -> dict[str, Any]:
         raise HTTPException(400, "body must be JSON") from exc
     if not isinstance(result, dict) or result.get("version") != 1:
         raise HTTPException(422, "expected a texas2step result object (version 1)")
+    if not isinstance(result.get("server") or {}, dict) or not isinstance(
+        result.get("tool") or "", str
+    ):
+        raise HTTPException(422, "a result's server is an object, and its tool a string")
     # A visitor outside internal_networks isn't told the version, so its page leaves it out.
     # This server served that page, and fills in its own; and its own as the tested
     # server's, when the test was of this server.

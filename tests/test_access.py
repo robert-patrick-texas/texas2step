@@ -326,7 +326,7 @@ def test_passes():
     stamp, _, sig = token.partition(".")
     assert c.pass_expires(f"{int(stamp) + 60}.{sig}", now=1_000_100) is None  # altered
     assert codes(key=access.parse_key(access.new_key())).pass_expires(token, 1_000_100) is None
-    for junk in ("", "abc", "1.2.3", f"{'9' * 20}.{sig}"):
+    for junk in ("", "abc", "1.2.3", f"{'9' * 20}.{sig}", f"\u00b2.{sig}"):  # "²" isn't 2
         assert c.pass_expires(junk, now=1_000_100) is None
 
 

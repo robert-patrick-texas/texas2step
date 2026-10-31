@@ -84,7 +84,7 @@ def verify(key: bytes, headers: Mapping[str, str], body: bytes, now: float) -> s
     """Why the request isn't a signed one from the cluster, or None if it is. The caller
     still checks that its one-time value is new."""
     stamp, nonce, signature = (headers.get(name, "") for name in HEADERS)
-    if not (stamp.isdigit() and len(nonce) == 32 and len(signature) == 64):
+    if not (stamp.isascii() and stamp.isdigit() and len(nonce) == 32 and len(signature) == 64):
         return "not a signed request from another server"
     if abs(now - int(stamp)) > SKEW:
         return f"its time is more than {SKEW // 60} minutes off this server's clock"

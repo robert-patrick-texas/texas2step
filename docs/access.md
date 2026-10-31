@@ -301,11 +301,13 @@ browser ([Security](security.md#the-desks-tools)).
 
 Loopback addresses are always inside, so commands on the server itself need no code. The
 service sees each visitor's address through nginx (`trusted_proxies`), which the packaged
-snippets send as `X-Forwarded-For`, replacing any the visitor sent. A request that comes
-through a proxy (it has `X-Forwarded-Proto`, `X-Forwarded-Prefix`, `X-Forwarded-Host` or
-`Forwarded`) without the visitor's address counts as outside, not as the proxy's own
-loopback address, so a hand-written nginx location that forgets
-`proxy_set_header X-Forwarded-For $remote_addr;` fails closed. If anything else sits in
+snippets send as `X-Forwarded-For`, replacing any the visitor sent. Of several addresses
+in it, as `$proxy_add_x_forwarded_for` sends, the last is taken: the one nginx saw. A
+request that comes through a proxy (it has `X-Forwarded-Proto`, `X-Forwarded-Prefix`,
+`X-Forwarded-Host` or `Forwarded`) without the visitor's address counts as outside, not as
+the proxy's own loopback address. That doesn't make a hand-written nginx location safe
+without `proxy_set_header X-Forwarded-For $remote_addr;`: nginx then passes on any
+`X-Forwarded-For` the visitor sent, and with it an address inside. If anything else sits in
 front of nginx and hides visitors' addresses, set nginx's
 [real IP](https://nginx.org/en/docs/http/ngx_http_realip_module.html) from it, and never
 list that device's addresses in `internal_networks`: every visitor would then count as

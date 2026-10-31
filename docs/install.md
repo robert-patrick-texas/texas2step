@@ -937,6 +937,8 @@ longer need them, for example `sudo rm -r /opt/texas2step`.
 * `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Prefix` are believed only
   from `trusted_proxies` (by default, nginx on the same host). A request from a trusted
   proxy that names no visitor address counts as outside, not as the proxy's loopback.
+  An nginx location of your own must set `X-Forwarded-For` as the packaged snippet does:
+  without it, nginx passes on any the visitor sent.
 * For a server open to the Internet, turn on [access codes](access.md) and set
   `internal_networks`. Then a visitor from outside gets only the page that asks for the
   code until they enter it, with no version number, and [three wrong codes in a

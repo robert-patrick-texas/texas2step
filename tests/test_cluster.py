@@ -67,6 +67,8 @@ def test_signatures():
     assert "minutes off" in str(cluster.verify(key, headers, body, now + cluster.SKEW + 1))
     assert "minutes off" in str(cluster.verify(key, headers, body, now - cluster.SKEW - 1))
     assert "not a signed" in str(cluster.verify(key, {}, body, now))
+    odd = {**headers, "x-texas2step-time": "\u00b2"}  # "²": a digit, but not one int() reads
+    assert "not a signed" in str(cluster.verify(key, odd, body, now))
     assert headers["x-texas2step-nonce"] != cluster.signed(key, body, now)["x-texas2step-nonce"]
 
 
