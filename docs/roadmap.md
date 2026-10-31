@@ -10,11 +10,8 @@ or promised: one goes into a release when it's needed, and moves to
 
 Tests that say how a connection will feel to the people using it, not only how fast it
 is. Call quality, responsiveness, one stream and Monitor's call profiles came in
-[2.1.0](#210-2026-10-24).
+[2.1.0](#210-2026-10-24), and rate limits in [2.10.0](#2100-2026-10-30).
 
-- [ ] **Shapers.** A rate that starts high and settles lower after a few seconds is a
-  shaper or policer. The 100 ms throughput timeline already shows it, for several streams
-  and for one, and the test could say so.
 - [ ] **Where is the problem?** A guided comparison of a nearby or internal server with a
   distant one: if both are bad, it's the local network or Wi-Fi; if only the distant one
   is, it's the WAN or the ISP. It would build on the server picker and Monitor's
@@ -216,6 +213,18 @@ test. Today a script runs t2s or the API from cron and keeps the JSON itself.
 ## Done
 
 Newest first. Each release's notes have the details and its upgrade steps.
+
+### [2.10.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.10.0) (2026-10-30)
+
+- [x] **Rate limit:** a transfer's rate that holds, then steps down and stays down, as a
+  shaper, a policer or the end of a speed boost makes it, is marked on its tile, on the
+  Throughput chart and in All measurements, with the rate before, when it fell and the
+  rate after; `texas2step run` and t2s print it too. Test options gain a 30s duration,
+  long enough to catch a boost a 10 s test ends inside.
+- [x] **The blue star:** the tab icon is the white star on blue in every theme, and the
+  header's star too in Light and Dark.
+- [x] **At a glance:** a page on what texas2step does and where it helps, and the same on
+  one printed page, US Letter or A4.
 
 ### [2.9.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.9.0) (2026-10-29)
 
