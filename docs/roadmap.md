@@ -243,6 +243,13 @@ Worth considering, not urgent, and perhaps not needed.
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.14.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.14.1) (2026-10-31)
+
+- [x] **A packet ring:** a metallic ring around the Test page's start button fills as the
+  packet-loss test's probes go out, with a red notch for each one lost, in each theme's
+  own metal.
+- [x] **Diag's event log** fills the Events card on a laptop.
+
 ### [2.14.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.14.0) (2026-10-31)
 
 - [x] **Device-bound results:** the Test page, `texas2step run` and t2s say when the
