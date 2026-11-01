@@ -16,7 +16,7 @@ import (
 
 func cmdMonitor(ctx context.Context, args []string) error {
 	o := newOptions("monitor", "URL [URL2] [options]", "Continuous UDP probing, as the Monitor page does it: to one server, or to two at once at the same moments.\n"+
-		"On a terminal it shows a panel that redraws in place; piped, a line a second. Ctrl-C stops it.")
+		"On a terminal it shows a panel that redraws in place; piped, or with --lines, a line a second. Ctrl-C stops it.")
 	o.target(false)
 	profile := o.String("profile", "", "path, voice or video: small probes, or a voice or video call's packets scored each 10s (default: as the server says)")
 	rate := o.Float64("rate", 10, "path probes a second")
@@ -26,6 +26,7 @@ func cmdMonitor(ctx context.Context, args []string) error {
 	video := o.Float64("video", 1000, "the video call's kb/s")
 	window := o.Float64("window", 60, "seconds the figures cover, up to 900")
 	seconds := o.Float64("seconds", 0, "stop after this many seconds (default: until Ctrl-C, or a server's limit)")
+	asLines := o.Bool("lines", false, "a line a second on the terminal too, as piped, instead of the panel")
 	only4 := o.Bool("4", false, "IPv4 only: every server over IPv4, so two compare on one family")
 	only6 := o.Bool("6", false, "IPv6 only: every server over IPv6")
 	found, err := o.parse(args, 1, 2)
@@ -62,7 +63,9 @@ func cmdMonitor(ctx context.Context, args []string) error {
 	cfg := monitor.Config{Profile: p, Chosen: p != "", Rate: *rate, Size: *size, VoiceSize: *voice, Every: *every, Video: *video,
 		Window: min(max(*window, 10), 900), Seconds: *seconds}
 
-	panel := !o.json && term.Is(os.Stdout)
+	// Asked first: on Windows it also readies the console for UTF-8, which lines need too.
+	onTerminal := term.Is(os.Stdout)
+	panel := !o.json && !*asLines && onTerminal
 	show.Colour = show.Colour && panel
 	var mu sync.Mutex // one writer at a time
 	lines := &monitor.Lines{W: os.Stdout}

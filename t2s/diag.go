@@ -16,9 +16,10 @@ import (
 func cmdDiag(ctx context.Context, args []string) error {
 	o := newOptions("diag", "URL [options]", "Every way of reaching the server, tried once a second, as the Diag page does it: HTTP/1.1, HTTP/2,\n"+
 		"HTTP/3, WebSocket and UDP, over IPv4 and over IPv6. On a terminal the table redraws in place;\n"+
-		"piped, the events come as lines and the table at the end. Ctrl-C stops it.")
+		"piped, or with --lines, the events come as lines and the table at the end. Ctrl-C stops it.")
 	o.target(false)
 	seconds := o.Float64("seconds", 0, "stop after this many seconds (default: until Ctrl-C, or the server's limit)")
+	asLines := o.Bool("lines", false, "the events as lines and the table at the end on the terminal too, as piped")
 	only4 := o.Bool("4", false, "IPv4 only")
 	only6 := o.Bool("6", false, "IPv6 only")
 	found, err := o.parse(args, 1, 1)
@@ -36,7 +37,9 @@ func cmdDiag(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	live := !o.json && term.Is(os.Stdout)
+	// Asked first: on Windows it also readies the console for UTF-8, which lines need too.
+	onTerminal := term.Is(os.Stdout)
+	live := !o.json && !*asLines && onTerminal
 	show.Colour = show.Colour && live
 	var mu sync.Mutex
 	notice := func(e diag.Event) {

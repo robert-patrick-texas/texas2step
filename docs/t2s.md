@@ -175,9 +175,13 @@ Path: 10 probes/s, 64 B, to two servers at the same moments · window 1 min
 ```
 
 Piped or redirected to a file, it writes a line a second for each server instead, and
-the events between them. `--json` writes JSON lines: `figures` each second, `slice` for
-each 10 seconds scored, `event`, and `summary` at the end. Ctrl-C stops it; the last
-panel stays on the terminal, with the totals since it started.
+the events between them; at the end, the last figures once the last probes are back,
+why it stopped, and the totals. `--lines` writes those lines on the terminal too, where
+Ctrl-C still ends them with the totals. Through a pipe Ctrl-C stops the program reading
+it as well, and the end is lost, unless that program is `tee -i`. `--json` writes JSON
+lines: `figures` each second, `slice` for each 10 seconds scored, `event`, and `summary`
+at the end. Ctrl-C stops it; the last panel stays on the terminal, with the totals since
+it started.
 
 | Option | What it does |
 |---|---|
@@ -189,6 +193,7 @@ panel stays on the terminal, with the totals since it started.
 | `--window SECONDS` | what the figures cover, up to 900 (default 60) |
 | `--seconds N` | stop after this long, from the first probe: the last probes get 1.5 seconds to come back, so a call's last 10 seconds are scored too (default: until Ctrl-C) |
 | `-4`, `-6` | every server over IPv4, or every one over IPv6, so two servers compare over one family (default: each by the address WebRTC finds) |
+| `--lines` | a line a second on the terminal too, as piped, instead of the panel |
 | `--code`, `--json` | as for a test |
 
 A server that stops answering is asked over HTTPS every 2 seconds until it answers, then
@@ -249,13 +254,15 @@ A window too narrow for a whole row has each row's details on the lines under it
 Diag page does, and narrower still its figures too; while Diag runs in a window too short
 for those, each row has a line of its own. The table it leaves when it stops has them all.
 
-Piped, Diag writes the events as lines as they happen, and the whole table once it stops.
+Piped, or with `--lines` on a terminal, Diag writes the events as lines as they happen,
+and the whole table once it stops.
 `--json` writes `event` lines, and a `summary` line with every row at the end.
 
 | Option | What it does |
 |---|---|
 | `-4`, `-6` | IPv4 or IPv6 only |
 | `--seconds N` | stop after this long (default: until Ctrl-C, or the server's Diag limit) |
+| `--lines` | the events as lines and the table at the end on the terminal too, as piped |
 | `--code`, `--json` | as for a test; an address that asks for the code is given it |
 
 ## Access codes

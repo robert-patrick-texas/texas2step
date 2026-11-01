@@ -106,6 +106,49 @@ def test_monitor_prints_its_last_figures_once_then_stops(t2s, live_server):
     assert lines[stop - 2].split()[-1] != "20"  # printed once
 
 
+def on_a_terminal(t2s: Path, *args: str, timeout: float = 30) -> str:
+    """What t2s writes with its output on a terminal (a pty), as when a person runs it."""
+    import pty
+    import select
+    import time
+
+    leader, follower = pty.openpty()
+    p = subprocess.Popen(
+        [str(t2s), *args], stdin=subprocess.DEVNULL, stdout=follower, stderr=subprocess.DEVNULL
+    )
+    os.close(follower)
+    out, end = b"", time.monotonic() + timeout
+    try:
+        while time.monotonic() < end:
+            if select.select([leader], [], [], 0.5)[0]:
+                try:
+                    chunk = os.read(leader, 65536)
+                except OSError:  # EIO: t2s has exited and closed the terminal
+                    break
+                if not chunk:
+                    break
+                out += chunk
+            elif p.poll() is not None:
+                break
+    finally:
+        os.close(leader)
+        p.kill()
+        p.wait()
+    return out.decode(errors="replace")
+
+
+def test_lines_on_a_terminal_as_piped(t2s, live_server):
+    panel = on_a_terminal(t2s, "monitor", live_server, "--seconds", "2", "-4")
+    assert "\x1b[?1049h" in panel  # the panel, on the terminal's alternate screen
+    lines = on_a_terminal(t2s, "monitor", live_server, "--seconds", "2", "-4", "--lines")
+    assert "\x1b[" not in lines
+    assert "Stopped after 2s, as --seconds asked." in lines
+    assert "Monitored for 2s" in lines
+    diag = on_a_terminal(t2s, "diag", live_server, "--seconds", "2", "-4", "--lines")
+    assert "\x1b[" not in diag
+    assert "IPv4 · server 127.0.0.1" in diag
+
+
 def test_monitor_holds_to_one_family(t2s, live_server):
     r = run(t2s, "monitor", live_server, "-6", "--seconds", "1", timeout=30)
     assert r.returncode == 1
