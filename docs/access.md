@@ -271,6 +271,17 @@ From the command line, the code goes with `--code`, or in `TEXAS2STEP_CODE`:
 texas2step run https://speedtest.example.net/texas2step --code maple.river.42
 ```
 
+A script on a server takes the code from `access show --code-only`, which prints the
+current code alone. Where there is none to be sure of, it prints nothing, says why on
+stderr and exits with status 1: with access codes off, and when it can't read
+`access_lockouts_file`, where a shuffle would have changed the code. A wrong code sent
+counts toward a lockout of the network it comes from, so stop there:
+
+```bash
+code=$(sudo texas2step access show --code-only) || exit 1
+TEXAS2STEP_CODE=$code t2s diag https://speedtest.example.net/texas2step --seconds 30
+```
+
 ## What needs what
 
 | | Needs |

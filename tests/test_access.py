@@ -1118,6 +1118,26 @@ def test_access_show_and_words(tmp_path, key_file, capsys):
     assert re.search(r"\nPhrases: +none\n", out)
 
 
+def test_access_show_code_only(tmp_path, key_file, capsys):
+    conf = config_file(tmp_path, key_file, access_code="daily", internal_networks=["10.0.0.0/8"])
+    cli.main(["access", "show", "--config", conf])
+    shown = re.search(r"Today's code: +(\S+)", capsys.readouterr().out)[1]
+    cli.main(["access", "show", "--code-only", "--config", conf])
+    assert capsys.readouterr().out == shown + "\n"  # the code alone, for a script
+
+    # A shuffle it can't read might have changed the code: none, rather than a wrong one.
+    (tmp_path / "access.db").write_bytes(b"not a database")
+    with pytest.raises(SystemExit, match="so a shuffle may have changed the code"):
+        cli.main(["access", "show", "--code-only", "--config", conf])
+    assert capsys.readouterr().out == ""
+
+    # Codes off: none, though the full output shows what the daily code would be.
+    off = config_file(tmp_path, key_file)
+    with pytest.raises(SystemExit, match='access codes are off \\(access_code = "off"\\)'):
+        cli.main(["access", "show", "--code-only", "--config", off])
+    assert capsys.readouterr().out == ""
+
+
 def test_access_lockout_commands(tmp_path, key_file, capsys):
     db = tmp_path / "access.db"
     conf = config_file(tmp_path, key_file, access_code="daily", internal_networks=["10.0.0.0/8"])

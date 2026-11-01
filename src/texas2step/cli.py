@@ -564,6 +564,18 @@ def cmd_access_show(args: argparse.Namespace) -> None:
     codes = _access_codes(settings)
     state = _access_state(settings)
     current = codes.current(datetime.now(UTC), state.shuffle, state.shuffled_at)
+    if args.code_only:
+        # For scripts: the code alone, or none. One that might be wrong would count as a
+        # wrong code where it's sent, toward a lockout of the network it's sent from.
+        if settings.access_code == "off":
+            sys.exit('texas2step: access codes are off (access_code = "off"): no code')
+        if state.unread:
+            sys.exit(
+                f"texas2step: can't read {settings.access_lockouts_file} ({state.unread}), "
+                "so a shuffle may have changed the code (try sudo)"
+            )
+        print(current.code)
+        return
     this, last = CODE_NAMES[codes.interval]
     if settings.access_code == "off":
         print('Access codes are off (access_code = "off"). Were they daily, the code would be:')
@@ -1661,6 +1673,12 @@ def build_parser() -> argparse.ArgumentParser:
         "show", help="the current code, when it changes, and a fingerprint to compare servers"
     )
     settings_file(show)
+    show.add_argument(
+        "--code-only",
+        action="store_true",
+        help="the current code alone, for scripts; where there's none to be sure of, "
+        "nothing, the reason on stderr and exit status 1",
+    )
     show.set_defaults(func=cmd_access_show)
     words = acc_sub.add_parser("words", help="the words codes are made of, one per line")
     settings_file(words)
