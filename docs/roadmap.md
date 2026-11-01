@@ -243,6 +243,14 @@ Worth considering, not urgent, and perhaps not needed.
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.15.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.15.0) (2026-10-31)
+
+- [x] **`--lines` for `t2s monitor` and `t2s diag`:** the lines and the table a pipe gets,
+  on the terminal, where Ctrl-C still ends them with the totals.
+- [x] **`texas2step access show --code-only`:** the current code alone, for scripts, or
+  nothing and exit status 1 where it can't be sure of it.
+- [x] **t2s monitor's ending:** piped, the last figures once, then why it stopped.
+
 ### [2.14.3](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.14.3) (2026-10-31)
 
 - [x] **Fixes from a review of the whole code:** latency under load from the command line
