@@ -1,4 +1,4 @@
-.PHONY: dev web web-watch test lint fmt check docs docs-watch sheet deb image version upgrade t2s t2s-test
+.PHONY: dev web web-watch test lint fmt check docs docs-watch sheet deb image version upgrade t2s t2s-deb t2s-test
 
 # t2s, the Go client: the platforms it is built for (Go's names; darwin is macOS), each a
 # file of its own in dist/.
@@ -61,6 +61,9 @@ t2s:            ## build t2s for Linux, macOS and Windows into dist/: t2s-linux-
 	    CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath \
 	        -ldflags "-s -w -X main.version=$$v" -o ../dist/t2s-$$name-$$arch$$ext . || exit 1; \
 	done
+
+t2s-deb:        ## build the t2s package from make t2s's files: dist/t2s_<version>-1_amd64.deb and _arm64.deb
+	packaging/build-t2s-deb.sh
 
 t2s-test:       ## gofmt, go vet (Linux, macOS and Windows) and go test for t2s
 	@cd t2s && test -z "$$(gofmt -l .)" || { echo "gofmt would change:"; gofmt -l .; exit 1; }

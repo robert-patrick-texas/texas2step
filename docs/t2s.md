@@ -24,9 +24,11 @@ files beside the server's package:
 | `t2s-macos-amd64` | macOS on Intel |
 | `t2s-windows-amd64.exe` | Windows 10 and 11 on x86-64 |
 | `t2s-windows-arm64.exe` | Windows 11 on ARM |
+| `t2s_<version>-1_amd64.deb` | [The t2s package](#the-t2s-package-on-debian-and-ubuntu) for Debian and Ubuntu on x86-64 |
+| `t2s_<version>-1_arm64.deb` | The t2s package for Debian and Ubuntu on ARM |
 
 `https://github.com/robert-patrick-texas/texas2step/releases/latest/download/<file>`
-always gives the newest. On Linux:
+always gives the newest of the files without a version in their names. On Linux:
 
 ```bash
 sudo curl -fLo /usr/local/bin/t2s \
@@ -70,6 +72,23 @@ To run it as `t2s` from any folder, add that folder to your `Path`:
     [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\t2s", "User")
 ```
 
+### The t2s package, on Debian and Ubuntu
+
+The t2s package installs t2s with its tab completion and man page, and apt keeps track of
+all three:
+
+```bash
+cd "$(mktemp -d)"
+curl -sL https://api.github.com/repos/robert-patrick-texas/texas2step/releases/latest \
+    | grep -o 'https://[^"]*/t2s_[^"]*_amd64\.deb' | xargs curl -sLO
+sudo apt install ./t2s_*_amd64.deb
+```
+
+Use `arm64` for `amd64` on ARM. The package puts t2s in `/usr/bin`, and its bash
+completion and man page under `/usr/share`, where packages put theirs.
+`sudo apt remove t2s` removes all three. Install the package or the file, not both: a t2s
+in `/usr/local/bin` comes ahead of `/usr/bin` in `PATH`, so it would hide the package's.
+
 ### Checking a download
 
 The release notes list each file's SHA-256, and GitHub shows it beside each file on the
@@ -112,7 +131,8 @@ Both go under `/usr/local/share`: bash and man look there wherever the command i
 package writes there. The completion needs the `bash-completion` package
 (`sudo apt install bash-completion` if it's missing). `sudo t2s install --remove` takes
 both away. A t2s anywhere else, such as `~/.local/bin`, still runs, but `t2s install`
-leaves it alone.
+leaves it alone. [The t2s package](#the-t2s-package-on-debian-and-ubuntu) installs both
+itself, so with it `t2s install` has nothing to do.
 
 ## A test
 
@@ -361,7 +381,12 @@ What's new: https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.7
 
 It needs to write to that folder: for `/usr/local/bin`, run it with `sudo`. Nothing else
 is left on disk. Where [`t2s install`](#tab-completion-and-the-man-page-on-linux) wrote
-the bash completion and man page, the new t2s writes its own over them. `--yes` installs without asking, for running it on a schedule:
+the bash completion and man page, the new t2s writes its own over them.
+
+A t2s from [the t2s package](#the-t2s-package-on-debian-and-ubuntu) is updated as a
+package, so apt's records of it stay true. `sudo t2s update` downloads the release's
+`t2s_<version>-1_<arch>.deb` and checks it against its SHA-256, runs the t2s in it once,
+then installs it with `dpkg -i`. It needs `sudo`; `--check` doesn't. `--yes` installs without asking, for running it on a schedule:
 
 ```bash
 # /etc/cron.d/t2s: every Monday at 04:00

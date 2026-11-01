@@ -1,0 +1,49 @@
+# The t2s package, for Debian and Ubuntu: t2s, its bash completion and its man page.
+# packaging/build-t2s-deb.sh (make t2s-deb) sets the ${T2S_...} values and runs nfpm.
+name: t2s
+arch: ${T2S_ARCH}
+platform: linux
+version: ${T2S_VERSION}
+release: ${T2S_REVISION}
+section: net
+priority: optional
+maintainer: Robert Patrick <193846785+robert-patrick-texas@users.noreply.github.com>
+homepage: https://github.com/robert-patrick-texas/texas2step
+license: Apache-2.0
+description: |-
+  texas2step's command-line client
+  t2s tests the network between this computer and a texas2step server, as the
+  server's pages do: download and upload throughput, latency and jitter idle and
+  under load, UDP packet loss and call quality, continuous probing to one server
+  or two, and every way of reaching a server, over IPv4 and IPv6.
+recommends:
+  - bash-completion
+contents:
+  - src: ${T2S_BIN}
+    dst: /usr/bin/t2s
+    expand: true
+    file_info: {mode: 0755}
+  - src: ${T2S_SHARE}/bash-completion/completions/t2s
+    dst: /usr/share/bash-completion/completions/t2s
+    expand: true
+    file_info: {mode: 0644}
+  - src: ${T2S_SHARE}/man/man1/t2s.1.gz
+    dst: /usr/share/man/man1/t2s.1.gz
+    expand: true
+    file_info: {mode: 0644}
+  - src: packaging/t2s/copyright
+    dst: /usr/share/doc/t2s/copyright
+    file_info: {mode: 0644}
+  - src: ${T2S_SHARE}/doc/changelog.Debian.gz
+    dst: /usr/share/doc/t2s/changelog.Debian.gz
+    expand: true
+    file_info: {mode: 0644}
+  - src: ${T2S_SHARE}/doc/modules.txt
+    dst: /usr/share/doc/t2s/modules.txt
+    expand: true
+    file_info: {mode: 0644}
+  - src: packaging/t2s/lintian-overrides
+    dst: /usr/share/lintian/overrides/t2s
+    file_info: {mode: 0644}
+deb:
+  compression: xz

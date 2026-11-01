@@ -54,6 +54,7 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make version` | Print the version |
 | `make upgrade` | Move every Python, npm and Go dependency to its newest release, then rebuild the UI |
 | `make t2s` | Build t2s for Linux, macOS and Windows (amd64, arm64) into `dist/` |
+| `make t2s-deb` | Build the t2s package from `make t2s`'s files: `dist/t2s_<version>-1_amd64.deb` and `_arm64.deb` |
 | `make t2s-test` | gofmt, go vet (for Linux, macOS and Windows) and go test for t2s |
 
 ## Project layout
@@ -157,6 +158,18 @@ Its version is the project's: `make t2s` stamps `make version` into each build
   `t2s __share DIR [bash] [man]` writes the bash completion and the man page under `DIR`,
   as `t2s install`, `t2s update` and a package's build do. An option that takes one of a
   few values names them with `oneOf`, so TAB offers them.
+* `make t2s-deb` (`packaging/build-t2s-deb.sh`) builds the t2s package for amd64 and
+  arm64 from `make t2s`'s Linux files, with [nfpm](https://nfpm.goreleaser.com), which
+  `go run` fetches at the version the script pins. `packaging/t2s/nfpm.yaml` says what
+  goes in: t2s at `/usr/bin/t2s`, the bash completion and the gzipped man page, which
+  this computer's t2s writes (`__share`), the copyright, and `modules.txt`, the Go
+  standard library and each module built into t2s, with its license's text. The script
+  checks that the files are this version's and from one build, takes file times from
+  the last commit so a rebuild gives the same packages, and runs lintian. The packages
+  are named as Debian names them, `t2s_<version>-<revision>_<arch>.deb`, with
+  underscores, so they never match `texas2step-*-amd64.deb`, the server's package, which
+  `docs/install.md` finds in a release by that pattern. `t2s update` finds its own by
+  the name too.
 * `tests/methodology-cases.json` is the Python engine's answers to a set of inputs:
   percentiles, summaries, throughput, the loss summary, one-way delays, call quality,
   responsiveness and bufferbloat. t2s's tests check its own answers against them, and
@@ -303,6 +316,8 @@ pushes them (see [Release](#release)).
      tells the version in each page it serves. No UI rebuild is needed for a new version.
    * The CLI (`texas2step --version`).
    * `packaging/build-deb.sh`, for the package version and file name.
+   * `make t2s`, which stamps it into each t2s, and `packaging/build-t2s-deb.sh`, for the
+     t2s package's version and file names.
    * `make version`, which prints it for scripts.
 
    The documentation doesn't repeat it.
@@ -312,8 +327,9 @@ pushes them (see [Release](#release)).
    carry the value across.
 3. Run `make upgrade`, so the release ships every dependency's newest version, with its
    security and bug fixes.
-4. Run `make check`, `make deb` and `make t2s`. The package installs exactly the
-   versions in `uv.lock`, and t2s is built with exactly those in `t2s/go.sum`.
+4. Run `make check`, `make deb`, `make t2s` and `make t2s-deb`. The package installs
+   exactly the versions in `uv.lock`, and t2s is built with exactly those in
+   `t2s/go.sum`.
 5. Commit (including the updated lockfiles), tag and publish the package:
 
 ```bash
@@ -322,6 +338,7 @@ git commit -am "Release $v" && git tag "v$v" && git push origin main "v$v"
 gh release create "v$v" "dist/texas2step-$v-1-amd64.deb" dist/texas2step-setup \
     dist/t2s-linux-amd64 dist/t2s-linux-arm64 dist/t2s-macos-amd64 dist/t2s-macos-arm64 \
     dist/t2s-windows-amd64.exe dist/t2s-windows-arm64.exe \
+    "dist/t2s_$v-1_amd64.deb" "dist/t2s_$v-1_arm64.deb" \
     --title "texas2step $v" --generate-notes
 ```
 

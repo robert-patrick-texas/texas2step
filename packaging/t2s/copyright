@@ -1,0 +1,31 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: t2s
+Upstream-Contact: Robert Patrick <193846785+robert-patrick-texas@users.noreply.github.com>
+Source: https://github.com/robert-patrick-texas/texas2step
+
+Files: *
+Copyright: 2026 Robert Patrick
+License: Apache-2.0
+
+Files: usr/bin/t2s
+Copyright: 2026 Robert Patrick; the Go Authors; the authors of each Go module built in
+License: Apache-2.0 and various
+Comment: t2s is one static Go program. It holds the Go standard library and the Go
+ modules it is built with, each under its own license: /usr/share/doc/t2s/modules.txt
+ names each one, with its version and its license's text.
+
+License: Apache-2.0
+ Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ use this file except in compliance with the License. You may obtain a copy of
+ the License at
+ .
+ http://www.apache.org/licenses/LICENSE-2.0
+ .
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ License for the specific language governing permissions and limitations under
+ the License.
+ .
+ On Debian systems, the complete text of the Apache License, Version 2.0 can
+ be found in "/usr/share/common-licenses/Apache-2.0".

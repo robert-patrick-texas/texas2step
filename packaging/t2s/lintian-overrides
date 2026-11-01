@@ -1,0 +1,5 @@
+# Distributed from GitHub, not the Debian archive.
+t2s: initial-upload-closes-no-bugs
+# One static Go program (no cgo), so the same file runs on every Linux, as the release's
+# t2s-linux-amd64 and t2s-linux-arm64 do.
+t2s: statically-linked-binary [usr/bin/t2s]
