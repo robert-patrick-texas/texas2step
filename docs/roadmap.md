@@ -176,6 +176,31 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
 
 [t2s](t2s.md), the Go client for Linux, macOS and Windows, could also:
 
+- [ ] **Tab completion, a man page and a .deb, on Linux.** `t2s install` would write the
+  bash completion and a man page for a t2s in `/usr/local/bin` or `/usr/bin`, under
+  `/usr/local/share`, where bash-completion and man look. The completion would ask t2s
+  itself for its commands and options, through a hidden `t2s __complete`, so it never
+  needs changing when they do. The man page would come from the same options as `--help`.
+  A t2s .deb for amd64 and arm64, built with nfpm, would install both in Debian's places.
+  `t2s update` would act on how t2s was installed, which it would ask dpkg:
+  - a copy installed by hand updates itself as now, and rewrites its man page;
+  - one from the t2s .deb fetches the newer .deb and installs it, so dpkg's records stay
+    right;
+  - one from the server's package says to run `sudo texas2step update`, which updates
+    both.
+- [ ] **Packages for Alma, Rocky and RHEL.** t2s runs on them unchanged, since it is one
+  static file. nfpm would build an .rpm (x86_64, aarch64) from the .deb's settings.
+  `t2s update` would ask rpm who installed it, as it asks dpkg, and install a newer .rpm
+  with dnf. To settle first:
+  - signing the packages with a GPG key, as many RHEL sites require; one key could sign
+    the .deb too;
+  - sudo's PATH on RHEL 9 and earlier leaves out `/usr/local/bin`, so a copy there
+    updates with `sudo /usr/local/bin/t2s update`;
+  - SELinux labels on a t2s moved into place with `mv` rather than copied;
+  - a test that installs the .rpm in Alma and Rocky containers.
+
+  The server on RHEL would be a separate, larger job: its Python environment, nginx's
+  layout, SELinux for nginx, and firewalld.
 - [ ] **Come with the server's package**, once it has a stable baseline: the package
   would carry every platform's t2s, so each server can offer it for download from its own
   address, and `t2s update` could update from the server it tests, for networks without
