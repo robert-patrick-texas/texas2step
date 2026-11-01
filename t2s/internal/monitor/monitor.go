@@ -55,6 +55,9 @@ type Config struct {
 type Event struct {
 	At   time.Time `json:"time"`
 	Text string    `json:"text"`
+	// Ends: it says why Monitor stops, at a time limit or a server's. Lines and JSON
+	// print it after the last figures, which come once the last probes are back.
+	Ends bool `json:"-"`
 }
 
 type point struct {
@@ -148,6 +151,7 @@ type Monitor struct {
 	startedAt float64
 	firstSent float64 // wall ms at the first probe: the time limit counts from it, as the call's slices do
 	settling  float64 // wall ms at the time limit, while the last probes come back
+	lastOut   bool    // the last probe before the time limit has gone out
 	stopped   float64
 	events    []Event
 	ended     string // why it stopped, where it wasn't Ctrl-C
@@ -258,7 +262,7 @@ func (m *Monitor) Start(ctx context.Context) error {
 		return fmt.Errorf("%s is unreachable", m.Dests[0].info.Name(m.Dests[0].t))
 	}
 	m.mu.Lock()
-	m.running, m.held = true, ""
+	m.running, m.held, m.lastOut = true, "", false
 	m.startedAt = wall()
 	for _, d := range m.Dests {
 		d.lastEcho = m.startedAt
@@ -434,8 +438,10 @@ func (d *Dest) push(p point) {
 	}
 }
 
-func (m *Monitor) event(text string) {
-	e := Event{At: time.Now(), Text: text}
+func (m *Monitor) event(text string) { m.emit(Event{At: time.Now(), Text: text}) }
+
+// emit keeps e for the panel and passes it on. Called with m.mu held.
+func (m *Monitor) emit(e Event) {
 	m.events = append(m.events, e)
 	if len(m.events) > 300 {
 		m.events = m.events[1:]
@@ -501,6 +507,9 @@ func (m *Monitor) schedule() {
 			}
 			d.beat = now
 			d.probe.send(seq, size)
+		}
+		if charted && m.limit.Ms > 0 && now+every-m.firstSent >= m.limit.Ms-every/2 {
+			m.lastOut = true // the next is past the limit: this was the last
 		}
 	}
 	m.every(ctx, time.Duration(every*float64(time.Millisecond)), func() { send(size, -1, true) })
@@ -746,7 +755,7 @@ func (m *Monitor) end(why string) {
 		return
 	}
 	m.ended = why
-	m.event(why)
+	m.emit(Event{At: time.Now(), Text: why, Ends: true})
 	m.stopLocked()
 	m.cancel()
 }
@@ -761,7 +770,7 @@ func (m *Monitor) atLimit(now float64) {
 	if m.limit.Who == "" {
 		m.ended = fmt.Sprintf("Stopped after %s, as --seconds asked.", Span(m.limit.Ms/1000))
 	}
-	m.event(m.ended)
+	m.emit(Event{At: time.Now(), Text: m.ended, Ends: true})
 	m.settling = max(now, m.firstSent+m.limit.Ms) // the probes sent cover the limit to its end
 	m.stopSend()
 }
@@ -963,6 +972,23 @@ type Snapshot struct {
 func (m *Monitor) Snapshot() Snapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.snapshot()
+}
+
+// Live is Snapshot while Monitor's figures still move on their own: false once the last
+// probe before its time limit has gone out, or Monitor has stopped. From then on only
+// the last answers, or their loss, change them, and the snapshot as it stops has them.
+func (m *Monitor) Live() (Snapshot, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.running || m.lastOut || m.settling > 0 {
+		return Snapshot{}, false
+	}
+	return m.snapshot(), true
+}
+
+// snapshot is Snapshot, called with m.mu held.
+func (m *Monitor) snapshot() Snapshot {
 	now := wall()
 	scoreAt := now
 	if m.settling > 0 {

@@ -67,10 +67,13 @@ func cmdMonitor(ctx context.Context, args []string) error {
 	var mu sync.Mutex // one writer at a time
 	lines := &monitor.Lines{W: os.Stdout}
 	js := monitor.JSON{W: os.Stdout}
+	var ends *monitor.Event // why it stopped: printed after the last figures
 	notice := func(e monitor.Event) {
 		mu.Lock()
 		defer mu.Unlock()
 		switch {
+		case e.Ends && !panel:
+			ends = &e
 		case o.json:
 			js.Event(e)
 		case !panel:
@@ -114,7 +117,17 @@ loop:
 		case <-m.Done():
 			break loop
 		case <-ticker.C:
-			s := m.Snapshot()
+			// Piped, a line a second until the last probe is out; then its figures print
+			// once, as Monitor stops, with the call slices scored meanwhile (a snapshot
+			// takes its new slices, so none is taken here).
+			var s monitor.Snapshot
+			if panel {
+				s = m.Snapshot()
+			} else if live, ok := m.Live(); ok {
+				s = live
+			} else {
+				continue
+			}
 			mu.Lock()
 			switch {
 			case panel:
@@ -132,6 +145,9 @@ loop:
 	started, stopped := time.UnixMicro(int64(s.Started*1000)), time.UnixMicro(int64(s.Now*1000))
 	totals := m.Totals()
 	why := m.Ended()
+	mu.Lock()
+	held := ends
+	mu.Unlock()
 	if panel {
 		fmt.Print(term.Normal)
 		// The last picture stays on the terminal, held where it stopped.
@@ -139,10 +155,16 @@ loop:
 		fmt.Println()
 	} else if !o.json {
 		lines.Tick(s)
+		if held != nil {
+			lines.Event(*held)
+		}
 		fmt.Println()
 	}
 	if o.json {
 		js.Tick(s)
+		if held != nil {
+			js.Event(*held)
+		}
 		js.Totals(started, stopped, why, totals)
 	} else {
 		fmt.Println(strings.Join(monitor.Summary(started, stopped, why, totals), "\n"))

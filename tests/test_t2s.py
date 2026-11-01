@@ -93,6 +93,19 @@ def test_monitor_probes_and_sums_up(t2s, live_server):
     assert total["lost"] <= 2
 
 
+def test_monitor_prints_its_last_figures_once_then_stops(t2s, live_server):
+    # Past --seconds it waits for the last probes to come back, its figures held at the
+    # limit: piped, they print once as it stops, the last probe's with them, and then why
+    # it stopped, not again each second meanwhile.
+    r = run(t2s, "monitor", live_server, "--seconds", "2", "-4", timeout=30)
+    assert r.returncode == 0, r.stderr
+    lines = r.stdout.splitlines()
+    stop = next(i for i, line in enumerate(lines) if line.endswith("as --seconds asked."))
+    assert lines[stop + 1] == ""  # then the summary
+    assert lines[stop - 1].split()[-1] == "20"  # every probe: 10 a second for 2 s
+    assert lines[stop - 2].split()[-1] != "20"  # printed once
+
+
 def test_monitor_holds_to_one_family(t2s, live_server):
     r = run(t2s, "monitor", live_server, "-6", "--seconds", "1", timeout=30)
     assert r.returncode == 1
