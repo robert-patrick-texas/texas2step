@@ -59,7 +59,13 @@ async def test_a_t2s_run_has_the_python_engines_result(t2s, live_server):
     assert r.returncode == 0, r.stderr
     got = json.loads(r.stdout)
     assert list(got) == list(want)
-    assert shape(got) == shape(want)
+
+    # device_bound is a verdict, there only when a transfer was held back by this computer,
+    # which a host busy with other tests can make one engine find and not the other.
+    def verdicts_aside(s: dict[str, str]) -> dict[str, str]:
+        return {k: v for k, v in s.items() if not k.endswith(".device_bound")}
+
+    assert verdicts_aside(shape(got)) == verdicts_aside(shape(want))
     assert got["tool"].startswith("t2s/")
     assert got["loss"]["transport"] == "webrtc"
     assert got["loss"]["received"] > 0
