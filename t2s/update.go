@@ -171,6 +171,13 @@ func updatePackage(ctx context.Context, c *http.Client, rel *update.Release, exe
 	if err != nil {
 		return err
 	}
+	// dpkg says the name of the file it unpacks: the release's reads better than the
+	// download's. Only a plain name, so a mirror's can't place it outside tmp.
+	if name := rel.Asset.Name; filepath.Base(name) == name && name != "." && name != ".." {
+		if named := filepath.Join(tmp, name); os.Rename(deb, named) == nil {
+			deb = named
+		}
+	}
 	bin, err := update.Unpack(ctx, deb, filepath.Dir(exe))
 	if err != nil {
 		return err
