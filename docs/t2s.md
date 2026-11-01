@@ -336,8 +336,11 @@ t2s update --check
 ```
 
 ```
-t2s 2.7.0 (2026-11-20) is available; this is 2.6.0. Install it with: t2s update
+t2s 2.7.0 (2026-11-20) is available; this is 2.6.0. Install it with: sudo /usr/local/bin/t2s update
 ```
+
+It names `sudo`, with t2s's whole path, where you can't write to t2s's folder. Some
+systems' sudo doesn't search `/usr/local/bin`, so the whole path works on all of them.
 
 `t2s update` asks, then installs it over itself:
 

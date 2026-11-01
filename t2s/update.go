@@ -37,6 +37,9 @@ func cmdUpdate(o *options) func(context.Context, []string) error {
 		}
 		switch pkg {
 		case "":
+			if exeErr == nil && !canWrite(filepath.Dir(exe)) {
+				how = "sudo " + exe + " update" // sudo's PATH may leave out /usr/local/bin
+			}
 		case "t2s":
 			how = "sudo t2s update"
 		case "texas2step":
