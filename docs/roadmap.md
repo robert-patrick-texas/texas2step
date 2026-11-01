@@ -176,20 +176,6 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
 
 [t2s](t2s.md), the Go client for Linux, macOS and Windows, could also:
 
-- [ ] **Tab completion, a man page and a .deb, on Linux.** `t2s install` would write the
-  bash completion and a man page for a t2s in `/usr/local/bin` or `/usr/bin`, under
-  `/usr/local/share`, where bash-completion and man look. The completion would ask t2s
-  itself for its commands and options, through a hidden `t2s __complete`, so it never
-  needs changing when they do. The man page would come from the same options as `--help`.
-  A t2s .deb for amd64 and arm64, built with nfpm, would install both in Debian's places.
-  `t2s update` would act on how t2s was installed, which it would ask dpkg:
-  - a copy installed by hand updates itself as now, and rewrites its man page;
-  - one from the t2s .deb fetches the newer .deb and installs it, so dpkg's records stay
-    right.
-
-  The server's package doesn't install t2s, so the two packages never share a file. A
-  server gets t2s as any computer does, from the t2s .deb or as a copy, and
-  `sudo t2s update` updates it there too.
 - [ ] **Packages for Alma, Rocky and RHEL.** t2s runs on them unchanged, since it is one
   static file. nfpm would build an .rpm (x86_64, aarch64) from the .deb's settings.
   `t2s update` would ask rpm who installed it, as it asks dpkg, and install a newer .rpm
@@ -274,6 +260,19 @@ Worth considering, not urgent, and perhaps not needed.
 ## Done
 
 Newest first. Each release's notes have the details and its upgrade steps.
+
+### [2.17.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.17.0) (2026-11-01)
+
+- [x] **Tab completion and a man page for t2s, on Linux:** `t2s install` writes them under
+  `/usr/local/share` for a t2s in `/usr/local/bin` or `/usr/bin`. The completion asks t2s
+  itself what can come next, so it never needs changing; the man page comes from the same
+  options as `--help`, and `t2s update` rewrites both.
+- [x] **The t2s package for Debian and Ubuntu,** for amd64 and arm64, built with nfpm: t2s
+  with its completion and man page. `sudo t2s update` installs the newer package, so apt's
+  records stay true. The server's package doesn't install t2s: a server gets it as any
+  computer does.
+- [x] `t2s update --check` names `sudo`, with t2s's whole path, where t2s can't write to its
+  own folder.
 
 ### [2.16.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.16.0) (2026-11-01)
 
