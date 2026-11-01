@@ -87,6 +87,33 @@ Get-FileHash "$env:LOCALAPPDATA\t2s\t2s.exe"
 The files aren't code-signed, so Windows may warn about one downloaded with a browser,
 and macOS asks for the mark above to be taken off.
 
+## Tab completion and the man page, on Linux
+
+For a t2s in `/usr/local/bin` or `/usr/bin`, `t2s install` writes its bash completion and
+its man page:
+
+```bash
+sudo t2s install
+```
+
+```
+Wrote /usr/local/share/bash-completion/completions/t2s
+Wrote /usr/local/share/man/man1/t2s.1
+Tab completion works in new shells (in one open now, run: complete -r t2s), and man t2s now.
+t2s update keeps them up to date.
+```
+
+TAB then completes the commands, each one's options, and the values `--profile` takes.
+It offers nothing where a server's address goes. The completion asks t2s itself what can
+come next, so it always matches the t2s you run. The man page comes from the same options
+as `--help`, and `t2s update` rewrites it with each new version.
+
+Both go under `/usr/local/share`: bash and man look there wherever the command is, and no
+package writes there. The completion needs the `bash-completion` package
+(`sudo apt install bash-completion` if it's missing). `sudo t2s install --remove` takes
+both away. A t2s anywhere else, such as `~/.local/bin`, still runs, but `t2s install`
+leaves it alone.
+
 ## A test
 
 ```bash
@@ -330,7 +357,8 @@ What's new: https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.7
 ```
 
 It needs to write to that folder: for `/usr/local/bin`, run it with `sudo`. Nothing else
-is left on disk. `--yes` installs without asking, for running it on a schedule:
+is left on disk. Where [`t2s install`](#tab-completion-and-the-man-page-on-linux) wrote
+the bash completion and man page, the new t2s writes its own over them. `--yes` installs without asking, for running it on a schedule:
 
 ```bash
 # /etc/cron.d/t2s: every Monday at 04:00

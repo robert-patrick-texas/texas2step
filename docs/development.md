@@ -150,6 +150,13 @@ Its version is the project's: `make t2s` stamps `make version` into each build
   own by name.
 * `make t2s-test` runs gofmt, go vet (for Linux, and for macOS's and Windows' own files)
   and go test. The t2s workflow runs the tests on Linux, macOS and Windows.
+* Each command in `main.go`'s table declares its options apart from the code that runs
+  it, so `--help`, the tab completion and the man page all read the same options. Two
+  hidden commands serve them: `t2s __complete BREAKS LINE` prints the words that can go
+  where the cursor is, which the bash completion (`complete.go`) asks for at each TAB;
+  `t2s __share DIR [bash] [man]` writes the bash completion and the man page under `DIR`,
+  as `t2s install`, `t2s update` and a package's build do. An option that takes one of a
+  few values names them with `oneOf`, so TAB offers them.
 * `tests/methodology-cases.json` is the Python engine's answers to a set of inputs:
   percentiles, summaries, throughput, the loss summary, one-way delays, call quality,
   responsiveness and bufferbloat. t2s's tests check its own answers against them, and

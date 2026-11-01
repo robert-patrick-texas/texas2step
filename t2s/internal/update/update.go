@@ -9,11 +9,16 @@
 //     program can't be replaced, the old one is renamed aside first, and removed by the
 //     next run.
 //
+// A t2s that dpkg installed, from the t2s package, is updated by the package instead, so
+// dpkg's records stay right: the release's t2s_<version>-<revision>_<arch>.deb is
+// downloaded and checked the same way, the t2s in it run once, and dpkg -i installs it.
+//
 // Downloads check certificates against this computer's trust store, and go through
 // --proxy if given, else https_proxy and the like from the environment.
 package update
 
 import (
+	"archive/tar"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -42,6 +47,20 @@ const Available = 100
 
 // AssetName is this platform's executable in a release.
 func AssetName() string { return assetName(runtime.GOOS, runtime.GOARCH) }
+
+// Kind is which of a release's files an update takes.
+type Kind int
+
+const (
+	File    Kind = iota // this platform's executable, such as t2s-linux-amd64
+	Package             // the t2s package for this computer, such as t2s_2.17.0-1_amd64.deb
+)
+
+// packageName matches the t2s package for version on arch (Debian's names for amd64 and
+// arm64 are Go's), with any revision.
+func packageName(version, arch string) *regexp.Regexp {
+	return regexp.MustCompile(`^t2s_` + regexp.QuoteMeta(version) + `-[0-9]+_` + regexp.QuoteMeta(arch) + `\.deb$`)
+}
 
 // assetName is a platform's executable: t2s-linux-amd64, t2s-macos-arm64,
 // t2s-windows-amd64.exe and the like, as make t2s names them.
@@ -88,8 +107,9 @@ func Client(proxy string, insecure bool) (*http.Client, error) {
 	return &http.Client{Transport: tr, Timeout: 5 * time.Minute}, nil
 }
 
-// Fetch asks base's releases API for the newest release, or for version.
-func Fetch(ctx context.Context, c *http.Client, base, version, userAgent string) (*Release, error) {
+// Fetch asks base's releases API for the newest release, or for version, and finds the
+// file of the kind wanted in it.
+func Fetch(ctx context.Context, c *http.Client, base, version string, kind Kind, userAgent string) (*Release, error) {
 	where := strings.TrimRight(base, "/") + "/releases/latest"
 	missing := "no release"
 	if version != "" {
@@ -133,10 +153,17 @@ func Fetch(ctx context.Context, c *http.Client, base, version, userAgent string)
 		rel.Date = data.Published[:10]
 	}
 	name := AssetName()
+	matches := func(n string) bool { return n == name }
+	if kind == Package {
+		name = "t2s_" + rel.Version + "-*_" + runtime.GOARCH + ".deb"
+		re := packageName(rel.Version, runtime.GOARCH)
+		matches = re.MatchString
+	}
 	for _, a := range data.Assets {
-		if a.Name != name {
+		if !matches(a.Name) {
 			continue
 		}
+		name = a.Name
 		algo, sum, _ := strings.Cut(a.Digest, ":")
 		if algo != "sha256" || !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(sum) {
 			return nil, fmt.Errorf("release %s: %s has no SHA-256 to check it against", rel.Tag, name)
@@ -146,6 +173,9 @@ func Fetch(ctx context.Context, c *http.Client, base, version, userAgent string)
 		}
 		rel.Asset = Asset{Name: name, URL: a.URL, SHA256: sum, Size: a.Size}
 		return rel, nil
+	}
+	if kind == Package {
+		return nil, fmt.Errorf("release %s has no t2s package for this computer (%s)", rel.Tag, name)
 	}
 	return nil, fmt.Errorf("release %s has no t2s for this computer (%s)", rel.Tag, name)
 }
@@ -283,6 +313,60 @@ func Replace(newPath, exe string) error {
 		_ = os.Rename(old, exe)
 		os.Remove(newPath)
 		return fmt.Errorf("can't replace %s: %w", exe, unwrapPath(err))
+	}
+	return nil
+}
+
+// Unpack takes the t2s out of the package at deb into dir, as a new executable file, so it
+// can run once before the package is installed: its path. dir is the folder t2s is in,
+// as for a download, which a system mounting /tmp noexec still lets run.
+func Unpack(ctx context.Context, deb, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "dpkg-deb", "--fsys-tarfile", deb)
+	data, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("can't open the package with dpkg-deb: %w", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, data) // let dpkg-deb finish, so it ends
+		_ = cmd.Wait()
+	}()
+	tr := tar.NewReader(data)
+	for {
+		h, err := tr.Next()
+		if err != nil {
+			return "", fmt.Errorf("the package has no usr/bin/t2s (%v); not installed", err)
+		}
+		if h.Typeflag != tar.TypeReg || strings.TrimPrefix(h.Name, "./") != "usr/bin/t2s" {
+			continue
+		}
+		tmp, err := os.CreateTemp(dir, ".t2s-*.new")
+		if err != nil {
+			return "", fmt.Errorf("can't write next to t2s in %s (%w): run this as root", dir, unwrapPath(err))
+		}
+		_, err = io.Copy(tmp, io.LimitReader(tr, 256<<20))
+		if cerr := tmp.Close(); err == nil {
+			err = cerr
+		}
+		if err == nil {
+			err = os.Chmod(tmp.Name(), 0o755)
+		}
+		if err != nil {
+			os.Remove(tmp.Name())
+			return "", err
+		}
+		return tmp.Name(), nil
+	}
+}
+
+// InstallPackage installs the package at deb with dpkg -i, saying what dpkg says.
+func InstallPackage(ctx context.Context, deb string) error {
+	cmd := exec.CommandContext(ctx, "dpkg", "-i", deb)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("dpkg didn't install the package (%v); see what it said above", err)
 	}
 	return nil
 }

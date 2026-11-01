@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,79 +15,120 @@ import (
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/update"
 )
 
-func cmdUpdate(ctx context.Context, args []string) error {
-	o := newOptions("update", "[VERSION] [options]", "Install the newest t2s, or VERSION, from texas2step's GitHub releases, over this one.\n"+
-		"It is checked against the SHA-256 the release gives, and run once before it takes this one's place.\n"+
-		"t2s looks for updates only when asked: run this by hand, or with --yes from cron or Task Scheduler.")
+func cmdUpdate(o *options) func(context.Context, []string) error {
 	check := o.Bool("check", false, "only say whether a newer release is out; exit status 100 if one is")
 	yes := o.Bool("yes", false, "install without asking")
 	proxy := o.String("proxy", "", "the HTTP proxy to go through, such as http://proxy.example.net:3128 (default: https_proxy)")
 	insecure := o.Bool("insecure", false, "check no certificate (for a firewall that inspects TLS with a CA this computer lacks)")
 	o.BoolVar(insecure, "k", false, "the same as --insecure")
 	base := o.String("url", update.Releases, "the releases API to ask, or a mirror that answers as it does")
-	found, err := o.parse(args, 0, 1)
-	if err != nil {
-		return err
-	}
-	want := ""
-	if len(found) == 1 {
-		want = strings.TrimPrefix(found[0], "v")
-	}
-	if *insecure {
-		fmt.Fprintln(os.Stderr, "warning: --insecure: no certificate is checked, so anything on the way can change what the release says, "+
-			"its SHA-256 included. Nothing shows the new t2s is genuine.")
-	}
-	c, err := update.Client(strings.TrimSpace(*proxy), *insecure)
-	if err != nil {
-		return err
-	}
-	rel, err := update.Fetch(ctx, c, strings.TrimSpace(*base), want, engine.UserAgent()+" (update)")
-	if err != nil {
-		return err
-	}
-	shown := func(v string) string {
-		if v == "dev" {
-			return "a development build"
+	return func(ctx context.Context, found []string) error {
+		want := ""
+		if len(found) == 1 {
+			want = strings.TrimPrefix(found[0], "v")
 		}
-		return v
-	}
-	newer := version == "dev" || update.Compare(rel.Version, version) > 0
-	same := version != "dev" && update.Compare(rel.Version, version) == 0
-	date := ""
-	if rel.Date != "" {
-		date = " (" + rel.Date + ")"
-	}
-	if *check {
-		if newer {
-			fmt.Printf("t2s %s%s is available; this is %s. Install it with: t2s update\n", rel.Version, date, shown(version))
-			return failure{update.Available}
+		// How this t2s was installed decides how it is updated: by hand, it updates itself;
+		// from the t2s package, it installs the newer package; from another package, such as
+		// the server's, that package updates it.
+		exe, exeErr := update.Executable()
+		pkg, how := "", "t2s update"
+		if exeErr == nil {
+			pkg = packaged(ctx, exe)
 		}
-		fmt.Printf("t2s %s is the newest release%s.\n", shown(version), date)
-		return nil
-	}
-	if same {
-		fmt.Printf("t2s %s is installed already%s.\n", version, date)
-		return nil
-	}
-	if !newer && want == "" {
-		fmt.Printf("This t2s (%s) is newer than the newest release, %s; nothing to do.\n", version, rel.Version)
-		return nil
-	}
-	exe, err := update.Executable()
-	if err != nil {
-		return err
-	}
-	if !*yes {
-		if !term.Is(os.Stdin) {
-			return fmt.Errorf("add --yes to install t2s %s without asking", rel.Version)
+		switch pkg {
+		case "":
+		case "t2s":
+			how = "sudo t2s update"
+		case "texas2step":
+			how = "sudo texas2step update, which updates the server too"
+		default:
+			how = "the " + pkg + " package's own update"
 		}
-		fmt.Printf("Install t2s %s%s over %s at %s? [y/N] ", rel.Version, date, shown(version), exe)
-		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-		if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
-			fmt.Println("Nothing installed.")
+		if pkg != "" && pkg != "t2s" && !*check {
+			return fmt.Errorf("%s came with the %s package, so it is updated with it: %s", exe, pkg, how)
+		}
+		if *insecure {
+			fmt.Fprintln(os.Stderr, "warning: --insecure: no certificate is checked, so anything on the way can change what the release says, "+
+				"its SHA-256 included. Nothing shows the new t2s is genuine.")
+		}
+		c, err := update.Client(strings.TrimSpace(*proxy), *insecure)
+		if err != nil {
+			return err
+		}
+		kind := update.File
+		if pkg == "t2s" {
+			kind = update.Package
+		}
+		rel, err := update.Fetch(ctx, c, strings.TrimSpace(*base), want, kind, engine.UserAgent()+" (update)")
+		if err != nil {
+			return err
+		}
+		shown := func(v string) string {
+			if v == "dev" {
+				return "a development build"
+			}
+			return v
+		}
+		newer := version == "dev" || update.Compare(rel.Version, version) > 0
+		same := version != "dev" && update.Compare(rel.Version, version) == 0
+		date := ""
+		if rel.Date != "" {
+			date = " (" + rel.Date + ")"
+		}
+		if *check {
+			if newer {
+				fmt.Printf("t2s %s%s is available; this is %s. Install it with: %s\n", rel.Version, date, shown(version), how)
+				return failure{update.Available}
+			}
+			fmt.Printf("t2s %s is the newest release%s.\n", shown(version), date)
 			return nil
 		}
+		if same {
+			fmt.Printf("t2s %s is installed already%s.\n", version, date)
+			return nil
+		}
+		if !newer && want == "" {
+			fmt.Printf("This t2s (%s) is newer than the newest release, %s; nothing to do.\n", version, rel.Version)
+			return nil
+		}
+		if exeErr != nil {
+			return exeErr
+		}
+		if pkg == "t2s" && os.Geteuid() != 0 {
+			return fmt.Errorf("this t2s came with the t2s package, which is updated as root: sudo t2s update")
+		}
+		if !*yes {
+			if !term.Is(os.Stdin) {
+				return fmt.Errorf("add --yes to install t2s %s without asking", rel.Version)
+			}
+			if pkg == "t2s" {
+				fmt.Printf("Install t2s %s%s over %s, from its package %s? [y/N] ", rel.Version, date, shown(version), rel.Asset.Name)
+			} else {
+				fmt.Printf("Install t2s %s%s over %s at %s? [y/N] ", rel.Version, date, shown(version), exe)
+			}
+			answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
+				fmt.Println("Nothing installed.")
+				return nil
+			}
+		}
+		if pkg == "t2s" {
+			if err := updatePackage(ctx, c, rel, exe); err != nil {
+				return err
+			}
+		} else if err := updateFile(ctx, c, rel, exe); err != nil {
+			return err
+		}
+		if rel.Page != "" {
+			fmt.Println("What's new: " + rel.Page)
+		}
+		return nil
 	}
+}
+
+// updateFile puts the release's t2s in place of exe, one installed by hand, and has it
+// rewrite the bash completion and man page t2s install wrote.
+func updateFile(ctx context.Context, c *http.Client, rel *update.Release, exe string) error {
 	path, err := update.Download(ctx, c, rel, filepath.Dir(exe), engine.UserAgent()+" (update)")
 	if err != nil {
 		return err
@@ -98,8 +141,48 @@ func cmdUpdate(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Printf("Installed t2s %s at %s, checked against its SHA-256 %s.\n", rel.Version, exe, rel.Asset.SHA256)
-	if rel.Page != "" {
-		fmt.Println("What's new: " + rel.Page)
+	if !inByHand(exe) {
+		return nil
 	}
+	if have := installed(); len(have) > 0 {
+		out, err := exec.CommandContext(ctx, exe, append([]string{"__share", shareDir}, have...)...).CombinedOutput()
+		if err != nil {
+			fmt.Printf("t2s %s didn't rewrite its bash completion and man page in %s (%v): %s\n",
+				rel.Version, shareDir, err, strings.TrimSpace(string(out)))
+		} else {
+			fmt.Println("Rewrote its bash completion and man page in " + shareDir + ".")
+		}
+	}
+	return nil
+}
+
+// updatePackage installs the release's t2s package over the one dpkg installed exe from:
+// downloaded and checked as a file is, the t2s in it run once, then dpkg -i.
+func updatePackage(ctx context.Context, c *http.Client, rel *update.Release, exe string) error {
+	tmp, err := os.MkdirTemp("", "t2s-update-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	deb, err := update.Download(ctx, c, rel, tmp, engine.UserAgent()+" (update)")
+	if err != nil {
+		return err
+	}
+	bin, err := update.Unpack(ctx, deb, filepath.Dir(exe))
+	if err != nil {
+		return err
+	}
+	err = update.Check(ctx, bin, rel.Version)
+	os.Remove(bin)
+	if err != nil {
+		return err
+	}
+	if err := update.InstallPackage(ctx, deb); err != nil {
+		return err
+	}
+	if err := update.Check(ctx, exe, rel.Version); err != nil {
+		return fmt.Errorf("dpkg installed %s, but %s doesn't say it is t2s %s: %v", rel.Asset.Name, exe, rel.Version, err)
+	}
+	fmt.Printf("Installed t2s %s from %s, checked against its SHA-256 %s.\n", rel.Version, rel.Asset.Name, rel.Asset.SHA256)
 	return nil
 }

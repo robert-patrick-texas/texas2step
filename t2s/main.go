@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -24,20 +25,92 @@ import (
 // version is set at build time (make t2s) from the server's src/texas2step/__init__.py.
 var version = "dev"
 
-const usage = `t2s: texas2step's command-line client.
+// command is one of t2s's commands. Its options are declared apart from what runs it, so
+// --help, tab completion (t2s __complete) and the man page all read the same ones.
+type command struct {
+	name    string
+	words   string // after the name in t2s's usage: "URL"
+	summary string // its line in t2s's usage
+	args    string // after the name in its --help: "URL [options]"
+	about   string // what its --help says first
+	want    int    // arguments it needs
+	most    int    // arguments it takes
+	linux   bool   // only on Linux
+	// options declares the command's options on o, and gives what runs it with its arguments.
+	options func(o *options) func(ctx context.Context, found []string) error
+}
 
-  t2s run URL          full test: latency, download, upload, packet loss
-  t2s latency URL      idle HTTP round-trip time and jitter
-  t2s download URL     download throughput (multi-stream)
-  t2s upload URL       upload throughput (multi-stream)
-  t2s loss URL         UDP packet loss, RTT and jitter over WebRTC
-  t2s monitor URL [URL2]  continuous UDP probing, to one server or two at once
-  t2s diag URL         every way of reaching the server, tried once a second
-  t2s update           install the newest t2s from its GitHub releases
-  t2s version          print the version
+// commands are t2s's commands, set in init: install's man page reads them.
+var commands []command
 
-URL is a texas2step server's address, such as https://dallas.example.net/texas2step.
-Add --help after a command for its options.`
+func init() {
+	commands = []command{
+		{name: "run", words: "URL", summary: "full test: latency, download, upload, packet loss",
+			args: "URL [options]", about: "A full test: latency, download, upload and packet loss, as the Test page runs it.",
+			want: 1, most: 1, options: cmdRun},
+		{name: "latency", words: "URL", summary: "idle HTTP round-trip time and jitter",
+			args: "URL [options]", about: "Idle HTTP round-trip time and jitter.",
+			want: 1, most: 1, options: cmdLatency},
+		{name: "download", words: "URL", summary: "download throughput (multi-stream)",
+			args: "URL [options]", about: "Download throughput over parallel streams, with latency under load.",
+			want: 1, most: 1, options: cmdTransfer("download")},
+		{name: "upload", words: "URL", summary: "upload throughput (multi-stream)",
+			args: "URL [options]", about: "Upload throughput over parallel streams, with latency under load.",
+			want: 1, most: 1, options: cmdTransfer("upload")},
+		{name: "loss", words: "URL", summary: "UDP packet loss, RTT and jitter over WebRTC",
+			args: "URL [options]", about: "UDP packet loss, round-trip time and jitter, over a WebRTC data channel.",
+			want: 1, most: 1, options: cmdLoss},
+		{name: "monitor", words: "URL [URL2]", summary: "continuous UDP probing, to one server or two at once",
+			args: "URL [URL2] [options]", about: "Continuous UDP probing, as the Monitor page does it: to one server, or to two at once at the same moments.\n" +
+				"On a terminal it shows a panel that redraws in place; piped, or with --lines, a line a second. Ctrl-C stops it.",
+			want: 1, most: 2, options: cmdMonitor},
+		{name: "diag", words: "URL", summary: "every way of reaching the server, tried once a second",
+			args: "URL [options]", about: "Every way of reaching the server, tried once a second, as the Diag page does it: HTTP/1.1, HTTP/2,\n" +
+				"HTTP/3, WebSocket and UDP, over IPv4 and over IPv6. On a terminal the table redraws in place;\n" +
+				"piped, or with --lines, the events come as lines and the table at the end. Ctrl-C stops it.",
+			want: 1, most: 1, options: cmdDiag},
+		{name: "update", summary: "install the newest t2s from its GitHub releases",
+			args: "[VERSION] [options]", about: "Install the newest t2s, or VERSION, from texas2step's GitHub releases, over this one.\n" +
+				"It is checked against the SHA-256 the release gives, and run once before it takes this one's place.\n" +
+				"t2s looks for updates only when asked: run this by hand, or with --yes from cron or Task Scheduler.",
+			want: 0, most: 1, options: cmdUpdate},
+		{name: "install", summary: "write t2s's bash completion and man page",
+			args: "[options]", about: "Write t2s's bash completion and man page under " + shareDir + ", where bash and man look, for a t2s\n" +
+				"installed by hand in /usr/local/bin or /usr/bin. Run it with sudo. A t2s from a package has them already.",
+			want: 0, most: 0, linux: true, options: cmdInstall},
+	}
+}
+
+// here is whether c is a command on this computer.
+func (c *command) here() bool { return !c.linux || runtime.GOOS == "linux" }
+
+// find is the command named name, if it is one here.
+func find(name string) *command {
+	for i := range commands {
+		if commands[i].name == name && commands[i].here() {
+			return &commands[i]
+		}
+	}
+	return nil
+}
+
+// usage is what t2s says with no command, or with --help.
+func usage() string {
+	var b strings.Builder
+	b.WriteString("t2s: texas2step's command-line client.\n\n")
+	line := func(words, summary string) {
+		fmt.Fprintf(&b, "  t2s %-*s%s\n", max(17, len(words)+2), words, summary)
+	}
+	for _, c := range commands {
+		if c.here() {
+			line(strings.TrimSpace(c.name+" "+c.words), c.summary)
+		}
+	}
+	line("version", "print the version")
+	b.WriteString("\nURL is a texas2step server's address, such as https://dallas.example.net/texas2step.\n" +
+		"Add --help after a command for its options.")
+	return b.String()
+}
 
 // failure is an error already said, with the exit status to end with.
 type failure struct{ status int }
@@ -52,30 +125,43 @@ func main() {
 
 func run(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, usage)
+		fmt.Fprintln(os.Stderr, usage())
 		return 2
-	}
-	commands := map[string]func(context.Context, []string) error{
-		"run": cmdRun, "latency": cmdLatency, "download": cmdTransfer("download"),
-		"upload": cmdTransfer("upload"), "loss": cmdLoss, "monitor": cmdMonitor,
-		"diag": cmdDiag, "update": cmdUpdate,
 	}
 	switch args[0] {
 	case "-h", "--help", "help":
-		fmt.Println(usage)
+		fmt.Println(usage())
 		return 0
 	case "-V", "--version", "version":
 		fmt.Println("t2s " + version)
 		return 0
+	case "__complete": // for the bash completion: the shell's word breaks, then the line
+		if len(args) == 3 {
+			for _, w := range complete(args[1], args[2]) {
+				fmt.Println(w)
+			}
+		}
+		return 0
+	case "__share": // for t2s update and the package's build: write the files t2s install does
+		if err := share(args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "t2s: "+err.Error())
+			return 1
+		}
+		return 0
 	}
-	cmd, ok := commands[args[0]]
-	if !ok {
-		fmt.Fprintf(os.Stderr, "t2s: no command %q\n\n%s\n", args[0], usage)
+	c := find(args[0])
+	if c == nil {
+		fmt.Fprintf(os.Stderr, "t2s: no command %q\n\n%s\n", args[0], usage())
 		return 2
 	}
+	o := newOptions(c.name, c.args, c.about)
+	start := c.options(o)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := cmd(ctx, args[1:])
+	found, err := o.parse(args[1:], c.want, c.most)
+	if err == nil {
+		err = start(ctx, found)
+	}
 	var done failure
 	switch {
 	case err == nil:
@@ -111,17 +197,26 @@ func explain(err error) string {
 // options are a command's flags; parse takes them before and after its arguments.
 type options struct {
 	*flag.FlagSet
-	about  string
-	json   bool
-	code   string
-	http2  bool
-	family string // "tcp4" or "tcp6" to hold every connection to one address family
+	about   string
+	json    bool
+	code    string
+	http2   bool
+	family  string              // "tcp4" or "tcp6" to hold every connection to one address family
+	choices map[string][]string // the values an option takes, where they are few
 }
 
 func newOptions(name, args, about string) *options {
 	o := &options{FlagSet: flag.NewFlagSet(name, flag.ContinueOnError), about: "usage: t2s " + name + " " + args + "\n\n" + about}
 	o.SetOutput(io.Discard)
 	return o
+}
+
+// oneOf names the values option name takes, for tab completion and the man page.
+func (o *options) oneOf(name string, values ...string) {
+	if o.choices == nil {
+		o.choices = map[string][]string{}
+	}
+	o.choices[name] = values
 }
 
 // target adds the options every command toward a server takes.
@@ -133,20 +228,27 @@ func (o *options) target(transfers bool) {
 	}
 }
 
+// flagWords are an option as --help shows it: "--seconds", "FLOAT" and what it does.
+func flagWords(fl *flag.Flag) (left, arg, use string) {
+	name, use := flag.UnquoteUsage(fl)
+	left = "--" + fl.Name
+	if len(fl.Name) == 1 {
+		left = "-" + fl.Name // -4, -6, -k
+	}
+	if fl.DefValue != "" && fl.DefValue != "false" && fl.DefValue != "0" && !strings.Contains(use, "default") {
+		use += " (default: " + fl.DefValue + ")"
+	}
+	return left, strings.ToUpper(name), use
+}
+
 func (o *options) help() string {
 	var b strings.Builder
 	b.WriteString(o.about + "\n\noptions:\n")
 	o.VisitAll(func(fl *flag.Flag) {
-		name, use := flag.UnquoteUsage(fl)
-		left := "  --" + fl.Name
-		if len(fl.Name) == 1 {
-			left = "  -" + fl.Name // -4, -6, -k
-		}
-		if name != "" {
-			left += " " + strings.ToUpper(name)
-		}
-		if fl.DefValue != "" && fl.DefValue != "false" && fl.DefValue != "0" && !strings.Contains(use, "default") {
-			use += " (default: " + fl.DefValue + ")"
+		left, arg, use := flagWords(fl)
+		left = "  " + left
+		if arg != "" {
+			left += " " + arg
 		}
 		fmt.Fprintf(&b, "%-26s %s\n", left, use)
 	})
@@ -206,8 +308,7 @@ func printJSON(v any) error {
 	return nil
 }
 
-func cmdRun(ctx context.Context, args []string) error {
-	o := newOptions("run", "URL [options]", "A full test: latency, download, upload and packet loss, as the Test page runs it.")
+func cmdRun(o *options) func(context.Context, []string) error {
 	o.target(true)
 	seconds := o.Float64("seconds", 10, "seconds each transfer runs")
 	streams := o.Int("streams", 4, "parallel streams")
@@ -218,78 +319,45 @@ func cmdRun(ctx context.Context, args []string) error {
 	noOne := o.Bool("no-one-stream", false, "don't download over one stream")
 	save := o.Bool("save", false, "store the result on the server, for History")
 	noLocal := o.Bool("no-local", false, "leave this computer's own address and MAC out of the result")
-	found, err := o.parse(args, 1, 1)
-	if err != nil {
-		return err
-	}
-	t, err := o.unlock(ctx, found[0])
-	if err != nil {
-		return err
-	}
-	opts := engine.Options{Seconds: *seconds, Streams: max(1, *streams), Packets: *packets, IntervalMs: *interval, Loss: !*noLoss, Local: !*noLocal}
-	if o.set("one-stream") || o.set("no-one-stream") {
-		v := *one && !*noOne
-		opts.OneStream = &v
-	}
-	l := newLive(!o.json)
-	r, err := engine.RunAll(ctx, t, opts, l.progress)
-	l.clear()
-	if err != nil {
-		return err
-	}
-	if *save {
-		if r.ID, err = engine.Save(ctx, t, r); err != nil {
-			return err
-		}
-	}
-	if o.json {
-		return printJSON(r)
-	}
-	fmt.Println(report(r))
-	return nil
-}
-
-func cmdLatency(ctx context.Context, args []string) error {
-	o := newOptions("latency", "URL [options]", "Idle HTTP round-trip time and jitter.")
-	o.target(true)
-	count := o.Int("count", 20, "pings")
-	found, err := o.parse(args, 1, 1)
-	if err != nil {
-		return err
-	}
-	t, err := o.unlock(ctx, found[0])
-	if err != nil {
-		return err
-	}
-	l := newLive(!o.json)
-	r, err := engine.MeasureLatency(ctx, t, *count, l.progress)
-	l.clear()
-	if err != nil {
-		return err
-	}
-	if o.json {
-		return printJSON(r)
-	}
-	fmt.Println(latencyLine("Latency", &r.Summary))
-	return nil
-}
-
-func cmdTransfer(direction string) func(context.Context, []string) error {
-	return func(ctx context.Context, args []string) error {
-		o := newOptions(direction, "URL [options]", strings.ToUpper(direction[:1])+direction[1:]+" throughput over parallel streams, with latency under load.")
-		o.target(true)
-		seconds := o.Float64("seconds", 10, "seconds the transfer runs")
-		streams := o.Int("streams", 4, "parallel streams")
-		found, err := o.parse(args, 1, 1)
+	return func(ctx context.Context, found []string) error {
+		t, err := o.unlock(ctx, found[0])
 		if err != nil {
 			return err
 		}
+		opts := engine.Options{Seconds: *seconds, Streams: max(1, *streams), Packets: *packets, IntervalMs: *interval, Loss: !*noLoss, Local: !*noLocal}
+		if o.set("one-stream") || o.set("no-one-stream") {
+			v := *one && !*noOne
+			opts.OneStream = &v
+		}
+		l := newLive(!o.json)
+		r, err := engine.RunAll(ctx, t, opts, l.progress)
+		l.clear()
+		if err != nil {
+			return err
+		}
+		if *save {
+			if r.ID, err = engine.Save(ctx, t, r); err != nil {
+				return err
+			}
+		}
+		if o.json {
+			return printJSON(r)
+		}
+		fmt.Println(report(r))
+		return nil
+	}
+}
+
+func cmdLatency(o *options) func(context.Context, []string) error {
+	o.target(true)
+	count := o.Int("count", 20, "pings")
+	return func(ctx context.Context, found []string) error {
 		t, err := o.unlock(ctx, found[0])
 		if err != nil {
 			return err
 		}
 		l := newLive(!o.json)
-		r, err := engine.MeasureThroughput(ctx, t, direction, *seconds, max(1, *streams), true, l.progress, "")
+		r, err := engine.MeasureLatency(ctx, t, *count, l.progress)
 		l.clear()
 		if err != nil {
 			return err
@@ -297,38 +365,60 @@ func cmdTransfer(direction string) func(context.Context, []string) error {
 		if o.json {
 			return printJSON(r)
 		}
-		fmt.Println(throughputLine(strings.ToUpper(direction[:1])+direction[1:], r, nil))
+		fmt.Println(latencyLine("Latency", &r.Summary))
 		return nil
 	}
 }
 
-func cmdLoss(ctx context.Context, args []string) error {
-	o := newOptions("loss", "URL [options]", "UDP packet loss, round-trip time and jitter, over a WebRTC data channel.")
+func cmdTransfer(direction string) func(*options) func(context.Context, []string) error {
+	return func(o *options) func(context.Context, []string) error {
+		o.target(true)
+		seconds := o.Float64("seconds", 10, "seconds the transfer runs")
+		streams := o.Int("streams", 4, "parallel streams")
+		return func(ctx context.Context, found []string) error {
+			t, err := o.unlock(ctx, found[0])
+			if err != nil {
+				return err
+			}
+			l := newLive(!o.json)
+			r, err := engine.MeasureThroughput(ctx, t, direction, *seconds, max(1, *streams), true, l.progress, "")
+			l.clear()
+			if err != nil {
+				return err
+			}
+			if o.json {
+				return printJSON(r)
+			}
+			fmt.Println(throughputLine(strings.ToUpper(direction[:1])+direction[1:], r, nil))
+			return nil
+		}
+	}
+}
+
+func cmdLoss(o *options) func(context.Context, []string) error {
 	o.target(false)
 	packets := o.Int("packets", 500, "probes")
 	interval := o.Float64("interval", 10, "ms between probes")
 	size := o.Int("size", engine.ProbeBytes, "probe size in bytes")
-	found, err := o.parse(args, 1, 1)
-	if err != nil {
-		return err
+	return func(ctx context.Context, found []string) error {
+		t, err := o.unlock(ctx, found[0])
+		if err != nil {
+			return err
+		}
+		info, err := t.GetInfo(ctx)
+		if err != nil {
+			return err
+		}
+		l := newLive(!o.json)
+		r, err := engine.MeasureLoss(ctx, t, info, *packets, *interval, *size, 2*time.Second, l.progress)
+		l.clear()
+		if err != nil {
+			return err
+		}
+		if o.json {
+			return printJSON(r)
+		}
+		fmt.Println(lossLine(r) + "\n" + callLine(quality.CallQuality(r.Probes())))
+		return nil
 	}
-	t, err := o.unlock(ctx, found[0])
-	if err != nil {
-		return err
-	}
-	info, err := t.GetInfo(ctx)
-	if err != nil {
-		return err
-	}
-	l := newLive(!o.json)
-	r, err := engine.MeasureLoss(ctx, t, info, *packets, *interval, *size, 2*time.Second, l.progress)
-	l.clear()
-	if err != nil {
-		return err
-	}
-	if o.json {
-		return printJSON(r)
-	}
-	fmt.Println(lossLine(r) + "\n" + callLine(quality.CallQuality(r.Probes())))
-	return nil
 }
