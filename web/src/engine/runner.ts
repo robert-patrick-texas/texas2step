@@ -12,6 +12,7 @@ import { BIN_MS, type LiveThroughput, measureDownload, measureUpload, type Throu
 
 export type Phase = "latency" | "download" | "one" | "upload" | "loss";
 export const PHASES: Phase[] = ["latency", "download", "one", "upload", "loss"];
+const IDLE_PINGS = 20; // idle latency's pings, after one to warm the connection
 
 export interface RunConfig {
   streams: number;
@@ -25,6 +26,7 @@ export interface RunConfig {
 export interface RunEvents {
   phase(phase: Phase): void;
   latency(kind: "idle" | Direction, rtt: number): void;
+  pingSent(seq: number, total: number): void; // an idle-latency ping going out
   throughput(direction: Direction | "one", live: LiveThroughput): void;
   packetSent(seq: number): void;
   packetEcho(seq: number, rtt: number): void;
@@ -132,7 +134,9 @@ export class TestRun {
 
     try {
       this.on.phase("latency");
-      const idle = await this.timed("latency", () => measureHttpLatency(this.ep, 20, (rtt) => this.on.latency("idle", rtt), signal));
+      const idle = await this.timed("latency", () =>
+        measureHttpLatency(this.ep, IDLE_PINGS, (rtt) => this.on.latency("idle", rtt), signal, (seq) => this.on.pingSent(seq, IDLE_PINGS)),
+      );
       r.latency = summarize(idle.samples, idle.lost);
       if (idle.protocol) r.client.protocol = idle.protocol;
       this.multiplexed = /^h[23]$/i.test(idle.protocol ?? "");

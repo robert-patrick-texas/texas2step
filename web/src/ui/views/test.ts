@@ -534,6 +534,7 @@ export class TestView implements View {
           this.link.pulse();
         }
       },
+      pingSent: (seq, total) => this.gauge.setPings(seq + 1, total),
       throughput: (dir, live) => {
         this.gauge.set(live.mbps, dir === "one" ? "download" : dir);
         this.link.setRate(live.mbps);
@@ -580,6 +581,7 @@ export class TestView implements View {
     this.run = null;
     app.awake.hold("test", false);
     this.gauge.setRunning(false, true);
+    this.gauge.drainPings(); // stopped while pinging
     this.gauge.button.removeAttribute("aria-label");
     this.link.setMode("idle");
     if (aborted) setText(this.status, this.left ? "Stopped when you went to another page. Partial results are shown below." : "Stopped. Partial results are shown below.");
@@ -619,6 +621,7 @@ export class TestView implements View {
     };
     setText(this.status, say[p]);
     this.gauge.setCaption(PHASE_LABEL[p]);
+    if (p !== "latency") this.gauge.drainPings(); // their ring empties for the packet-loss test
     if (p === "download" || p === "upload" || p === "one") this.gauge.set(0, p === "one" ? "download" : p);
     else this.gauge.set(0, p === "latency" ? "latency" : "loss");
     this.link.setMode(p === "one" ? "download" : p, p === "latency" ? "round trips" : p === "loss" ? "UDP probes" : p === "one" ? "one stream" : "");

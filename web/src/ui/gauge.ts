@@ -8,8 +8,12 @@ const R = 150;
 const C = 200;
 const MAX_MBPS = 10_000;
 // The packet-loss test's ring: inside the speed arc, around the start button, on the same
-// 270° sweep, filling as probes go out, so half the probes reach 12 o'clock.
+// 270° sweep, filling as probes go out, so half the probes reach 12 o'clock. Idle
+// latency's pings fill it first, gliding round as they go out, then it drains back to
+// nothing in DRAIN_MS until the packet-loss test.
 const RP = 128;
+const GLIDE_MS = 60; // how quickly the fill catches up with the pings (time constant)
+const DRAIN_MS = 450;
 
 export type GaugeTone = "idle" | "download" | "upload" | "latency" | "loss";
 
@@ -47,6 +51,9 @@ export class Gauge {
   private packetsShown = 0; // the share of the ring drawn
   private packetsTarget = 0;
   private packetRaf = 0;
+  private pings = false; // the ring shows idle latency's pings, not the packet-loss test
+  private moving = false; // the pings' glide or drain is under way, on packetRaf
+  private drainNext = false; // the pings are done: drain once the glide reaches the last
 
   constructor(onStart: () => void) {
     const ticks = s("g", { class: "gauge-ticks" });
@@ -148,6 +155,7 @@ export class Gauge {
    * speed arc's start. 0 clears it, as a new test begins. */
   setPackets(sent: number, total: number): void {
     const share = total > 0 ? Math.min(1, Math.max(0, sent / total)) : 0;
+    if (this.pings || this.moving) this.stopPackets();
     if (share === 0) {
       this.packetsShown = this.packetsTarget = 0;
       this.drawPackets();
@@ -168,6 +176,7 @@ export class Gauge {
    * (null in `packets`) out of `total`. */
   setPacketResult(packets: (number | null)[], total: number): void {
     if (!total) return this.setPackets(0, 0);
+    this.stopPackets();
     this.packetsShown = this.packetsTarget = Math.min(1, packets.length / total);
     this.drawPackets();
     const marks = packets.flatMap((p, seq) => {
@@ -178,6 +187,67 @@ export class Gauge {
       return [s("line", { x1: x0, y1: y0, x2: x1, y2: y1 })];
     });
     this.packetLost.replaceChildren(...marks);
+  }
+
+  /** Idle latency's pings on the same ring: `sent` of `total`, the fill gliding round to
+   * each. */
+  setPings(sent: number, total: number): void {
+    if (!this.pings) this.stopPackets();
+    this.pings = true;
+    this.packetsTarget = total > 0 ? Math.min(1, Math.max(0, sent / total)) : 0;
+    if (this.moving) return; // already gliding: it follows the new target
+    this.moving = true;
+    let last = performance.now();
+    const step = (now: number) => {
+      const diff = this.packetsTarget - this.packetsShown;
+      const k = 1 - Math.exp(-Math.max(0, now - last) / GLIDE_MS);
+      last = now;
+      const close = Math.abs(diff) < (this.drainNext ? 0.01 : 0.002);
+      this.packetsShown = reducedMotion() || close ? this.packetsTarget : this.packetsShown + diff * k;
+      this.drawPackets();
+      this.moving = this.packetsShown !== this.packetsTarget;
+      this.packetRaf = this.moving ? requestAnimationFrame(step) : 0;
+      if (!this.moving && this.drainNext) this.drain();
+    };
+    this.packetRaf = requestAnimationFrame(step);
+  }
+
+  /** The pings are done (or the test stopped): their ring catches up with the last one
+   * sent, then drains quickly back to nothing, to wait for the packet-loss test. Nothing
+   * happens when the ring isn't showing pings. */
+  drainPings(): void {
+    if (!this.pings) return;
+    if (this.moving) this.drainNext = true;
+    else this.drain();
+  }
+
+  private drain(): void {
+    this.stopPackets();
+    this.packetsTarget = 0;
+    const from = this.packetsShown;
+    if (from === 0 || reducedMotion()) {
+      this.packetsShown = 0;
+      this.drawPackets();
+      return;
+    }
+    this.moving = true;
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, Math.max(0, now - t0) / DRAIN_MS);
+      const eased = t < 0.5 ? 2 * t * t : 1 - (2 - 2 * t) ** 2 / 2; // ease in and out
+      this.packetsShown = t === 1 ? 0 : from * (1 - eased);
+      this.drawPackets();
+      this.moving = t < 1;
+      this.packetRaf = this.moving ? requestAnimationFrame(step) : 0;
+    };
+    this.packetRaf = requestAnimationFrame(step);
+  }
+
+  /** Whatever the ring was moving to, it stops where it is. */
+  private stopPackets(): void {
+    cancelAnimationFrame(this.packetRaf);
+    this.packetRaf = 0;
+    this.moving = this.pings = this.drainNext = false;
   }
 
   private drawPackets(): void {

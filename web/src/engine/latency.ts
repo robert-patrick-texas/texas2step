@@ -13,12 +13,14 @@ export interface HttpLatencyResult {
  * removes browser scheduling noise; falls back to wall-clock when timing is unavailable.
  * A ping without an answer is lost. One the server answers with an error ends it: 401
  * with NeedsCode, for the page to ask for the access code; a refusal isn't a lost ping.
+ * `onSend` hears each counted ping as it goes out, the warm-up not among them.
  */
 export async function measureHttpLatency(
   ep: Endpoint,
   count: number,
   onSample: (rtt: number, index: number) => void,
   signal?: AbortSignal,
+  onSend?: (index: number) => void,
 ): Promise<HttpLatencyResult> {
   const samples: number[] = [];
   let lost = 0;
@@ -36,6 +38,7 @@ export async function measureHttpLatency(
 
   await once(); // connection setup and TLS are not latency
   for (let i = 0; i < count; i++) {
+    onSend?.(i);
     const rtt = await once();
     if (rtt === null) lost++;
     else {
