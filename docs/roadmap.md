@@ -243,6 +243,16 @@ Worth considering, not urgent, and perhaps not needed.
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.16.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.16.0) (2026-11-01)
+
+- [x] **Loss each way, by packet:** the server keeps a record of which probes arrived, so
+  every client places each lost one exactly, on the way to the server or back. The Test
+  page gives each way's share with its count and lists the lost probes by number, Monitor
+  marks each one on its chart and counts each way under Loss, in every profile, and t2s
+  and `texas2step run` print them; t2s monitor's totals name them since Start.
+- [x] **The packet ring fills with the latency pings:** on the Test page, as the 20 pings
+  go out, then drains for the packet-loss test.
+
 ### [2.15.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.15.0) (2026-10-31)
 
 - [x] **`--lines` for `t2s monitor` and `t2s diag`:** the lines and the table a pipe gets,
