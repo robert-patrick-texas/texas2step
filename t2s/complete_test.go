@@ -133,6 +133,9 @@ func TestOwnerOfReadsDpkgQuery(t *testing.T) {
 }
 
 func TestInstallIsForTheFoldersMadeForIt(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("t2s install is for Linux, whose paths these are")
+	}
 	for exe, want := range map[string]bool{"/usr/local/bin/t2s": true, "/usr/bin/t2s": true,
 		"/home/austin/Downloads/t2s": false, "/usr/local/bin/sub/t2s": false, "/opt/t2s/t2s": false} {
 		if got := inByHand(exe); got != want {
