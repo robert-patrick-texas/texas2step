@@ -180,8 +180,11 @@ Its version is the project's: `make t2s` stamps `make version` into each build
   uv run python scripts/methodology_cases.py && make test t2s-test
   ```
 
-* `.github/workflows/t2s.yml` runs t2s's tests on Linux and on Windows, builds every
-  platform's file, and runs `tests/test_t2s.py`, on each push that changes t2s.
+* `.github/workflows/t2s.yml` runs t2s's tests on Linux, macOS and Windows, builds every
+  platform's file, and runs `tests/test_t2s.py`, on each push that changes t2s or its
+  package. On Linux it also builds the t2s package for both architectures, fails if
+  lintian finds an error or a warning, then installs the amd64 one, checks its files and
+  completion, and removes it, checking nothing is left.
 
 ## Documentation site
 
