@@ -28,8 +28,8 @@ func cmdUpdate(o *options) func(context.Context, []string) error {
 			want = strings.TrimPrefix(found[0], "v")
 		}
 		// How this t2s was installed decides how it is updated: by hand, it updates itself;
-		// from the t2s package, it installs the newer package; from another package, such as
-		// the server's, that package updates it.
+		// from the t2s package, it installs the newer package. The server's package doesn't
+		// install t2s; one that some other package installed is left to that package.
 		exe, exeErr := update.Executable()
 		pkg, how := "", "t2s update"
 		if exeErr == nil {
@@ -42,10 +42,8 @@ func cmdUpdate(o *options) func(context.Context, []string) error {
 			}
 		case "t2s":
 			how = "sudo t2s update"
-		case "texas2step":
-			how = "sudo texas2step update, which updates the server too"
 		default:
-			how = "the " + pkg + " package's own update"
+			how = "the way the " + pkg + " package is updated"
 		}
 		if pkg != "" && pkg != "t2s" && !*check {
 			return fmt.Errorf("%s came with the %s package, so it is updated with it: %s", exe, pkg, how)

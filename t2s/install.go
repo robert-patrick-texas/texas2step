@@ -157,8 +157,9 @@ func installed() []string {
 	return have
 }
 
-// packaged is the package that installed the file at path, as dpkg knows it: "t2s",
-// "texas2step", or "" for one installed by hand (or on a system without dpkg).
+// packaged is the package that installed the file at path, as dpkg knows it: "t2s", or
+// "" for one installed by hand (or on a system without dpkg). The server's package
+// doesn't install t2s, so any other name is another project's package.
 func packaged(ctx context.Context, path string) string {
 	if runtime.GOOS != "linux" {
 		return ""

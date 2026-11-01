@@ -185,9 +185,11 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
   `t2s update` would act on how t2s was installed, which it would ask dpkg:
   - a copy installed by hand updates itself as now, and rewrites its man page;
   - one from the t2s .deb fetches the newer .deb and installs it, so dpkg's records stay
-    right;
-  - one from the server's package says to run `sudo texas2step update`, which updates
-    both.
+    right.
+
+  The server's package doesn't install t2s, so the two packages never share a file. A
+  server gets t2s as any computer does, from the t2s .deb or as a copy, and
+  `sudo t2s update` updates it there too.
 - [ ] **Packages for Alma, Rocky and RHEL.** t2s runs on them unchanged, since it is one
   static file. nfpm would build an .rpm (x86_64, aarch64) from the .deb's settings.
   `t2s update` would ask rpm who installed it, as it asks dpkg, and install a newer .rpm
@@ -201,10 +203,15 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
 
   The server on RHEL would be a separate, larger job: its Python environment, nginx's
   layout, SELinux for nginx, and firewalld.
-- [ ] **Come with the server's package**, once it has a stable baseline: the package
-  would carry every platform's t2s, so each server can offer it for download from its own
-  address, and `t2s update` could update from the server it tests, for networks without
-  GitHub. Until then the releases list it beside the package.
+- [ ] **Be offered for download by each server**, for networks without GitHub. A server
+  would serve t2s's release files from its own address, each platform's and the .debs,
+  and answer as GitHub's releases API does, with each file's SHA-256, so
+  `t2s update --url` could update from the server it tests. This hands t2s out to other
+  computers. It isn't the server's own command line: the server's package still doesn't
+  install t2s. To decide: whether the server's package carries the files, about 34 MB
+  more in it and 91 MB installed, or `texas2step update` fetches them from the release
+  into a folder of the server's, perhaps behind a setting. Until then the releases list
+  them beside the package.
 - [ ] **Be built by GitHub Actions**, with signed attestations of where each file was
   built, as the PyPI release is, so `gh attestation verify` can check a download.
 - [ ] **Be signed and notarized for macOS.** The macOS files aren't signed with an Apple
