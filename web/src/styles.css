@@ -1672,6 +1672,27 @@ a.brand-org:hover,
   color: var(--critical);
 }
 
+/* Under Monitor's Loss: how many were lost each way, each kept whole. */
+.tile-ways {
+  display: flex;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  column-gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile-ways span {
+  white-space: nowrap;
+}
+
+.tile-ways:empty {
+  display: none;
+}
+
 .tile-unit {
   color: var(--muted);
   font-size: 13px;

@@ -336,17 +336,21 @@ retransmits, so a packet the network drops stays dropped.
    a fixed schedule. They are 200 bytes, at least the size of a voice call's packets, so a path
    that can't carry them can't carry calls. Pacing works against the schedule, not
    `setInterval`, so timer clamping cannot drop probes.
-4. The server echoes each probe and counts what it receives and sends. A stamped echo
-   also carries the server's clock when the probe arrived, and how many probes had
-   arrived by then ([UDP probe protocol](api.md#udp-probe-protocol)).
+4. The server echoes each probe, counts what it receives and sends, and keeps a record of
+   which sequence numbers arrived. A stamped echo also carries the server's clock when
+   the probe arrived, and how many probes had arrived by then
+   ([UDP probe protocol](api.md#udp-probe-protocol)).
 5. After the last probe the client waits 2 s for stragglers, then asks over `control`
-   for the server's counters.
+   for the server's counters and its record of the probes that arrived.
 
 Reported:
 
 * **Loss** = probes without an echo ÷ probes sent.
-* **Upstream loss** = 1 − (server received ÷ client sent).
-* **Downstream loss** = 1 − (client received ÷ server sent).
+* **Upstream loss (to server)** = probes the server never received ÷ probes sent: lost
+  on the way from this device to the server.
+* **Downstream loss (from server)** = probes the server received but whose echo never
+  came back ÷ probes the server received: lost on the way back. Each share comes with
+  its count, and the counts add up to the loss.
 * **Out of order**: echoes arriving with a lower sequence number than the previous one.
 * **UDP RTT and jitter**: same definitions as above, over the echoed probes.
 * **Each direction's delay**, from the stamps: each probe's one-way delay above the
@@ -354,10 +358,19 @@ Reported:
   client's send time, downstream the client's receipt less the server's arrival. The two
   computers' clocks needn't agree: their difference is the same for every probe and drops
   out.
-* **Which way each loss went**, from the stamps: between two echoes, the server's counts
-  say how many of the probes in between reached it, and the rest were lost on the way
-  there. The count each way is exact. Where one gap lost probes both ways, which went
-  which way can't be told, and those lost on the way there are taken to be the first.
+* **Which way each loss went**, by sequence number, from the server's record of the
+  probes that arrived: one it never got was lost on the way there, one it got on the way
+  back. Each is placed exactly, and the result lists them both ways (`lost_upstream`,
+  `lost_downstream`), so a lost probe can be followed up, in a packet capture say. A server
+  from before 2.16.0 keeps no record: its stamps place the losses instead. Between two
+  echoes, its counts say how many of the probes in between reached it, and the rest were
+  lost on the way there. The count each way is exact, but where one gap lost probes both
+  ways, which went which way can't be told, and those lost on the way there are taken to
+  be the first. A server without stamps either gives only the counts each way.
+
+On the Test page the packet grid marks each lost probe with an arrow: ▲ lost on the way
+to the server, ▼ on the way back. Hovering a square gives its number, and **All
+measurements** lists the lost ones each way.
 
 When the visitor chooses **IPv4 only** or **IPv6 only**, the client drops the server's
 candidates of the other family from the answer before connecting, so ICE can only form
@@ -478,6 +491,19 @@ Over hours the two computers' clocks drift apart, by tens of milliseconds an hou
 10 seconds measures delays against its own fastest packet, where the drift is a fraction
 of a millisecond. A server without stamps scores each 10 seconds on round trips, and over
 the TCP fallback only the voice packets are sent.
+
+**Which way each loss went.** About a second after a probe is found lost, Monitor asks
+the server for its record of the probes that arrived, from the oldest lost probe not yet
+placed, and places each one: never received by the server, lost on the way there, or
+received, lost on the way back. Every profile does this, the path probes as well as a
+call's packets, and a call's 10 seconds are scored each way by the same placing. The
+chart marks each lost probe ▲ (on the way to the server) or ▼ (on the way back), and
+hovering one gives its number. Under **Loss** the tile counts them each way ("↑ 2 to
+server · ↓ 1 from server"), and hovering it lists them by number. Probes not sent while
+the server was quiet, those sent over an earlier session, and those over the TCP fallback
+can't be placed, and a server from before 2.16.0 keeps no record, so its losses aren't
+placed. Once in a while, at a traffic limit, the server holds back a probe it received,
+which counts as lost neither way.
 
 **Stop** holds the chart and its figures where they stopped, to show or to take a
 screenshot of. The window can still be changed, to look back over the last 15 minutes.

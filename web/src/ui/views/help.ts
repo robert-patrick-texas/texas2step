@@ -36,7 +36,7 @@ const TOPICS: Topic[] = [
         [b("Download"), ": pulling data from the server to your device, several transfers at once, 4 by default, for 10s. The figure, in megabits a second (Mbps), leaves out the first seconds, while the connection speeds up."],
         [b("One stream"), ": one transfer on its own for the same time, as a single file copy or remote desktop gets."],
         [b("Upload"), ": pushing data from your device to the server, with the same transfers and timing as Download."],
-        [b("Packet loss"), ": 500 small numbered UDP packets, 10 ms apart, each echoed by the server. Any that don't come back were lost. Calls and video travel this way."],
+        [b("Packet loss"), ": 500 small numbered UDP packets, 10 ms apart, each echoed by the server. Any that don't come back were lost: on the way to the server (upstream) when the server never got it, or on the way back (downstream). Calls and video travel this way."],
       ]),
       p("While the transfers run, the page also measures:"),
       list("ul", [
@@ -99,6 +99,7 @@ const TOPICS: Topic[] = [
         b("Servers: Two"),
         " sends the same packets to two of them at the same moments and compares them side by side, with the difference B − A. When one path is worse, the trouble lies on that path, not in this device.",
       ),
+      p("Each lost packet is marked over the chart: ▲ lost on the way to the server, ▼ on the way back, as the server's record of the packets it got shows. Under Loss, the counts each way; hover it, or a mark, for the packets' numbers."),
       p("A server that stops answering for 3s is reported over the chart; Monitor keeps trying, and says how long it was gone once it answers. Stop holds the chart still for a screenshot. Going to another page stops Monitor too."),
       ...limit("monitor", (t) => `This site stops Monitor ${t} after each Start; reload the page to run it again.`),
     ],

@@ -1,11 +1,14 @@
-// Every UDP probe as one cell, in send order: shade = round-trip time, red = lost.
+// Every UDP probe as one cell, in send order: shade = round-trip time, red = lost, with an
+// arrow for the way it was lost where the server's record says: up on the way to the
+// server, down on the way back.
 import { cssVar, h, onResize, pointerIn } from "../dom";
 import { ms, text } from "../format";
 import { isDarkTheme, onThemeChange } from "../theme";
 import { hideTip, showTip } from "../tooltip";
 import { ramp } from "./common";
 
-type Cell = "unsent" | "inflight" | number | "lost";
+type Cell = "unsent" | "inflight" | number | "lost" | "up" | "down";
+const LOST: Cell[] = ["lost", "up", "down"];
 
 // Sequential teal ramp (latency identity), light→dark on light surfaces and the reverse
 // on dark ones, so "slow" is always the more prominent end.
@@ -21,6 +24,7 @@ export class PacketGrid {
   private width = 0;
   private pending = 0;
   private layout = { cols: 50, size: 8, gap: 2 };
+  private ways = false; // the lost cells show which way they were lost
   private scale: HTMLElement;
 
   constructor() {
@@ -38,6 +42,7 @@ export class PacketGrid {
 
   reset(n: number): void {
     this.cells = new Array<Cell>(n).fill("unsent");
+    this.ways = false;
     this.lo = Infinity;
     this.hi = 0;
     this.draw();
@@ -55,8 +60,10 @@ export class PacketGrid {
     this.schedule();
   }
 
-  finalize(packets: (number | null)[]): void {
-    this.cells = packets.map((p) => (p === null ? "lost" : p));
+  /** The finished test; `ways`: which lost probes went which way, where known. */
+  finalize(packets: (number | null)[], ways: { up: ReadonlySet<number>; down: ReadonlySet<number> } | null = null): void {
+    this.cells = packets.map((p, i) => (p !== null ? p : ways?.up.has(i) ? "up" : ways?.down.has(i) ? "down" : "lost"));
+    this.ways = ways !== null;
     const got = packets.filter((p): p is number => p !== null).sort((a, b) => a - b);
     this.lo = got[0] ?? 0;
     // Clip the colour scale at p98 so one outlier doesn't wash out the rest.
@@ -78,7 +85,7 @@ export class PacketGrid {
   private color(cell: Cell, stops: string[]): string {
     if (cell === "unsent") return cssVar("--grid");
     if (cell === "inflight") return cssVar("--axis");
-    if (cell === "lost") return cssVar("--critical");
+    if (typeof cell !== "number") return cssVar("--critical");
     const span = this.hi - this.lo;
     return ramp(stops, span > 0 ? (cell - this.lo) / span : 0.2);
   }
@@ -121,6 +128,16 @@ export class PacketGrid {
         ctx.moveTo(cx + size * 0.72, cy + size * 0.28);
         ctx.lineTo(cx + size * 0.28, cy + size * 0.72);
         ctx.stroke();
+      } else if ((cell === "up" || cell === "down") && size >= 6) {
+        // Which way it was lost: a triangle pointing up (to the server) or down (back).
+        const [top, bottom] = cell === "up" ? [0.24, 0.74] : [0.76, 0.26];
+        ctx.fillStyle = cssVar("--surface");
+        ctx.beginPath();
+        ctx.moveTo(cx + size * 0.5, cy + size * top);
+        ctx.lineTo(cx + size * 0.78, cy + size * bottom);
+        ctx.lineTo(cx + size * 0.22, cy + size * bottom);
+        ctx.closePath();
+        ctx.fill();
       }
     }
     this.drawScale(stops);
@@ -134,7 +151,7 @@ export class PacketGrid {
       h("span", { class: "scale-label" }, has ? `${text(ms(this.hi))}+` : "slow"),
       h("span", { class: "scale-gap" }),
       h("span", { class: "legend-key square", style: "--key:var(--critical)" }),
-      h("span", { class: "scale-label" }, "lost"),
+      h("span", { class: "scale-label" }, this.ways ? "lost: ▲ to server, ▼ from server" : "lost"),
       h("span", { class: "legend-key square", style: "--key:var(--axis)" }),
       h("span", { class: "scale-label" }, "in flight"),
     );
@@ -148,7 +165,8 @@ export class PacketGrid {
     const i = row * cols + col;
     const cell = this.cells[i];
     if (cell === undefined || col >= cols) return hideTip();
-    const value = typeof cell === "number" ? text(ms(cell)) : cell === "lost" ? "Lost" : cell === "inflight" ? "In flight" : "Not sent";
-    showTip(ev.clientX, ev.clientY, `Packet ${i + 1}`, [{ value, label: typeof cell === "number" ? "round trip" : "" }]);
+    const value = typeof cell === "number" ? text(ms(cell)) : LOST.includes(cell) ? "Lost" : cell === "inflight" ? "In flight" : "Not sent";
+    const label = typeof cell === "number" ? "round trip" : cell === "up" ? "on the way to the server" : cell === "down" ? "on the way back from the server" : "";
+    showTip(ev.clientX, ev.clientY, `Probe #${i}`, [{ value, label }]);
   }
 }

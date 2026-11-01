@@ -1,8 +1,10 @@
-// Scrolling RTT chart for the monitor: one dot per probe, lost probes as ticks on top,
+// Scrolling RTT chart for the monitor: one dot per probe, lost probes as marks on top (▲
+// lost on the way to the server, ▼ on the way back, a tick where that isn't known),
 // and a per-second loss strip underneath, where a call's score marks each 10 seconds. It
 // draws one series, or two (one per server) on shared axes, so two paths can be compared
 // directly. Stopped, it holds still where it stopped.
 import type { Slice } from "../../engine/stream";
+import type { Way } from "../../engine/ways";
 import type { CallRating } from "../../types";
 import { clear, cssVar, h, onResize, pointerIn } from "../dom";
 import { compact, ms, niceTicks, pct, text } from "../format";
@@ -14,7 +16,16 @@ import { log125 } from "./common";
 export interface LiveSample {
   t: number; // ms since epoch
   rtt: number | null; // null = lost
+  seq?: number; // a lost probe's sequence number...
+  way?: Way; // ...and which way it was lost, once known
 }
+
+const WAY_WORDS: Record<Way, string> = {
+  up: "on the way to the server",
+  down: "on the way back",
+  held: "held back by the server",
+  unknown: "which way isn't known",
+};
 
 export interface LiveSeries {
   label: string; // "" for a lone series
@@ -264,7 +275,17 @@ export class LiveChart {
       ctx.fillStyle = ink.crit;
       for (const d of data[i]!) {
         if (d.rtt !== null) continue;
-        ctx.fillRect(x(d.t) - 1, row, 2, 8);
+        const at = x(d.t);
+        if (d.way === "up" || d.way === "down") {
+          // Which way it was lost: pointing up (to the server) or down (on the way back).
+          const [tip, base] = d.way === "up" ? [row, row + 8] : [row + 8, row];
+          ctx.beginPath();
+          ctx.moveTo(at, tip);
+          ctx.lineTo(at + 3.5, base);
+          ctx.lineTo(at - 3.5, base);
+          ctx.closePath();
+          ctx.fill();
+        } else ctx.fillRect(at - 1, row, 2, 8);
       }
     }
 
@@ -366,8 +387,11 @@ export class LiveChart {
     const who = this.series[i]!.label ? `${this.series[i]!.label}: ` : "";
     const rows: TipRow[] = [];
     if (inSecond.length) {
-      const lost = inSecond.filter((d) => d.rtt === null).length;
-      rows.push({ value: text(pct((lost / inSecond.length) * 100)), label: `${who}lost in this second (${lost} of ${inSecond.length})` });
+      const lost = inSecond.filter((d) => d.rtt === null);
+      rows.push({ value: text(pct((lost.length / inSecond.length) * 100)), label: `${who}lost in this second (${lost.length} of ${inSecond.length})` });
+      const up = lost.filter((d) => d.way === "up").length;
+      const down = lost.filter((d) => d.way === "down").length;
+      if (up || down) rows.push({ value: `↑ ${up} · ↓ ${down}`, label: "to the server · on the way back" });
     }
     const s = (this.calls[i] ?? []).find((c) => t >= c.start && t < c.end);
     if (s && (s.dead || !s.call)) rows.push({ value: "No packets came back", label: `in these 10s, ${s.sent} sent` });
@@ -408,10 +432,12 @@ export class LiveChart {
     const at = rows.map((r) => r.best).find((b) => b);
     if (!at) return hideTip();
     const rtt = (b: LiveSample | undefined) => (!b ? "—" : b.rtt === null ? "Lost" : text(ms(b.rtt)));
+    // A lost probe: its number, and which way it was lost where known.
+    const lostAs = (b: LiveSample | undefined) => (b?.rtt === null ? [b.seq !== undefined ? `#${b.seq}` : "", b.way ? WAY_WORDS[b.way] : "not placed yet"].filter(Boolean).join(", ") : "");
     if (rows.length === 1) {
       const [r] = rows as [(typeof rows)[number]];
       return showTip(ev.clientX, ev.clientY, new Date(at.t).toLocaleTimeString(), [
-        { value: rtt(r.best), label: "round trip", color: `var(${r.s.token})`, shape: "dot" },
+        { value: rtt(r.best), label: r.best?.rtt === null ? lostAs(r.best) : "round trip", color: `var(${r.s.token})`, shape: "dot" },
         { value: r.loss, label: "loss in this second" },
       ]);
     }
@@ -419,7 +445,7 @@ export class LiveChart {
       ev.clientX,
       ev.clientY,
       new Date(at.t).toLocaleTimeString(),
-      rows.map((r) => ({ value: rtt(r.best), label: `${r.s.label} · ${r.loss} loss this second`, color: `var(${r.s.token})`, shape: "dot" as const })),
+      rows.map((r) => ({ value: rtt(r.best), label: [r.s.label, lostAs(r.best), `${r.loss} loss this second`].filter(Boolean).join(" · "), color: `var(${r.s.token})`, shape: "dot" as const })),
     );
   }
 }

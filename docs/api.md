@@ -112,6 +112,19 @@ sending the offer. The offer must include data channels:
   server's clock is its own: compare its stamps with each other, not with the client's
   clock. Servers that can stamp say so with `capabilities.stamps` in `/api/v1/info`.
 
+  `{"op":"seen","from":0}` asks for the server's record of which probes arrived, by the
+  sequence number in their first four bytes, from `from` up:
+  `{"op":"seen","from":0,"to":499,"missing":[[12,12],[340,341]],"held":[],"more":false}`.
+  Every probe from `from` to `to`, the highest that arrived, arrived but those in
+  `missing`, each run as `[first, last]`; a probe after `to` hasn't arrived. `held` arrived
+  but weren't echoed, at a traffic limit. A session keeps the last 131,072 numbers up to
+  the highest: asked from further back, `from` says where the record starts. An answer
+  lists at most 1,000 runs; with more, `more` is `true` and `to` stops before the first
+  left out, so ask again from after it. `{"op":"reset"}` clears the record too. A probe
+  without an echo whose number the server never got was lost on the way there, and one
+  it got was lost on the way back. Servers that keep the record say so with
+  `capabilities.seen`.
+
   `{"op":"profile","name":"voice"}` (or `"video"`, or `"path"`) says which of Monitor's
   profiles the session runs. A voice or video session counts toward a
   [traffic limit](traffic.md#monitors-call-profiles). The answer is
@@ -139,7 +152,7 @@ every port in its `rtc_port_min`–`rtc_port_max` range is taken.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/v1/info` | name, version (left out for clients outside `internal_networks`), server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes; `test_cpu`: it answers `/api/v1/tests/{id}`; `test_window`: with the client's `window` for downloads), limits (`max_session_seconds`: `session_max_runtime`; `max_monitor_seconds`, `max_diag_seconds`: `page_monitor_max_runtime` and `page_diag_max_runtime`, which pages from other servers keep while they test this one; `0` for none), ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `device` (`check`, `details`: `device_check` and `device_details`; `bound_percent`: `device_bound_percent`), `monitor` (`profile`: Monitor's until a visitor picks; `voice`, `video`: whether the Voice call and Video call profiles are offered); with a [traffic limit](traffic.md), `traffic` (below) |
+| GET | `/api/v1/info` | name, version (left out for clients outside `internal_networks`), server identity, capabilities (`stamps`: the UDP probe can [stamp](#udp-probe-protocol) its echoes; `seen`: it says [which probes arrived](#udp-probe-protocol); `test_cpu`: it answers `/api/v1/tests/{id}`; `test_window`: with the client's `window` for downloads), limits (`max_session_seconds`: `session_max_runtime`; `max_monitor_seconds`, `max_diag_seconds`: `page_monitor_max_runtime` and `page_diag_max_runtime`, which pages from other servers keep while they test this one; `0` for none), ICE servers, UI defaults (`one_stream`: whether a test downloads over one stream too, unless asked otherwise), `device` (`check`, `details`: `device_check` and `device_details`; `bound_percent`: `device_bound_percent`), `monitor` (`profile`: Monitor's until a visitor picks; `voice`, `video`: whether the Voice call and Video call profiles are offered); with a [traffic limit](traffic.md), `traffic` (below) |
 | GET | `/api/v1/whoami` | client IP, port, family, scheme, HTTP version, user agent |
 | GET | `/api/v1/diag/http` | both ends of this HTTP connection, its HTTP version and TLS, the server's TCP RTT and clock (below) |
 | GET | `/api/v1/locations` | servers offered in the picker (this one first) |
@@ -281,9 +294,11 @@ Browser runs, `texas2step run --json` and `/measure/full` share one shape (snake
   "one_stream": { …same as download, with one stream and no loaded latency… },
   "upload": { …same as download… },
   "loss": {"transport": "webrtc", "sent": 500, "received": 499, "loss_pct": 0.2,
-           "up_loss_pct": 0.0, "down_loss_pct": 0.2, "out_of_order": 0, "size": 200,
-           "rtt": { …latency stats… }, "packets": [3.1, 3.0, null, …],
-           "up_ms": [0.4, 0.0, null, …], "down_ms": [0.1, 0.3, null, …], "lost_upstream": []},
+           "up_loss_pct": 0.0, "down_loss_pct": 0.2, "up_lost": 0, "down_lost": 1,
+           "out_of_order": 0, "size": 200, "rtt": { …latency stats… },
+           "packets": [3.1, 3.0, null, …], "up_ms": [0.4, 0.0, null, …],
+           "down_ms": [0.1, 0.3, null, …], "lost_upstream": [], "lost_downstream": [2],
+           "placed": "seen"},
   "bufferbloat": {"added_download_ms": 4.1, "added_upload_ms": 11.0, "grade": "A"},
   "call": {"basis": "each way", "interval_ms": 20, "delay_ms": 81.6, "worse": "down",
            "packets": 250, "late": 0, "late_pct": 0.0, "impaired_pct": 0.2, "burst_ratio": 1.0,
@@ -302,9 +317,16 @@ Browser runs, `texas2step run --json` and `/measure/full` share one shape (snake
 `call` is a G.711 call's quality over the path the packet-loss test measured, and
 `responsiveness` is round trips per minute under load: see
 [Call quality](methodology.md#call-quality) and
-[Responsiveness](methodology.md#responsiveness). With a server that stamps its echoes,
-`loss.up_ms` and `loss.down_ms` give each probe's delay above the fastest, each way, and
-`loss.lost_upstream` the probes lost on the way to the server; `call.basis` is then
+[Responsiveness](methodology.md#responsiveness). `loss.up_lost` and `loss.down_lost` count
+the probes lost on the way to the server and on the way back; `up_loss_pct` is the share
+of those sent, and `down_loss_pct` the share of those that reached the server. Results
+from before 2.16.0 leave the counts out. `loss.lost_upstream` and `loss.lost_downstream`
+list them by sequence number, from #0: `loss.placed` is `"seen"` where the server's
+record of the probes that arrived placed each one exactly, and `"counted"` where its
+stamps placed them, which of a run went which way being a guess (results from before
+2.16.0 have `lost_upstream` alone, counted). With a server that stamps its echoes,
+`loss.up_ms` and `loss.down_ms` give each probe's delay above the fastest, each way;
+`call.basis` is then
 `"each way"`, with `down` and `up` scored apart and the worse one's figures at the top.
 Without stamps, `call.basis` is `"round trip"` and there are no `up` and `down`.
 `responsiveness.basis` is `"ippm"` when new connections were timed during the transfers

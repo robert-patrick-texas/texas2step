@@ -139,6 +139,53 @@ def one_way(
     }
 
 
+def place(
+    packets: Sequence[float | None],
+    seen: dict[str, Any] | None = None,
+    upstream: Sequence[int] | None = None,
+) -> dict[str, Any] | None:
+    """Which way each lost probe went, by sequence number: ``lost_upstream`` on the way to
+    the server, ``lost_downstream`` on the way back.
+
+    ``seen`` is the server's record of which probes arrived (its answer to {"op": "seen",
+    "from": 0} once the probes are done), which places each one exactly: those it never got
+    were lost on the way there, and those it got on the way back. One it held back at a
+    traffic limit was lost neither way. Without it, ``upstream`` is one_way's
+    ``lost_upstream``, placed by the server's counts, and the rest were lost on the way
+    back. ``placed`` says which; None with neither.
+
+    ``up_loss_pct`` is the share of the probes sent that were lost on the way there, and
+    ``down_loss_pct`` the share of those that reached the server lost on the way back.
+    """
+    lost = [i for i, r in enumerate(packets) if r is None]
+    if seen is not None:
+        start, to, more = seen["from"], seen["to"], seen.get("more", False)
+        missing = {s for first, last in seen["missing"] for s in range(first, last + 1)}
+        held = {s for first, last in seen.get("held", []) for s in range(first, last + 1)}
+        # One after the last that arrived never did, unless the answer stopped short.
+        up = [i for i in lost if i >= start and (i in missing or (i > to and not more))]
+        down = [i for i in lost if start <= i <= to and i not in missing and i not in held]
+        how = "seen"
+    elif upstream is not None:
+        ups = set(upstream)
+        up = [i for i in lost if i in ups]
+        down = [i for i in lost if i not in ups]
+        how = "counted"
+    else:
+        return None
+    sent = len(packets)
+    reached = sent - len(up)
+    return {
+        "lost_upstream": up,
+        "lost_downstream": down,
+        "up_lost": len(up),
+        "down_lost": len(down),
+        "up_loss_pct": len(up) / sent * 100 if sent else None,
+        "down_loss_pct": len(down) / reached * 100 if reached else None,
+        "placed": how,
+    }
+
+
 def _judge(
     seqs: Sequence[int],
     lost: Sequence[bool],

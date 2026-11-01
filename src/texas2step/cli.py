@@ -143,6 +143,24 @@ def _one_stream_line(result: dict[str, Any]) -> list[str]:
     ]
 
 
+def _counted(pct: float | None, count: int | None) -> str:
+    """A share of the probes and how many, as "0.60 % (3)"."""
+    return _fmt(pct, " %") + ("" if count is None else f" ({count:,})")
+
+
+def seq_runs(seqs: list[int], most: int = 10) -> str:
+    """Sequence numbers as "#3, #7\u2013#9 and 4 more": runs of them, the first ``most``."""
+    runs: list[list[int]] = []
+    for s in sorted(seqs):
+        if runs and runs[-1][1] == s - 1:
+            runs[-1][1] = s
+        else:
+            runs.append([s, s])
+    shown = ", ".join(f"#{a}" if a == b else f"#{a}\u2013#{b}" for a, b in runs[:most])
+    rest = sum(b - a + 1 for a, b in runs[most:])
+    return f"{shown} and {rest:,} more" if rest else shown
+
+
 def _loss_line(loss: dict[str, Any] | None) -> str:
     if not loss:
         return f"  {'Loss':<14} —"
@@ -151,10 +169,25 @@ def _loss_line(loss: dict[str, Any] | None) -> str:
     rtt = loss.get("rtt") or {}
     parts = [f"{loss['lost']}/{loss['sent']} lost"]
     if loss.get("up_loss_pct") is not None:
-        parts.append(f"↑ {_fmt(loss['up_loss_pct'], ' %')} ↓ {_fmt(loss['down_loss_pct'], ' %')}")
+        up = _counted(loss["up_loss_pct"], loss.get("up_lost"))
+        down = _counted(loss["down_loss_pct"], loss.get("down_lost"))
+        parts.append(f"↑ to server {up} · ↓ from server {down}")
     if rtt.get("median") is not None:
         parts.append(f"UDP RTT {_fmt(rtt['median'], ' ms')} · jitter {_fmt(rtt['jitter'], ' ms')}")
-    return f"  {'Loss':<14} {_fmt(loss['loss_pct'], ' %'):>14}   ({' · '.join(parts)})"
+    line = f"  {'Loss':<14} {_fmt(loss['loss_pct'], ' %'):>14}   ({' · '.join(parts)})"
+    # Which probes, by number, each way.
+    if loss.get("lost") and "lost_upstream" in loss and "lost_downstream" in loss:
+        ways = [
+            f"{way}: {seq_runs(found)}"
+            for way, found in (
+                ("↑ lost to the server", loss["lost_upstream"]),
+                ("↓ lost from the server", loss["lost_downstream"]),
+            )
+            if found
+        ]
+        how = ", placed by the server's counts" if loss.get("placed") == "counted" else ""
+        line += f"\n  {'':<14} {'':>14}   {' · '.join(ways)} (of #0\u2013#{loss['sent'] - 1}{how})"
+    return line
 
 
 def _rated(side: dict[str, Any]) -> str:

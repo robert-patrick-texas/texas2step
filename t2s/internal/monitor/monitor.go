@@ -8,6 +8,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"math/rand/v2"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/engine"
+	"github.com/robert-patrick-texas/texas2step/t2s/internal/quality"
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/stats"
 )
 
@@ -63,6 +65,7 @@ type Event struct {
 type point struct {
 	t   float64 // wall ms when the probe was sent
 	rtt float64 // NaN: lost
+	seq uint32
 }
 
 type probe interface {
@@ -70,10 +73,22 @@ type probe interface {
 	close()
 }
 
-type rtcProbe struct{ r *engine.RtcProbe }
+type rtcProbe struct {
+	r   *engine.RtcProbe
+	can bool // the server keeps a record of the probes that arrived
+}
 
 func (p rtcProbe) send(seq uint32, size int) { p.r.Send(seq, size) }
 func (p rtcProbe) close()                    { p.r.Close() }
+
+// seerOf is how to ask a session's server which probes arrived; nil where it can't say:
+// over TCP, or from a server that keeps no record.
+func seerOf(p probe) func(from int) *quality.Seen {
+	if r, ok := p.(rtcProbe); ok && r.can {
+		return func(from int) *quality.Seen { return r.r.Seen(from, 2*time.Second) }
+	}
+	return nil
+}
 
 type wsProbe struct {
 	w    *engine.WsProber
@@ -105,6 +120,14 @@ type Dest struct {
 	probe     probe
 	transport string
 	sentAt    map[uint32]float64 // the probes on the chart: path probes or voice packets
+	via       map[uint32]int     // ...those of them sent, and over which session (lostWays)
+	ways      lostWays           // which way each lost one went
+	wayOf     map[uint32]string  // the lost ones on the chart: which way each went, once known
+	upSeqs    []uint32           // since Start: lost on the way to the server...
+	downSeqs  []uint32           // ...and on the way back, by sequence number
+	heldLost  int                // held back by the server, at a traffic limit
+	firstSeq  int64              // the first and last probes on the chart, since Start; -1 before
+	lastSeq   int64
 	sent      int
 	latest    float64
 	stream    *CallStream
@@ -157,6 +180,7 @@ type Monitor struct {
 	ended     string // why it stopped, where it wasn't Ctrl-C
 	limit     Limit
 	notice    func(Event)
+	closing   []chan struct{} // sessions closing, once the last lost probes are placed
 }
 
 func wall() float64 { return float64(time.Now().UnixNano()) / 1e6 }
@@ -165,7 +189,8 @@ func wall() float64 { return float64(time.Now().UnixNano()) / 1e6 }
 func New(cfg Config, targets []*engine.Target, notice func(Event)) *Monitor {
 	m := &Monitor{cfg: cfg, notice: notice}
 	for i, t := range targets {
-		d := &Dest{t: t, sentAt: map[uint32]float64{}, latest: math.NaN(), slices: map[float64]Slice{}}
+		d := &Dest{t: t, sentAt: map[uint32]float64{}, via: map[uint32]int{}, wayOf: map[uint32]string{},
+			firstSeq: -1, lastSeq: -1, latest: math.NaN(), slices: map[float64]Slice{}}
 		if len(targets) > 1 {
 			d.Short = string(rune('A' + i))
 		}
@@ -353,9 +378,10 @@ func (m *Monitor) udp(d *Dest) (probe, string, error) {
 			}
 			return nil, "", &Refusal{Message: fmt.Sprintf("%s doesn't offer Monitor's %s profile.", d.info.Name(d.t), profileNames[p])}
 		}
-		if d.info.Capabilities.Stamps {
-			rtc.Stamp()
-		}
+	}
+	// The server's clock and count in each echo, for each direction's delays.
+	if d.info.Capabilities.Stamps {
+		rtc.Stamp()
 	}
 	// At a traffic limit the server holds a call to path probes, and while the host is
 	// busy a Video call to its Voice call ("to"): follow it. At its session_max_runtime it
@@ -388,7 +414,7 @@ func (m *Monitor) udp(d *Dest) (probe, string, error) {
 			transport += " · IPv4"
 		}
 	}
-	return rtcProbe{rtc}, transport, nil
+	return rtcProbe{rtc, d.info.Capabilities.Seen}, transport, nil
 }
 
 func or(s, fallback string) string {
@@ -402,14 +428,15 @@ func or(s, fallback string) string {
 // answers. Called with m.mu held.
 func (m *Monitor) record(d *Dest, seq uint32, rtt float64) {
 	d.lastEcho = wall()
+	delete(d.via, seq)
 	t, ok := d.sentAt[seq]
 	if !ok {
 		return
 	}
 	delete(d.sentAt, seq)
 	d.latest = rtt
-	d.all = inOrder(d.all, point{t, rtt})
-	d.push(point{t, rtt})
+	d.all = inOrder(d.all, point{t, rtt, seq})
+	d.push(point{t, rtt, seq})
 }
 
 // inOrder adds p to points in the order the probes were sent: an answer that overtakes an
@@ -431,6 +458,7 @@ func (d *Dest) push(p point) {
 	d.points = inOrder(d.points, p)
 	cut := 0
 	for cut < len(d.points) && d.points[cut].t < p.t-keepMs {
+		delete(d.wayOf, d.points[cut].seq)
 		cut++
 	}
 	if cut > 0 {
@@ -497,6 +525,10 @@ func (m *Monitor) schedule() {
 			if charted {
 				d.sentAt[seq] = now
 				d.sent++
+				if d.firstSeq < 0 {
+					d.firstSeq = int64(seq)
+				}
+				d.lastSeq = int64(seq)
 			}
 			if d.stream != nil {
 				d.stream.Sent(seq, frame, at, now)
@@ -507,6 +539,9 @@ func (m *Monitor) schedule() {
 			}
 			d.beat = now
 			d.probe.send(seq, size)
+			if charted {
+				d.via[seq] = d.ways.session
+			}
 		}
 		if charted && m.limit.Ms > 0 && now+every-m.firstSent >= m.limit.Ms-every/2 {
 			m.lastOut = true // the next is past the limit: this was the last
@@ -526,18 +561,58 @@ func (m *Monitor) schedule() {
 	}
 }
 
-// sweep counts the probes not back within a second as lost. Called with m.mu held.
+// sweep counts the probes not back within a second as lost; which way they went follows
+// from the server. Called with m.mu held.
 func (m *Monitor) sweep() {
 	cutoff := wall() - lostAfterMs
 	for _, d := range m.Dests {
 		for seq, t := range d.sentAt {
-			if t < cutoff {
-				delete(d.sentAt, seq)
-				d.lost++
-				d.push(point{t, math.NaN()})
+			if t >= cutoff {
+				continue
 			}
+			delete(d.sentAt, seq)
+			d.lost++
+			d.push(point{t, math.NaN(), seq})
+			session, sent := d.via[seq]
+			delete(d.via, seq)
+			if !sent {
+				session = -1
+			}
+			d.ways.lost(seq, session, seerOf(d.probe) != nil, func(way string) { d.placed(seq, way) })
 		}
 	}
+}
+
+// placed is which way a lost probe went, once known. Called with m.mu held.
+func (d *Dest) placed(seq uint32, way string) {
+	d.wayOf[seq] = way
+	switch way {
+	case wayUp:
+		d.upSeqs = append(d.upSeqs, seq)
+	case wayDown:
+		d.downSeqs = append(d.downSeqs, seq)
+	case wayHeld:
+		d.heldLost++
+	}
+	if d.stream != nil {
+		d.stream.Place(seq, way)
+	}
+}
+
+// ask asks a server which of its lost probes arrived, unless it's being asked already or
+// none wait, and places them. Called without m.mu: the answer comes on the session's
+// control channel, whose callbacks may wait for it.
+func (m *Monitor) ask(d *Dest, seen func(from int) *quality.Seen) {
+	m.mu.Lock()
+	from, session, at, ok := d.ways.begin()
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+	answer := seen(from)
+	m.mu.Lock()
+	d.ways.take(answer, at, session)
+	m.mu.Unlock()
 }
 
 // every runs f with m.mu held every d, until ctx ends or Monitor stops.
@@ -565,6 +640,11 @@ func (m *Monitor) every(ctx context.Context, d time.Duration, f func()) {
 // TCP it tries UDP again every udpRetryMs. Called with m.mu held.
 func (m *Monitor) watch() {
 	now := wall()
+	for _, d := range m.Dests {
+		if seen := seerOf(d.probe); seen != nil && len(d.ways.waiting) > 0 && !d.ways.asking {
+			go m.ask(d, seen)
+		}
+	}
 	if m.settling > 0 {
 		if now-m.settling >= SettleMs {
 			m.stopLocked()
@@ -644,6 +724,7 @@ func (m *Monitor) reconnect(d *Dest) {
 	if d.stream != nil {
 		d.stream.NewSession()
 	}
+	d.ways.newSession()
 	if dn := d.down; dn != nil {
 		// Until its first echo, it's still down; if none comes, the next try waits longer.
 		now := wall()
@@ -661,13 +742,38 @@ func (m *Monitor) reconnect(d *Dest) {
 	}
 }
 
-// drop closes a server's session. Called with m.mu held: the closing goes on without it,
-// as a session's callbacks wait for it.
+// drop closes a server's session, once its last lost probes are placed where the server
+// answers. Called with m.mu held: the closing goes on without it, as a session's callbacks
+// wait for it.
 func (m *Monitor) drop(d *Dest) {
-	if p := d.probe; p != nil {
-		d.probe = nil
-		go p.close()
+	p := d.probe
+	if p == nil {
+		return
 	}
+	d.probe = nil
+	seen := seerOf(p)
+	done := make(chan struct{})
+	m.closing = append(m.closing, done)
+	go func() {
+		defer close(done)
+		defer p.close()
+		if seen == nil {
+			return
+		}
+		// One question under way is answered first; then any found lost since.
+		for range 20 {
+			m.mu.Lock()
+			asking, waiting := d.ways.asking, len(d.ways.waiting)
+			m.mu.Unlock()
+			if !asking {
+				if waiting > 0 {
+					m.ask(d, seen)
+				}
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
 }
 
 // tryUdp tries UDP again over the TCP fallback; it takes over if it opens.
@@ -692,6 +798,7 @@ func (m *Monitor) tryUdp(d *Dest) {
 	if d.stream != nil {
 		d.stream.NewSession()
 	}
+	d.ways.newSession()
 	m.event(fmt.Sprintf("%s: UDP gets through again, %s", d.Name(), transport))
 }
 
@@ -778,12 +885,22 @@ func (m *Monitor) atLimit(now float64) {
 // Done is closed once Monitor stops.
 func (m *Monitor) Done() <-chan struct{} { return m.ctx.Done() }
 
-// Stop stops Monitor: the figures hold where it stopped.
+// Stop stops Monitor: the figures hold where it stopped. It returns once the sessions have
+// closed, their last lost probes placed where the servers answered: within 3 s.
 func (m *Monitor) Stop() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.stopLocked()
 	m.cancel()
+	closing := m.closing
+	m.mu.Unlock()
+	deadline := time.After(3 * time.Second)
+	for _, done := range closing {
+		select {
+		case <-done:
+		case <-deadline:
+			return
+		}
+	}
 }
 
 func (m *Monitor) stopLocked() {
@@ -841,8 +958,15 @@ type Figures struct {
 	Jitter *float64 `json:"jitter_ms"`
 	Loss   *float64 `json:"loss_pct"`
 	Lost   int      `json:"lost"`
-	Window int      `json:"window"`
-	Sent   int      `json:"sent"`
+	// The lost ones by the way they went, where the server keeps a record (Placing): on
+	// the way to it, on the way back, held back by it, and not placed (yet).
+	UpLost       int  `json:"up_lost"`
+	DownLost     int  `json:"down_lost"`
+	HeldLost     int  `json:"held_lost,omitempty"`
+	UnplacedLost int  `json:"unplaced_lost"`
+	Placing      bool `json:"placing"`
+	Window       int  `json:"window"`
+	Sent         int  `json:"sent"`
 	// With a call profile, over the window's 10-second slices:
 	Mos        *float64 `json:"mos,omitempty"`
 	Rating     string   `json:"rating,omitempty"` // the median slice's
@@ -869,7 +993,22 @@ func figures(d *Dest, now, windowMs float64, slices []Slice) Figures {
 			got = append(got, p.rtt)
 		}
 	}
-	f := Figures{Lost: n - len(got), Window: n, Sent: d.sent}
+	f := Figures{Lost: n - len(got), Window: n, Sent: d.sent, Placing: d.info != nil && d.info.Capabilities.Seen}
+	for _, p := range d.points {
+		if p.t < from || p.t > now || !math.IsNaN(p.rtt) {
+			continue
+		}
+		switch d.wayOf[p.seq] {
+		case wayUp:
+			f.UpLost++
+		case wayDown:
+			f.DownLost++
+		case wayHeld:
+			f.HeldLost++
+		default:
+			f.UnplacedLost++
+		}
+	}
 	if !math.IsNaN(d.latest) {
 		f.Latest = ptr(d.latest)
 	}
@@ -950,6 +1089,7 @@ type View struct {
 	Quiet     bool
 	Figures   Figures
 	points    []point
+	wayOf     map[uint32]string
 	Slices    []Slice
 	New       []Slice // slices scored since the last snapshot
 }
@@ -1000,7 +1140,8 @@ func (m *Monitor) snapshot() Snapshot {
 	}
 	s := Snapshot{Now: now, Started: m.startedAt, Running: m.running, Profile: m.cfg.Profile, Config: m.cfg, Limit: m.limit, Events: append([]Event(nil), m.events...), Ended: m.ended}
 	for _, d := range m.Dests {
-		v := View{Short: d.Short, Name: d.t.Base, Transport: d.transport, Quiet: d.down != nil, points: append([]point(nil), d.points...)}
+		v := View{Short: d.Short, Name: d.t.Base, Transport: d.transport, Quiet: d.down != nil, points: append([]point(nil), d.points...),
+			wayOf: maps.Clone(d.wayOf)}
 		if d.info != nil {
 			v.Name = d.info.Name(d.t)
 			if d.info.Server.Location != nil {
@@ -1033,11 +1174,28 @@ type Total struct {
 	P95     *float64 `json:"p95_ms"`
 	Jitter  *float64 `json:"jitter_ms"`
 	Outages int      `json:"outages"`
-	Slices  int      `json:"slices,omitempty"`
-	Mos     *float64 `json:"mos,omitempty"`
-	Worst   *float64 `json:"worst_mos,omitempty"`
-	WorstAt string   `json:"worst_at,omitempty"`
-	Below   int      `json:"below_good,omitempty"`
+	// The lost probes by the way they went, by sequence number, of the probes from FirstSeq
+	// to LastSeq, where the server keeps a record of those that arrived (Placing).
+	UpLost         int      `json:"up_lost"`
+	DownLost       int      `json:"down_lost"`
+	HeldLost       int      `json:"held_lost,omitempty"`
+	UnplacedLost   int      `json:"unplaced_lost"`
+	LostUpstream   []uint32 `json:"lost_upstream"`
+	LostDownstream []uint32 `json:"lost_downstream"`
+	FirstSeq       int64    `json:"first_seq"`
+	LastSeq        int64    `json:"last_seq"`
+	Placing        bool     `json:"placing"`
+	Slices         int      `json:"slices,omitempty"`
+	Mos            *float64 `json:"mos,omitempty"`
+	Worst          *float64 `json:"worst_mos,omitempty"`
+	WorstAt        string   `json:"worst_at,omitempty"`
+	Below          int      `json:"below_good,omitempty"`
+}
+
+func sortedSeqs(seqs []uint32) []uint32 {
+	out := append([]uint32{}, seqs...)
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
 }
 
 // Totals are each server's figures since Start.
@@ -1046,7 +1204,11 @@ func (m *Monitor) Totals() []Total {
 	defer m.mu.Unlock()
 	var out []Total
 	for _, d := range m.Dests {
-		t := Total{Name: d.Name(), URL: d.t.Base, Sent: d.sent, Lost: d.lost, Outages: d.outages}
+		t := Total{Name: d.Name(), URL: d.t.Base, Sent: d.sent, Lost: d.lost, Outages: d.outages,
+			UpLost: len(d.upSeqs), DownLost: len(d.downSeqs), HeldLost: d.heldLost,
+			LostUpstream: sortedSeqs(d.upSeqs), LostDownstream: sortedSeqs(d.downSeqs),
+			FirstSeq: d.firstSeq, LastSeq: d.lastSeq, Placing: d.info != nil && d.info.Capabilities.Seen}
+		t.UnplacedLost = t.Lost - t.UpLost - t.DownLost - t.HeldLost
 		if resolved := len(d.all) + d.lost; resolved > 0 {
 			t.LossPct = ptr(float64(d.lost) / float64(resolved) * 100)
 		}

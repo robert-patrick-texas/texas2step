@@ -93,8 +93,12 @@ export interface LossResult {
   received: number;
   lost: number;
   loss_pct: number;
+  /** The share of the probes sent lost on the way to the server, and of those that reached
+   * it lost on the way back; with how many (older results leave the counts out). */
   up_loss_pct: number | null;
   down_loss_pct: number | null;
+  up_lost?: number | null;
+  down_lost?: number | null;
   out_of_order: number;
   duplicates: number;
   interval_ms: number;
@@ -102,10 +106,16 @@ export interface LossResult {
   rtt: LatencyStats;
   packets: (number | null)[];
   /** With the server's stamps: each probe's delay above the fastest, each way (null when
-   * lost), and the probes lost on the way to the server (the rest were lost coming back). */
+   * lost). */
   up_ms?: (number | null)[];
   down_ms?: (number | null)[];
+  /** The probes lost on the way to the server and on the way back, by sequence number:
+   * `placed` "seen" from the server's record of those that arrived, exactly; "counted"
+   * from its counts, where which of a run went which way is a guess. Older results have
+   * `lost_upstream` alone, counted. */
   lost_upstream?: number[];
+  lost_downstream?: number[];
+  placed?: "seen" | "counted";
   note?: string;
   error?: string;
   /** The page's lateness while the probes ran (ThroughputResult's `device_busy`). */
@@ -239,7 +249,7 @@ export interface ServerInfo {
   /** `stamps`: the UDP probe's echoes can carry the server's stamps; `test_cpu`: it says
    * whether its CPU held a test's transfers back; `test_window`: how long the client held
    * each download back. Older servers leave them out. */
-  capabilities: { websocket: boolean; webrtc: boolean; results: boolean; measure: boolean; stamps?: boolean; test_cpu?: boolean; test_window?: boolean };
+  capabilities: { websocket: boolean; webrtc: boolean; results: boolean; measure: boolean; stamps?: boolean; seen?: boolean; test_cpu?: boolean; test_window?: boolean };
   /** `max_session_seconds`: session_max_runtime; `max_monitor_seconds`, `max_diag_seconds`:
    * page_monitor_max_runtime and page_diag_max_runtime. 0 for none; older servers leave them out. */
   limits: {

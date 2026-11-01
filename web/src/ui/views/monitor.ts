@@ -5,12 +5,14 @@
 import { RUNTIME_CLOSE, WsProber } from "../../engine/latency";
 import { RtcProbe } from "../../engine/loss";
 import { type Endpoint, NeedsCode, REFUSED } from "../../engine/net";
+import { type SeenAnswer, seqRuns } from "../../engine/quality";
 import { jitter, percentile } from "../../engine/stats";
 import { CallStream, framePackets, type ProfileName, SETTLE_MS, type Slice, VIDEO_BYTES, VIDEO_FPS } from "../../engine/stream";
+import { LostWays } from "../../engine/ways";
 import type { CallRating, Location, ServerInfo } from "../../types";
 import type { App, View } from "../app";
 import { awakeSwitch } from "../awake";
-import { LiveChart, type LiveSeries } from "../charts/live";
+import { LiveChart, type LiveSample, type LiveSeries } from "../charts/live";
 import { clear, h, save, setText, store } from "../dom";
 import { type Formatted, ms, pct } from "../format";
 import { type Limit, RuntimeCounter, reloadButton, sessionEnded, span, strictest, whose } from "../runtime";
@@ -18,6 +20,8 @@ import { type Limit, RuntimeCounter, reloadButton, sessionEnded, span, strictest
 interface Probe {
   send(seq: number, size: number): void;
   close(): void;
+  /** The server's record of which probes arrived, where it keeps one (over UDP). */
+  seen?: (from: number) => Promise<SeenAnswer | null>;
 }
 
 /** One server being probed: its own session, probes in flight and totals. */
@@ -27,6 +31,8 @@ interface Dest {
   probe: Probe | null;
   transport: string;
   sentAt: Map<number, number>; // the probes on the chart: path probes or voice packets
+  via: Map<number, number>; // ...those of them sent, and over which session (LostWays)
+  ways: LostWays; // which way each lost one went
   sent: number;
   latest: number | null;
   stream: CallStream | null; // with a call profile
@@ -68,6 +74,13 @@ interface Figures {
   jitter: number | null;
   loss: number | null; // percent of the window
   lost: number;
+  // The lost ones by the way they went (LostWays): their sequence numbers each way, those
+  // held back by the server, and those not placed (yet). `placing`: the server keeps a record.
+  upSeqs: number[];
+  downSeqs: number[];
+  held: number;
+  unplaced: number;
+  placing: boolean;
   window: number;
   sent: number;
   // With a call profile, over the window's 10-second slices:
@@ -184,6 +197,7 @@ export class MonitorView implements View {
   private compare!: HTMLElement;
   private figures: Partial<Record<Key, HTMLElement>> = {};
   private counts: Partial<Record<Key, HTMLElement>> = {};
+  private lossWays: HTMLElement | null = null; // under Loss: how many each way
   private cells: Partial<Record<Key, HTMLElement>>[] = [];
   private heads: HTMLElement[] = [];
   private chartHead!: HTMLElement;
@@ -429,6 +443,10 @@ export class MonitorView implements View {
         this.counts[key] = count;
         figure.append(count);
       }
+      if (key === "loss") {
+        this.lossWays = h("span", { class: "tile-ways" });
+        figure.append(this.lossWays);
+      }
       this.tiles.append(h("div", { class: "tile compact", "data-key": key }, h("div", { class: "tile-label" }, label), figure));
     }
   }
@@ -518,6 +536,8 @@ export class MonitorView implements View {
       probe: null,
       transport: "",
       sentAt: new Map(),
+      via: new Map(),
+      ways: new LostWays(),
       sent: 0,
       latest: null,
       stream: call ? new CallStream(this.choice.every) : null,
@@ -613,8 +633,9 @@ export class MonitorView implements View {
         if (answer.reason === "traffic limit" || answer.reason === "server busy") return { message: answer.message ?? REFUSED, url: answer.url ?? null };
         return { message: `${info.server.name} doesn't offer Monitor's ${profile === "video" ? "Video call" : "Voice call"} profile.`, url: null };
       }
-      if (info.capabilities.stamps) await rtc.stamp();
     }
+    // The server's clock and count in each echo, for each direction's delays.
+    if (info.capabilities.stamps) await rtc.stamp();
     // At a traffic limit the server holds a call to path probes, and while it is busy with
     // other work, a Video call to its Voice call: follow it. At its session_max_runtime it
     // ends the session: stop, rather than open another.
@@ -627,12 +648,14 @@ export class MonitorView implements View {
       d.stream?.echo(seq, rtt, now, stamp);
     };
     const family = await rtc.family().catch(() => null);
-    return { probe: { send: (seq, size) => rtc.send(seq, size), close: () => rtc.close() }, transport: ["UDP · WebRTC", family].filter(Boolean).join(" · ") };
+    const seen = info.capabilities.seen ? (from: number) => rtc.seen(from) : undefined;
+    return { probe: { send: (seq, size) => rtc.send(seq, size), close: () => rtc.close(), seen }, transport: ["UDP · WebRTC", family].filter(Boolean).join(" · ") };
   }
 
   /** An echo: on the chart if its probe is still waiting, and proof the server answers. */
   private record(d: Dest, series: number, seq: number, rtt: number): void {
     d.lastEcho = Date.now();
+    d.via.delete(seq);
     const t = d.sentAt.get(seq);
     if (t === undefined) return;
     d.sentAt.delete(seq);
@@ -652,6 +675,7 @@ export class MonitorView implements View {
     const now = Date.now();
     const limit = this.limit();
     if (limit.ms && now - this.startedAt >= limit.ms) return this.end(`Stopped after ${span(limit.ms / 1000)}, ${whose(limit)} limit.`);
+    for (const d of this.dests) if (d.probe?.seen) void d.ways.ask(d.probe.seen);
     for (const [i, d] of this.dests.entries()) {
       if (d.busy) continue;
       const quiet = now - d.lastEcho > SILENT_MS;
@@ -704,6 +728,7 @@ export class MonitorView implements View {
       return;
     }
     d.stream?.newSession();
+    d.ways.newSession();
     const down = d.down;
     if (down) {
       // Until its first echo, it's still down; if none comes, the next try waits longer.
@@ -739,6 +764,7 @@ export class MonitorView implements View {
     d.probe = got.probe;
     d.transport = got.transport;
     d.stream?.newSession();
+    d.ways.newSession();
     this.showTransport();
   }
 
@@ -761,7 +787,7 @@ export class MonitorView implements View {
    * It's the one line those take, so Monitor still fits a laptop's screen.
    */
   private renderChartHead(): void {
-    const about = this.choice.profile === "path" ? "One dot per probe. Red ticks along the top mark probes that never came back." : "One dot per voice packet, red ticks for lost ones; the strip scores each 10 seconds.";
+    const about = this.choice.profile === "path" ? "One dot per probe. Red marks at the top are lost: ▲ to the server, ▼ from it." : "Lost voice packets in red: ▲ to the server, ▼ from it. The strip scores each 10s.";
     const quiet = this.running ? this.dests.find((d) => d.down) : undefined;
     let note = "";
     if (quiet) {
@@ -841,6 +867,7 @@ export class MonitorView implements View {
         if (!d.probe || (d.down && wall - d.beat < 1000)) continue;
         d.beat = wall;
         d.probe.send(seq, size);
+        if (charted) d.via.set(seq, d.ways.session);
       }
     };
     const size = this.held ? Math.min(c.size, HELD_BYTES) : c.size;
@@ -856,7 +883,7 @@ export class MonitorView implements View {
       );
     }
     this.timers.push(window.setInterval(() => this.watch(), 500));
-    // Probes not back within a second are lost.
+    // Probes not back within a second are lost; which way they went follows from the server.
     this.timers.push(
       window.setInterval(() => {
         const cutoff = Date.now() - 1000;
@@ -864,7 +891,14 @@ export class MonitorView implements View {
           for (const [seq, t] of d.sentAt) {
             if (t >= cutoff) continue;
             d.sentAt.delete(seq);
-            this.chart.push({ t, rtt: null }, i);
+            const sample: LiveSample = { t, rtt: null, seq };
+            this.chart.push(sample, i);
+            const session = d.via.get(seq) ?? null;
+            d.via.delete(seq);
+            d.ways.lost(seq, session, Boolean(d.probe?.seen), (way) => {
+              sample.way = way;
+              d.stream?.place(seq, way);
+            });
           }
         }
       }, 250),
@@ -879,8 +913,11 @@ export class MonitorView implements View {
       this.chart.freeze(this.stoppedAt);
     }
     for (const d of this.dests) {
-      d.probe?.close();
+      // The lost probes still waiting are placed, where the server answers, before it closes.
+      const probe = d.probe;
       d.probe = null;
+      if (probe?.seen && d.ways.pending) void d.ways.ask(probe.seen).finally(() => probe.close());
+      else probe?.close();
     }
     this.running = false;
     this.runId++;
@@ -896,6 +933,11 @@ export class MonitorView implements View {
     const data = this.chart.visible(i);
     const got = data.filter((d) => d.rtt !== null).map((d) => d.rtt!);
     const lost = data.length - got.length;
+    const gone = data.filter((d) => d.rtt === null);
+    const seqs = (way: string) => gone.flatMap((d) => (d.way === way && d.seq !== undefined ? [d.seq] : []));
+    const upSeqs = seqs("up");
+    const downSeqs = seqs("down");
+    const held = gone.filter((d) => d.way === "held").length;
     const from = this.chart.now - this.chart.windowSeconds * 1000;
     const shown = slices.filter((s) => s.end > from && (s.call || s.dead));
     const score = (s: Slice) => (s.dead ? 1 : s.call!.mos);
@@ -919,6 +961,11 @@ export class MonitorView implements View {
       jitter: got.length > 1 ? jitter(got) : null,
       loss: data.length ? (lost / data.length) * 100 : null,
       lost,
+      upSeqs,
+      downSeqs,
+      held,
+      unplaced: lost - upSeqs.length - downSeqs.length - held,
+      placing: Boolean(this.dests[i]?.info?.capabilities.seen),
       window: data.length,
       sent: this.dests[i]?.sent ?? 0,
       mos: scores.length ? percentile(scores, 50) : null,
@@ -973,8 +1020,14 @@ export class MonitorView implements View {
       el.title = title;
       el.classList.toggle("bad", bad);
     };
-    // The packets behind the percentage: red once any are lost.
-    count("loss", v.window ? `(${v.lost.toLocaleString()})` : "", `${v.lost.toLocaleString()} of ${v.window.toLocaleString()} probes lost in the window`, v.lost > 0);
+    // The packets behind the percentage: red once any are lost; under it, which way they went.
+    count("loss", v.window ? `(${v.lost.toLocaleString()})` : "", lostTitle(v), v.lost > 0);
+    if (this.lossWays) {
+      // Each way on its own, so a narrow tile breaks the line between them.
+      const ways = v.placing && v.window ? [`↑ ${v.upSeqs.length.toLocaleString()} to server`, `↓ ${v.downSeqs.length.toLocaleString()} from server`] : [];
+      this.lossWays.replaceChildren(...ways.map((w) => h("span", {}, w)));
+      this.lossWays.title = lostTitle(v);
+    }
     count("mos", v.rating ? RATING_WORD[v.rating] : "", "The median 10-second score in the window, and its rating", v.rating !== null && !["excellent", "good"].includes(v.rating));
     count("worst", v.worstAt !== null ? ago(v.worstAt, this.chart.now) : "", v.worstAt !== null ? `The worst 10 seconds began at ${new Date(v.worstAt).toLocaleTimeString()}` : "");
     count("below", v.slices ? `(${v.belowCount} of ${v.slices})` : "", "10-second slices rated below good (4.0), of those in the window", v.belowCount > 0);
@@ -988,12 +1041,12 @@ export class MonitorView implements View {
         const cell = c[key];
         if (!cell) continue;
         let shown = value(key, v);
-        if (key === "loss" && v.window) shown = `${shown} (${v.lost.toLocaleString()})`;
+        if (key === "loss" && v.window) shown = `${shown} (${v.lost.toLocaleString()})${v.placing ? ` · ↑ ${v.upSeqs.length.toLocaleString()} · ↓ ${v.downSeqs.length.toLocaleString()}` : ""}`;
         if (key === "mos" && v.rating) shown = `${shown} · ${RATING_WORD[v.rating]}`;
         setText(cell, shown);
       }
       c.loss?.classList.toggle("bad", v.lost > 0);
-      if (c.loss) c.loss.title = `${v.lost.toLocaleString()} of ${v.window.toLocaleString()} probes lost in the window`;
+      if (c.loss) c.loss.title = lostTitle(v);
       const d = this.dests[i];
       setText(this.heads[i]!, [this.sides()?.[i]?.location, d?.transport].filter(Boolean).join(" · "));
     }
@@ -1028,6 +1081,25 @@ function lede(c: Choice, two: boolean): string {
   const what = video ? `A video call's packets, voice and ${VIDEO_FPS} frames a second of video` : "A voice call's packets";
   if (two) return `A ${c.profile} call to two servers at once: about ${rate(each)} each way per server on the network, ${rate(2 * each)} in all, scored every 10s.`;
   return `${what}, about ${rate(each)} each way on the network, echoed by the server. Each 10 seconds is scored as the call would sound, to catch the moments it breaks up.`;
+}
+
+/**
+ * The window's lost probes, in words: how many, and which by number each way, where the
+ * server keeps a record of those that arrived.
+ */
+function lostTitle(v: Figures): string {
+  const all = `${v.lost.toLocaleString()} of ${v.window.toLocaleString()} probes lost in the window.`;
+  if (!v.placing || !v.lost) return all;
+  const n = (count: number) => count.toLocaleString();
+  return [
+    all,
+    v.upSeqs.length ? `↑ ${n(v.upSeqs.length)} on the way to the server (upstream): ${seqRuns(v.upSeqs, 20)}.` : "",
+    v.downSeqs.length ? `↓ ${n(v.downSeqs.length)} on the way back (downstream): ${seqRuns(v.downSeqs, 20)}.` : "",
+    v.held ? `${n(v.held)} held back by the server at its traffic limit.` : "",
+    v.unplaced ? `${n(v.unplaced)} not placed: sent while the server was quiet or over an earlier session, or not known yet.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** How long before `now`, as "40s ago" or "3 min ago". */

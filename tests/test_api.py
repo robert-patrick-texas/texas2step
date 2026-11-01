@@ -123,6 +123,7 @@ def test_info_whoami_locations(client):
         "results",
         "measure",
         "stamps",
+        "seen",
         "test_cpu",
         "test_window",
     }

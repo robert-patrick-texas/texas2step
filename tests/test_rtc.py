@@ -141,6 +141,86 @@ async def test_stamps_on_request(peers):
         await echo.stop()
 
 
+def test_seen_keeps_which_probes_arrived():
+    from texas2step.rtc import SEEN_KEPT, Seen
+
+    seen = Seen()
+    for seq in (9, 10, 12, 3, 16, 17, 18, 19, 20, 21, 22, 23, 24, 30):
+        seen.add(seq)  # 3 overtaken by 9, the first to arrive: kept all the same
+    assert seen.answer(0) == {
+        "op": "seen",
+        "from": 0,
+        "to": 30,
+        "missing": [[0, 2], [4, 8], [11, 11], [13, 15], [25, 29]],
+        "held": [],
+        "more": False,
+    }
+    seen.hold(12)
+    assert seen.answer(10) | {"op": "seen"} == {
+        "op": "seen",
+        "from": 10,
+        "to": 30,
+        "missing": [[11, 11], [13, 15], [25, 29]],
+        "held": [[12, 12]],
+        "more": False,
+    }
+    assert Seen().answer(0)["to"] == -1  # none yet: every probe sent went missing so far
+
+    # Far enough ahead, the oldest are forgotten: an answer starts where the record does.
+    far = Seen()
+    for seq in range(0, SEEN_KEPT + 100, 2):
+        far.add(seq)
+    answer = far.answer(0)
+    assert answer["from"] == far.since > 0 and far.top == SEEN_KEPT + 98
+    assert len(far.bits) <= SEEN_KEPT // 8
+    # Every other one missing: the answer lists SEEN_RUNS runs, and stops before the next.
+    assert len(answer["missing"]) == rtc.SEEN_RUNS and answer["more"]
+    assert answer["to"] == answer["missing"][-1][1] + 1
+
+
+async def test_seen_on_request(peers):
+    echo = RtcEcho([], max_sessions=4, timeout=60, port_range=RANGE)
+    echo.start()
+    try:
+        pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+        peers.append(pc)
+        probe = pc.createDataChannel("probe", ordered=False, maxRetransmits=0)
+        control = pc.createDataChannel("control")
+        await pc.setLocalDescription(await pc.createOffer())
+        answer = await echo.answer(pc.localDescription.sdp)
+
+        opened = asyncio.Event()
+        replies: asyncio.Queue[Any] = asyncio.Queue()
+        echoes: asyncio.Queue[bytes] = asyncio.Queue()
+        control.on("open", opened.set)
+        control.on("message", lambda m: replies.put_nowait(json.loads(m)))
+        probe.on("message", echoes.put_nowait)
+        await pc.setRemoteDescription(RTCSessionDescription(answer["sdp"], answer["type"]))
+        await asyncio.wait_for(opened.wait(), 10)
+
+        for seq in (0, 1, 3, 6):  # 2, 4 and 5 never sent: lost on the way there
+            probe.send(seq.to_bytes(4, "little") + bytes(20))
+            await asyncio.wait_for(echoes.get(), 5)
+        control.send(json.dumps({"op": "seen", "from": 0}))
+        got = await asyncio.wait_for(replies.get(), 5)
+        assert got == {
+            "op": "seen",
+            "from": 0,
+            "to": 6,
+            "missing": [[2, 2], [4, 5]],
+            "held": [],
+            "more": False,
+        }
+        control.send(json.dumps({"op": "seen", "from": "x"}))  # not a number: from 0
+        assert (await asyncio.wait_for(replies.get(), 5))["from"] == 0
+        control.send(json.dumps({"op": "reset"}))
+        await asyncio.wait_for(replies.get(), 5)
+        control.send(json.dumps({"op": "seen", "from": 0}))
+        assert (await asyncio.wait_for(replies.get(), 5))["to"] == -1
+    finally:
+        await echo.stop()
+
+
 class FakeMeter:
     """A traffic limit that counts outsiders, and is reached when `past` is set."""
 

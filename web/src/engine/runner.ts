@@ -304,6 +304,7 @@ export class TestRun {
       size: 200, // at least a voice packet: a path that can't carry these can't carry calls
       waitMs: 2000,
       stamps: this.info.capabilities.stamps === true,
+      seen: this.info.capabilities.seen === true,
       signal,
       onSent: (seq: number) => this.on.packetSent(seq),
       onEcho: (seq: number, rtt: number) => this.on.packetEcho(seq, rtt),

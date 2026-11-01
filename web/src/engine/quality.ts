@@ -132,6 +132,91 @@ export function oneWay(
   };
 }
 
+/** The server's record of which probes arrived: its answer to {"op": "seen"}. From `from`
+ * to `to`, each arrived but those in `missing`, as runs [first, last]; `held` arrived but
+ * weren't echoed, at a traffic limit. `more`: the answer stopped short of the last. */
+export interface SeenAnswer {
+  from: number;
+  to: number;
+  missing: [number, number][];
+  held?: [number, number][];
+  more?: boolean;
+}
+
+export interface Placed {
+  lost_upstream: number[];
+  lost_downstream: number[];
+  up_lost: number;
+  down_lost: number;
+  up_loss_pct: number | null;
+  down_loss_pct: number | null;
+  placed: "seen" | "counted";
+}
+
+/** The numbers in runs [first, last]. */
+export function inRuns(runs: readonly [number, number][] | undefined): Set<number> {
+  const out = new Set<number>();
+  for (const [first, last] of runs ?? []) for (let s = first; s <= last; s++) out.add(s);
+  return out;
+}
+
+/**
+ * Which way each lost probe went, by sequence number: `lost_upstream` on the way to the
+ * server, `lost_downstream` on the way back. `seen`, the server's record of which probes
+ * arrived (asked from 0 once the probes are done), places each one exactly: those it never
+ * got were lost on the way there, and those it got on the way back; one it held back at a
+ * traffic limit was lost neither way. Without it, `upstream` is oneWay's `lost_upstream`,
+ * placed by the server's counts, and the rest were lost on the way back. Null with neither.
+ * `up_loss_pct` is the share of the probes sent lost on the way there, and `down_loss_pct`
+ * the share of those that reached the server lost on the way back.
+ */
+export function place(packets: readonly (number | null)[], seen?: SeenAnswer | null, upstream?: readonly number[] | null): Placed | null {
+  const lost = packets.flatMap((r, i) => (r === null ? [i] : []));
+  let up: number[];
+  let down: number[];
+  let how: Placed["placed"];
+  if (seen) {
+    const missing = inRuns(seen.missing);
+    const held = inRuns(seen.held);
+    // One after the last that arrived never did, unless the answer stopped short.
+    up = lost.filter((i) => i >= seen.from && (missing.has(i) || (i > seen.to && !seen.more)));
+    down = lost.filter((i) => i >= seen.from && i <= seen.to && !missing.has(i) && !held.has(i));
+    how = "seen";
+  } else if (upstream) {
+    const ups = new Set(upstream);
+    up = lost.filter((i) => ups.has(i));
+    down = lost.filter((i) => !ups.has(i));
+    how = "counted";
+  } else return null;
+  const sent = packets.length;
+  const reached = sent - up.length;
+  return {
+    lost_upstream: up,
+    lost_downstream: down,
+    up_lost: up.length,
+    down_lost: down.length,
+    up_loss_pct: sent ? (up.length / sent) * 100 : null,
+    down_loss_pct: reached ? (down.length / reached) * 100 : null,
+    placed: how,
+  };
+}
+
+/** Sequence numbers as "#3, #7–#9 and 4 more": runs of them, the first `most`. */
+export function seqRuns(seqs: readonly number[], most = 10): string {
+  const runs: [number, number][] = [];
+  for (const s of [...seqs].sort((a, b) => a - b)) {
+    const last = runs[runs.length - 1];
+    if (last && last[1] === s - 1) last[1] = s;
+    else runs.push([s, s]);
+  }
+  const shown = runs
+    .slice(0, most)
+    .map(([a, b]) => (a === b ? `#${a}` : `#${a}–#${b}`))
+    .join(", ");
+  const rest = runs.slice(most).reduce((n, [a, b]) => n + b - a + 1, 0);
+  return rest ? `${shown} and ${rest.toLocaleString()} more` : shown;
+}
+
 /** A call over these probes, each lost or late or neither. Its bursts count the probes whose
  * sequence numbers are a call's packets: every `step`-th. */
 function judge(seqs: readonly number[], lost: readonly boolean[], late: readonly boolean[], step: number, intervalMs: number, delayMs: number): CallSide {

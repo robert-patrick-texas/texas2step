@@ -1,7 +1,8 @@
 """Write tests/methodology-cases.json: inputs and what texas2step makes of them.
 
 The Python engine is the reference. t2s, the Go client, checks its own statistics, loss
-summary, one-way delays, call quality and responsiveness against these cases
+summary, one-way delays, lost probes' directions, call quality and responsiveness against
+these cases
 (t2s/internal/*_test.go), and tests/test_methodology_cases.py checks that the file still
 says what the Python code does. After changing the methodology, run this again:
 
@@ -28,8 +29,19 @@ def _rtts(rng: random.Random, n: int, base: float, spread: float) -> list[float]
     ]
 
 
+def _runs(seqs: list[int]) -> list[list[int]]:
+    runs: list[list[int]] = []
+    for s in sorted(seqs):
+        if runs and runs[-1][1] == s - 1:
+            runs[-1][1] = s
+        else:
+            runs.append([s, s])
+    return runs
+
+
 def _path(rng: random.Random, n: int, interval: float, up_loss: float, down_loss: float) -> dict:
-    """A simulated packet-loss test: what the client and the server's stamps saw."""
+    """A simulated packet-loss test: what the client and the server's stamps saw, and the
+    server's record of which probes arrived."""
     offset = 12345.678  # the server's clock against the client's
     sent = [i * interval + rng.random() * 0.2 for i in range(n)]
     arrive: dict[int, float] = {}
@@ -47,6 +59,8 @@ def _path(rng: random.Random, n: int, interval: float, up_loss: float, down_loss
             back[i] = arrive[i] + 7 + rng.random() * 5 + (rng.random() < 0.03) * 70
     order = sorted(back, key=lambda i: back[i])
     rtts = [round(back[i] - sent[i], 6) if i in back else None for i in range(n)]
+    top = max(arrive, default=-1)
+    seen = {"from": 0, "to": top, "missing": _runs([i for i in range(top) if i not in arrive])}
     return {
         "rtts": rtts,
         "order": order,
@@ -56,6 +70,7 @@ def _path(rng: random.Random, n: int, interval: float, up_loss: float, down_loss
         "stamp_at": [round(arrive[i] + offset, 6) if i in back else None for i in range(n)],
         "back": [round(back[i], 6) if i in back else None for i in range(n)],
         "counts": [count[i] if i in back else None for i in range(n)],
+        "seen": seen | {"held": [], "more": False},
     }
 
 
@@ -81,6 +96,7 @@ def cases() -> dict[str, list[dict]]:
             "summarize_throughput",
             "bufferbloat",
             "loss",
+            "place",
             "call_quality",
             "responsiveness",
             "rpm",
@@ -187,6 +203,24 @@ def cases() -> dict[str, list[dict]]:
             }
         )
         out["call_quality"].append({"loss": loss, "want": quality.call_quality(loss)})
+        packets = summary["packets"]
+        out["place"].append(
+            {"packets": packets, "seen": p["seen"], "want": quality.place(packets, p["seen"])}
+        )
+        if ways:
+            up = ways["lost_upstream"]
+            out["place"].append(
+                {"packets": packets, "upstream": up, "want": quality.place(packets, None, up)}
+            )
+    # The server's answer partway: it stopped short (more), began after the first probes
+    # (from), and held one back at a traffic limit; and no answer at all.
+    packets = [None if i in (0, 3, 4, 7, 9, 12, 15) else 10.0 for i in range(16)]
+    partial = {"from": 2, "to": 10, "missing": [[3, 3]], "held": [[7, 7]], "more": True}
+    for seen in (partial, partial | {"more": False}, {"from": 0, "to": -1, "missing": []}):
+        out["place"].append(
+            {"packets": packets, "seen": seen, "want": quality.place(packets, seen)}
+        )
+    out["place"].append({"packets": packets, "want": quality.place(packets)})
     out["call_quality"].append({"loss": {"error": "TimeoutError: no answer"}, "want": None})
     # Every one of the call's packets lost (each other probe at 10 ms): a burst ratio of 0,
     # scored as random loss, as Python's `ratio or 1.0` does.

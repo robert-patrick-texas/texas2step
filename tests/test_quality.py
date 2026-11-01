@@ -9,6 +9,7 @@ from texas2step.quality import (
     longest_run,
     mos,
     one_way,
+    place,
     r_factor,
     rating,
     responsiveness,
@@ -297,3 +298,25 @@ def test_responsiveness_by_the_drafts_method():
     # Plain HTTP: a new connection takes 2 steps.
     plain = {"connections": {"setup_ms": [20.0], "lost": 0, "tls": False}}
     assert responsiveness({"download": plain})["download"]["foreign_rpm"] == 6000
+
+
+def test_place_takes_each_loss_from_the_servers_record():
+    packets = [None if i in (1, 2, 5, 8, 9) else 10.0 for i in range(10)]
+    # The server got 0 to 7 but 1 and 5: those went on the way there, 2 on the way back,
+    # and 8 and 9, after the last it got, on the way there too.
+    seen = {"from": 0, "to": 7, "missing": [[1, 1], [5, 5]], "held": [], "more": False}
+    got = place(packets, seen)
+    assert got["lost_upstream"] == [1, 5, 8, 9] and got["lost_downstream"] == [2]
+    assert (got["up_lost"], got["down_lost"], got["placed"]) == (4, 1, "seen")
+    assert got["up_loss_pct"] == 40.0 and got["down_loss_pct"] == pytest.approx(100 / 6)
+    # An answer that stopped short leaves those after it unplaced; one held back is neither.
+    short = place(packets, seen | {"more": True, "held": [[2, 2]]})
+    assert short["lost_upstream"] == [1, 5] and short["lost_downstream"] == []
+
+
+def test_place_without_the_record_follows_the_counts():
+    packets = [None, 10.0, None, None]
+    got = place(packets, None, [0])
+    assert got["lost_upstream"] == [0] and got["lost_downstream"] == [2, 3]
+    assert got["placed"] == "counted"
+    assert place(packets) is None

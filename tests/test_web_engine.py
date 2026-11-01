@@ -21,7 +21,7 @@ pytestmark = pytest.mark.skipif(
 ENTRY = """
 import { readFileSync } from "node:fs";
 import { jitter, percentile, summarize, summarizeThroughput } from "ENGINE/stats.ts";
-import { callQuality, rpm } from "ENGINE/quality.ts";
+import { callQuality, place, rpm } from "ENGINE/quality.ts";
 
 const cases = JSON.parse(readFileSync(process.argv[2], "utf8"));
 const got = {
@@ -31,6 +31,7 @@ const got = {
   summarize_throughput: cases.summarize_throughput.map((c) =>
     summarizeThroughput(c.bins, c.bin_ms, c.seconds),
   ),
+  place: cases.place.map((c) => place(c.packets, c.seen, c.upstream)),
   call_quality: cases.call_quality.map((c) => callQuality(c.loss)),
   rpm: cases.rpm.map((c) => rpm(c.samples)),
 };
@@ -97,7 +98,8 @@ def differences(got, want, at: str = "") -> list[str]:
 
 
 @pytest.mark.parametrize(
-    "kind", ["percentile", "jitter", "summarize", "summarize_throughput", "call_quality", "rpm"]
+    "kind",
+    ["percentile", "jitter", "summarize", "summarize_throughput", "place", "call_quality", "rpm"],
 )
 def test_the_browser_engine_does_as_the_python_engine(browser, kind):
     cases = json.loads(CASES.read_text())[kind]

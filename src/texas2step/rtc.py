@@ -4,10 +4,10 @@ Browsers cannot send raw UDP, but a WebRTC data channel opened with
 ``ordered: false, maxRetransmits: 0`` is delivered over SCTP/DTLS/UDP without
 retransmission, so a packet the network drops stays dropped. The client sends
 numbered probes on the ``probe`` channel; we echo each one and keep receive/transmit
-counters so the client can separate upstream from downstream loss by asking on the
-reliable ``control`` channel. Echoes are unchanged unless the client asks for stamps:
-then each carries the time it arrived here and how many probes had, so the client can
-time each direction and place each loss in one.
+counters, and which of the numbers arrived, so the client can tell exactly which probes it
+lost on the way here and which on the way back, by asking on the reliable ``control``
+channel. Echoes are unchanged unless the client asks for stamps: then each carries the
+time it arrived here and how many probes had, so the client can time each direction.
 
 By default the OS picks the UDP ports. Given a port range, every host socket of an
 answered session is bound inside it instead, so a firewall can allow exactly that range.
@@ -67,6 +67,13 @@ _RCVBUF = 256 * 1024  # the receive buffer aioice gives its own sockets
 # probes received so far, this one included, after the client's u32 sequence and f64 time.
 STAMP = struct.Struct("<dI")
 STAMP_AT = 12
+SEQ = struct.Struct("<I")  # the client's sequence number, at the start of each probe
+# Which probes arrived, by sequence number: a session keeps the last SEEN_KEPT numbers up to
+# the highest, about five minutes of a Video call (which a client asks about every second
+# or so), and an answer lists at most SEEN_RUNS runs of missing ones.
+SEEN_KEPT = 1 << 17
+SEEN_RUNS = 1000
+HELD_KEPT = 4096  # the latest probes held back, not echoed, at a traffic limit
 # Monitor's profiles. Path probes are small and uncounted, as they always were. Voice and
 # video sessions count toward a traffic limit; past it a session is held to path probes.
 PROFILES = ("path", "voice", "video")
@@ -220,6 +227,93 @@ if AVAILABLE:
             return candidates
 
 
+class Seen:
+    """Which of a session's probes arrived, by the client's sequence number.
+
+    Numbers before the first that arrived are known too: none of them did, until the
+    record has to forget its oldest, beyond SEEN_KEPT below the highest. ``held`` are
+    those that arrived but weren't echoed: past a traffic limit, or a Video call's video
+    while the host is busy.
+    """
+
+    def __init__(self) -> None:
+        self.base = 0  # the sequence number of the first bit of ``bits``
+        self.bits = bytearray()
+        self.top = -1  # the highest that arrived
+        self.since = 0  # known from here up: raised as the oldest are forgotten
+        self.held: dict[int, None] = {}  # in the order held, the oldest let go first
+
+    def add(self, seq: int) -> None:
+        if seq < self.since:
+            return
+        if self.top < 0:
+            self.base = seq - seq % 8
+        if seq < self.base:  # before the first that arrived, overtaken by it
+            grow = (self.base - seq + 7) // 8
+            if len(self.bits) + grow > SEEN_KEPT // 8:
+                return
+            self.bits[:0] = bytes(grow)
+            self.base -= grow * 8
+        i = seq - self.base
+        if i >= SEEN_KEPT:  # forget the oldest: half the record at a time
+            drop = (i - SEEN_KEPT // 2) // 8
+            del self.bits[:drop]
+            self.base += drop * 8
+            self.since = self.base
+            i = seq - self.base
+        if i // 8 >= len(self.bits):
+            self.bits.extend(bytes(i // 8 + 1 - len(self.bits)))
+        self.bits[i // 8] |= 1 << i % 8
+        self.top = max(self.top, seq)
+
+    def hold(self, seq: int) -> None:
+        self.held[seq] = None
+        if len(self.held) > HELD_KEPT:
+            del self.held[next(iter(self.held))]
+
+    def arrived(self, seq: int) -> bool:
+        i = seq - self.base
+        return 0 <= i < len(self.bits) * 8 and bool(self.bits[i // 8] >> i % 8 & 1)
+
+    def answer(self, start: int) -> dict[str, Any]:
+        """From ``start`` (or as far back as the record goes, ``from``) to the highest that
+        arrived (``to``): the runs of numbers that never did, and those held back, each as
+        [first, last]. With more than SEEN_RUNS runs missing, ``to`` stops before the first
+        left out, and ``more`` says the client should ask again from after it."""
+        start = max(start, self.since)
+        missing: list[list[int]] = []
+        to, more = self.top, False
+        seq = start
+        while seq <= self.top:
+            i = seq - self.base
+            if i >= 0 and i % 8 == 0 and seq + 7 <= self.top and self.bits[i // 8] == 0xFF:
+                seq += 8  # eight in a row arrived
+                continue
+            if not self.arrived(seq):
+                if missing and missing[-1][1] == seq - 1:
+                    missing[-1][1] = seq
+                elif len(missing) == SEEN_RUNS:
+                    to, more = seq - 1, True
+                    break
+                else:
+                    missing.append([seq, seq])
+            seq += 1
+        held: list[list[int]] = []
+        for seq in sorted(s for s in self.held if start <= s <= to):
+            if held and held[-1][1] == seq - 1:
+                held[-1][1] = seq
+            else:
+                held.append([seq, seq])
+        return {
+            "op": "seen",
+            "from": start,
+            "to": to,
+            "missing": missing,
+            "held": held,
+            "more": more,
+        }
+
+
 @dataclass
 class Session:
     id: str
@@ -240,6 +334,7 @@ class Session:
     limited: bool = False  # held to path probes by a traffic limit
     voice_only: bool = False  # a Video call held to its Voice call while the host is busy
     control: Any = None  # the control channel, to tell the client of a limit reached
+    seen: Seen = field(default_factory=Seen)  # which probes arrived, by sequence number
     ending: float | None = None  # when it was told session_max_runtime is up
 
     def counters(self) -> dict[str, int]:
@@ -378,10 +473,18 @@ class RtcEcho:
                     session.bytes_in += len(message)
                     session.last_seen = now
                     counted = session.profile != "path"
-                    if session.limited and len(message) > PATH_BYTES:
-                        return  # past a traffic limit: only path probes are echoed
-                    if session.voice_only and len(message) > VOICE_BYTES:
-                        return  # the host is busy: a Video call's video isn't echoed
+                    numbered = isinstance(message, bytes) and len(message) >= SEQ.size
+                    seq = SEQ.unpack_from(message)[0] if numbered else None
+                    if seq is not None:
+                        session.seen.add(seq)
+                    if (session.limited and len(message) > PATH_BYTES) or (
+                        session.voice_only and len(message) > VOICE_BYTES
+                    ):
+                        # Past a traffic limit only path probes are echoed, and while the
+                        # host is busy a Video call's video isn't.
+                        if seq is not None:
+                            session.seen.hold(seq)
+                        return
                     end = STAMP_AT + STAMP.size
                     if session.stamp and isinstance(message, bytes) and len(message) >= end:
                         stamp = STAMP.pack(now * 1000, session.rx & 0xFFFFFFFF)
@@ -412,7 +515,12 @@ class RtcEcho:
                         channel.send(json.dumps({"op": "addr", **session.addresses()}))
                     elif op == "reset":
                         session.rx = session.tx = session.rx_bytes = 0
+                        session.seen = Seen()
                         channel.send(json.dumps({"op": "reset"}))
+                    elif op == "seen":
+                        start = request.get("from")
+                        ok = isinstance(start, int) and not isinstance(start, bool) and start >= 0
+                        channel.send(json.dumps(session.seen.answer(start if ok else 0)))
                     elif op == "stamp":
                         session.stamp = True
                         channel.send(json.dumps({"op": "stamp"}))

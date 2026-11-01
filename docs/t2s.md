@@ -159,20 +159,26 @@ shown), a mark for each column with a lost probe, and the latest events:
 
 ```
 t2s monitor → A Dallas · UDP · WebRTC · IPv4  ·  B Houston · UDP · WebRTC · IPv4   ran 2 min · Ctrl-C stops
-Path: 10 probes/s, 64 B, to two servers at the same moments · window 1 min
+Path: 10 probes/s, 64 B, to two servers at the same moments · window 1 min · lost ↑ to the server, ↓ from it
 
-              Latest     Median     95th pct   Jitter     Loss (1 min)   Probes
-  A Dallas    18.6 ms    18.4 ms    19.9 ms    0.52 ms    0 % (0)        1,300
-  B Houston   24.9 ms    24.7 ms    26.3 ms    0.61 ms    1.7 % (10)     1,300
+              Latest     Median     95th pct   Jitter     Loss (1 min)        Probes
+  A Dallas    18.6 ms    18.4 ms    19.9 ms    0.52 ms    0 % (0) ↑0 ↓0       1,300
+  B Houston   24.9 ms    24.7 ms    26.3 ms    0.61 ms    1.7 % (10) ↑2 ↓8    1,300
   B − A       +6.3 ms    +6.3 ms    +6.4 ms    +0.09 ms   +1.7 pts
 
   A RTT  ▂▂▂▃▂▂▂▂▃▂▂▂▂▂▂▂▂▂▂▂▂▂▃▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂▂ max 22.4 ms
     Loss ····························································
   B RTT  ▅▅▅▅▅▆▅▅▅▅▅▅▅▅▅▅▅▅▅▅█▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅▅ max 31.0 ms
-    Loss ····················x·······································
+    Loss ··········↑·········x·······↓·······························
 
   14:02:51  B (Houston) didn't answer from 14:02:44 to 14:02:51, for 7s.
 ```
+
+Each lost probe is placed, as on the [Monitor page](methodology.md#live-monitor), from the
+server's record of the probes that arrived: ↑ lost on the way to the server, ↓ on the way
+back. A column of the loss strip shows ↑ or ↓ where all its lost probes went that way,
+and `x` where they went both ways or aren't placed yet. A server from before 2.16.0 keeps
+no record, and its loss isn't split.
 
 Piped or redirected to a file, it writes a line a second for each server instead, and
 the events between them; at the end, the last figures once the last probes are back,
@@ -182,6 +188,22 @@ it as well, and the end is lost, unless that program is `tee -i`. `--json` write
 lines: `figures` each second, `slice` for each 10 seconds scored, `event`, and `summary`
 at the end. Ctrl-C stops it; the last panel stays on the terminal, with the totals since
 it started.
+
+The totals name each lost probe by its sequence number, each way, so one can be followed
+up in a packet capture at either end:
+
+```
+Monitored for 1 min, 21:34:10 to 21:35:10. Stopped after 1 min, as --seconds asked.
+  Houston: 3,000 probes · 5 lost (0.17 %): ↑ 5 to the server, ↓ 0 from the server · median 1.52 ms · p95 1.90 ms · jitter 0.21 ms
+    ↑ lost on the way to the server: #212, #1405–#1406, #2290–#2291
+    of probes #0 to #2999
+```
+
+In JSON, `figures` counts the window's lost probes each way (`up_lost`, `down_lost`, and
+`unplaced_lost` for those not placed yet or that can't be), and `summary` lists them since
+Start (`lost_upstream`, `lost_downstream`), of the probes from `first_seq` to `last_seq`.
+`placing` says whether the server keeps the record that places them. When Monitor stops,
+it asks once more, so the last lost probes are placed too.
 
 | Option | What it does |
 |---|---|

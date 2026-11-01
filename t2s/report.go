@@ -106,13 +106,35 @@ func lossLine(l *engine.Loss) string {
 		return fmt.Sprintf("  %-14s unavailable (%s)", "Loss", l.Error)
 	}
 	parts := []string{fmt.Sprintf("%d/%d lost", l.Lost, l.Sent)}
+	counted := func(pct *float64, n *int) string {
+		if n == nil {
+			return f(pct, " %", 2)
+		}
+		return fmt.Sprintf("%s (%d)", f(pct, " %", 2), *n)
+	}
 	if l.UpLossPct != nil {
-		parts = append(parts, fmt.Sprintf("↑ %s ↓ %s", f(l.UpLossPct, " %", 2), f(l.DownLossPct, " %", 2)))
+		parts = append(parts, fmt.Sprintf("↑ to server %s · ↓ from server %s", counted(l.UpLossPct, l.UpLost), counted(l.DownLossPct, l.DownLost)))
 	}
 	if l.Rtt.Median != nil {
 		parts = append(parts, fmt.Sprintf("UDP RTT %s · jitter %s", f(l.Rtt.Median, " ms", 2), f(l.Rtt.Jitter, " ms", 2)))
 	}
-	return fmt.Sprintf("  %-14s %14s   (%s)", "Loss", fv(l.LossPct, " %", 2), strings.Join(parts, " · "))
+	line := fmt.Sprintf("  %-14s %14s   (%s)", "Loss", fv(l.LossPct, " %", 2), strings.Join(parts, " · "))
+	// Which probes, by number, each way.
+	if l.Lost > 0 && l.LostUpstream != nil && l.LostDownstream != nil {
+		var ways []string
+		if len(*l.LostUpstream) > 0 {
+			ways = append(ways, "↑ lost to the server: "+quality.SeqRuns(*l.LostUpstream, 10))
+		}
+		if len(*l.LostDownstream) > 0 {
+			ways = append(ways, "↓ lost from the server: "+quality.SeqRuns(*l.LostDownstream, 10))
+		}
+		how := ""
+		if l.Placed == "counted" {
+			how = ", placed by the server's counts"
+		}
+		line += fmt.Sprintf("\n  %-14s %14s   %s (of #0–#%d%s)", "", "", strings.Join(ways, " · "), l.Sent-1, how)
+	}
+	return line
 }
 
 func rated(s quality.Side) string {

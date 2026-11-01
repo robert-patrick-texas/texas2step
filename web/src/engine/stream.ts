@@ -4,6 +4,7 @@ import type { CallQuality } from "../types";
 import type { Stamp } from "./loss";
 import { callQuality } from "./quality";
 import { percentile } from "./stats";
+import type { Way } from "./ways";
 
 export type ProfileName = "path" | "voice" | "video";
 
@@ -34,7 +35,8 @@ interface Packet {
   rtt: number | null;
   server: number | null; // the server's stamp: its clock on arrival
   back: number | null; // performance.now() when the echo came back
-  lostUp: boolean; // lost on the way to the server, by the server's counts
+  lostUp: boolean; // lost on the way to the server, by the server's counts or its record
+  placed: boolean; // by its record, exactly: the counts leave it be
 }
 
 /** Video frames hit by a lost or late packet, of those sent. */
@@ -80,7 +82,7 @@ export class CallStream {
     // The server counts from its session's first probe, which is this stream's first.
     this.last ??= { seq: seq - 1, count: 0 };
     this.origin ??= wall;
-    const p: Packet = { seq, frame, wall, sent, rtt: null, server: null, back: null, lostUp: false };
+    const p: Packet = { seq, frame, wall, sent, rtt: null, server: null, back: null, lostUp: false, placed: false };
     this.packets.set(seq, p);
     const k = Math.floor((wall - this.origin) / SLICE_MS);
     const list = this.bySlice.get(k);
@@ -106,9 +108,18 @@ export class CallStream {
     const reached = Math.min(Math.max(stamp.count - last.count - 1, 0), missing);
     for (let s = last.seq + 1; s < last.seq + 1 + missing - reached; s++) {
       const gone = this.packets.get(s);
-      if (gone) gone.lostUp = true;
+      if (gone && !gone.placed) gone.lostUp = true;
     }
     this.last = { seq, count: Math.max(last.count, stamp.count) };
+  }
+
+  /** A lost packet placed by the server's record of those that arrived: exactly, so the
+   * counts' guess gives way to it. One scored already stays as it was scored. */
+  place(seq: number, way: Way): void {
+    const p = this.packets.get(seq);
+    if (!p || (way !== "up" && way !== "down")) return;
+    p.lostUp = way === "up";
+    p.placed = true;
   }
 
   /** Every slice scored in Monitor's longest window, oldest first, scoring those whose

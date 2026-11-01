@@ -1,9 +1,9 @@
 // The main view: run a test (or show a saved one) with live instruments and charts.
 import { appPath, NeedsCode, Refused, REFUSED } from "../../engine/net";
 import { reachHttp3 } from "../../engine/latency";
-import { callQuality, responsiveness } from "../../engine/quality";
+import { callQuality, responsiveness, seqRuns } from "../../engine/quality";
 import { type Phase, PHASES, type RunEvents, TestRun } from "../../engine/runner";
-import type { CallQuality, CallRating, CallSide, Direction, Level, RateLimit, Readiness, Responsiveness, ResponsivenessSide, TestResult, ThroughputResult } from "../../types";
+import type { CallQuality, CallRating, CallSide, Direction, Level, LossResult, RateLimit, Readiness, Responsiveness, ResponsivenessSide, TestResult, ThroughputResult } from "../../types";
 import type { App, HttpVersion, Settings, View } from "../app";
 import { awakeSwitch } from "../awake";
 import { LatencyChart } from "../charts/latency";
@@ -183,6 +183,34 @@ const rated = (c: CallSide) => (gapped(c) ? `${RATING[c.rating].toLowerCase()} f
 
 /** Each direction's figure, what you hear first: "↓ 0 · ↑ 2". */
 const ways = (call: CallQuality, f: (side: CallSide) => string) => `↓ ${f(call.down!)} · ↑ ${f(call.up!)}`;
+
+/** A share and how many: "0.60 % (3)". */
+const counted = (share: number | null, n: number | null | undefined) => `${text(pct(share))}${n === null || n === undefined ? "" : ` (${n.toLocaleString()})`}`;
+
+/**
+ * The probes lost each way: how many, and which, by sequence number, where the result
+ * says. Results from before the counts give shares alone, and the probes lost on the way
+ * to the server alone, placed by the server's counts: the rest went on the way back.
+ */
+function lostWays(l: LossResult): { up: number | null; down: number | null; upSeqs: number[] | null; downSeqs: number[] | null; counted: boolean } {
+  const up = l.up_lost ?? (l.up_loss_pct === null ? null : Math.round((l.up_loss_pct * l.sent) / 100));
+  const down = l.down_lost ?? (l.down_loss_pct === null ? null : Math.round((l.down_loss_pct * (l.sent - (up ?? 0))) / 100));
+  const upSeqs = l.lost_upstream ?? null;
+  const ups = new Set(upSeqs ?? []);
+  const downSeqs = l.lost_downstream ?? (upSeqs ? l.packets.flatMap((p, i) => (p === null && !ups.has(i) ? [i] : [])) : null);
+  return { up, down, upSeqs, downSeqs, counted: l.placed !== "seen" };
+}
+
+/** Which probes were lost each way, by number: "↑ to the server: #12, #340 · ↓ from the
+ * server: #77". */
+function lostList(w: ReturnType<typeof lostWays>, most = 10): string {
+  return [
+    w.upSeqs?.length ? `↑ lost to the server: ${seqRuns(w.upSeqs, most)}` : "",
+    w.downSeqs?.length ? `↓ lost from the server: ${seqRuns(w.downSeqs, most)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
 
 const USE_ICON: Record<Readiness["id"], string> = {
   streaming: "M3 5h18v12H3zM8 21h8M10 8.5v5l4.5-2.5z",
@@ -807,15 +835,19 @@ export class TestView implements View {
     const lossPct = pct(loss.loss_pct);
     put(this.tiles.loss, lossPct, `${loss.lost} of ${loss.sent} lost · ${loss.transport === "webrtc" ? "UDP" : "TCP fallback"}`);
     railValue("loss", text(lossPct));
-    this.packets.finalize(loss.packets);
+    const w = lostWays(loss);
+    this.packets.finalize(loss.packets, w.upSeqs && w.downSeqs ? { up: new Set(w.upSeqs), down: new Set(w.downSeqs) } : null);
     this.gauge.setPacketResult(loss.packets, Math.max(loss.packets.length, this.result?.config.packets ?? 0));
     clear(this.packetStats);
-    const row = (k: string, v: string) => this.packetStats.append(h("dt", {}, k), h("dd", {}, v));
+    const row = (k: string, v: string, title = "") => this.packetStats.append(h("dt", {}, k), h("dd", title ? { title } : {}, v));
     row("Transport", loss.transport === "webrtc" ? "UDP (WebRTC, no retransmit)" : "TCP (WebSocket fallback)");
     row("Sent / received", `${loss.sent} / ${loss.received}`);
-    row("Loss", text(lossPct));
-    if (loss.up_loss_pct !== null) row("Upstream loss", text(pct(loss.up_loss_pct)));
-    if (loss.down_loss_pct !== null) row("Downstream loss", text(pct(loss.down_loss_pct)));
+    row("Loss", counted(loss.loss_pct, loss.lost));
+    // Which ones, by number, on hover: placed exactly from the server's record, or by its counts.
+    const which = (seqs: number[] | null, way: string) =>
+      !seqs ? "" : seqs.length ? `Lost ${way}: ${seqRuns(seqs, 40)}, of #0–#${loss.sent - 1}.${w.counted ? " Placed by the server's counts: which of a run of lost probes went which way is a guess." : ""}` : `None lost ${way}.`;
+    if (loss.up_loss_pct !== null) row("Upstream loss (to server)", counted(loss.up_loss_pct, w.up), which(w.upSeqs, "on the way to the server"));
+    if (loss.down_loss_pct !== null) row("Downstream loss (from server)", counted(loss.down_loss_pct, w.down), which(w.downSeqs, "on the way back from the server"));
     row("Out of order", String(loss.out_of_order));
     row("Round trip", `${text(ms(loss.rtt.median))} median`);
     row("Jitter", text(ms(loss.rtt.jitter)));
@@ -826,7 +858,7 @@ export class TestView implements View {
       row("You hear", `${call.down.mos.toFixed(1)} MOS · ${rated(call.down)}`);
       row("They hear", `${call.up.mos.toFixed(1)} MOS · ${rated(call.up)}`);
     } else if (call) {
-      row("Late for a call", `${call.late} (${text(pct(call.late_pct))})`);
+      row("Late for a call", counted(call.late_pct, call.late));
       row("Longest gap", `${call.longest_gap_ms.toLocaleString()} ms`);
       row("Burst ratio", call.burst_ratio === null ? "no loss" : call.burst_ratio.toFixed(2));
       row("Call quality", `${call.mos.toFixed(1)} MOS · ${rated(call)}`);
@@ -887,7 +919,9 @@ export class TestView implements View {
     if (r.bufferbloat?.grade) add("Bufferbloat", `grade ${r.bufferbloat.grade}`);
     else if (r.bufferbloat?.withheld) add("Bufferbloat", "no grade: the page's own lateness made most of the rise (device busy)");
     const l = r.loss;
-    if (l) add("Packet loss", `${text(pct(l.loss_pct))} (${l.lost}/${l.sent}) over ${l.transport === "webrtc" ? "UDP" : "TCP"}${l.up_loss_pct !== null ? ` · up ${text(pct(l.up_loss_pct))} · down ${text(pct(l.down_loss_pct))}` : ""} · ${l.out_of_order} out of order · RTT ${text(ms(l.rtt.median))} · jitter ${text(ms(l.rtt.jitter))}`);
+    const lw = l ? lostWays(l) : null;
+    if (l && lw) add("Packet loss", `${text(pct(l.loss_pct))} (${l.lost}/${l.sent}) over ${l.transport === "webrtc" ? "UDP" : "TCP"}${l.up_loss_pct !== null ? ` · upstream (to server) ${counted(l.up_loss_pct, lw.up)} · downstream (from server) ${counted(l.down_loss_pct, lw.down)}` : ""} · ${l.out_of_order} out of order · RTT ${text(ms(l.rtt.median))} · jitter ${text(ms(l.rtt.jitter))}`);
+    if (l && lw && l.lost && lostList(lw)) add("Lost probes", `${lostList(lw, 40)}, of #0–#${l.sent - 1}${lw.counted ? " (placed by the server's counts: which of a run went which way is a guess)" : ""}`);
     if (l?.device_busy !== undefined) add("Packet loss device", `browser busy/late ${share(l.device_busy)} (95th percentile ${text(ms(l.device_lag_ms ?? 0))})`);
     const call = r.call ?? callQuality(l);
     const side = (c: CallSide) => `${c.mos.toFixed(2)} MOS, ${rated(c)} · R ${c.r.toFixed(1)} · ${text(pct(c.impaired_pct))} lost or late (${c.late} late) · longest gap ${c.longest_gap_ms} ms · burst ratio ${c.burst_ratio?.toFixed(2) ?? "—"}`;

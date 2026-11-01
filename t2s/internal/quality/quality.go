@@ -5,8 +5,10 @@
 package quality
 
 import (
+	"fmt"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/num"
 )
@@ -120,6 +122,124 @@ type OneWay struct {
 	UpMs         num.Floats `json:"up_ms"`
 	DownMs       num.Floats `json:"down_ms"`
 	LostUpstream []int      `json:"lost_upstream"`
+}
+
+// Seen is the server's record of which probes arrived, its answer to {"op": "seen"}: from
+// From to To each arrived but those in Missing, as runs [first, last]; Held arrived but
+// weren't echoed, at a traffic limit. More: the answer stopped short of the last.
+type Seen struct {
+	From    int      `json:"from"`
+	To      int      `json:"to"`
+	Missing [][2]int `json:"missing"`
+	Held    [][2]int `json:"held"`
+	More    bool     `json:"more"`
+}
+
+// InRuns is the numbers in runs [first, last].
+func InRuns(runs [][2]int) map[int]bool {
+	out := map[int]bool{}
+	for _, r := range runs {
+		for s := r[0]; s <= r[1]; s++ {
+			out[s] = true
+		}
+	}
+	return out
+}
+
+// Placed is which way each lost probe went, by sequence number.
+type Placed struct {
+	LostUpstream   []int    `json:"lost_upstream"`
+	LostDownstream []int    `json:"lost_downstream"`
+	UpLost         int      `json:"up_lost"`
+	DownLost       int      `json:"down_lost"`
+	UpLossPct      *float64 `json:"up_loss_pct"`
+	DownLossPct    *float64 `json:"down_loss_pct"`
+	Placed         string   `json:"placed"`
+}
+
+// Place works out which way each lost probe (NaN in packets) went: LostUpstream on the way
+// to the server, LostDownstream on the way back. seen, the server's record of which probes
+// arrived (asked from 0 once the probes are done), places each one exactly: those it never
+// got were lost on the way there, and those it got on the way back; one it held back at a
+// traffic limit was lost neither way. Without it, upstream is FromStamps' LostUpstream,
+// placed by the server's counts, and the rest were lost on the way back. Nil with neither.
+// UpLossPct is the share of the probes sent lost on the way there, and DownLossPct the
+// share of those that reached the server lost on the way back.
+func Place(packets []float64, seen *Seen, upstream []int) *Placed {
+	up, down := []int{}, []int{}
+	how := "seen"
+	switch {
+	case seen != nil:
+		missing, held := InRuns(seen.Missing), InRuns(seen.Held)
+		for i, r := range packets {
+			if !math.IsNaN(r) || i < seen.From {
+				continue
+			}
+			// One after the last that arrived never did, unless the answer stopped short.
+			if missing[i] || (i > seen.To && !seen.More) {
+				up = append(up, i)
+			} else if i <= seen.To && !held[i] {
+				down = append(down, i)
+			}
+		}
+	case upstream != nil:
+		how = "counted"
+		ups := map[int]bool{}
+		for _, i := range upstream {
+			ups[i] = true
+		}
+		for i, r := range packets {
+			if !math.IsNaN(r) {
+				continue
+			}
+			if ups[i] {
+				up = append(up, i)
+			} else {
+				down = append(down, i)
+			}
+		}
+	default:
+		return nil
+	}
+	p := &Placed{LostUpstream: up, LostDownstream: down, UpLost: len(up), DownLost: len(down), Placed: how}
+	if sent := len(packets); sent > 0 {
+		p.UpLossPct = num.Ptr(float64(len(up)) / float64(sent) * 100)
+		if reached := sent - len(up); reached > 0 {
+			p.DownLossPct = num.Ptr(float64(len(down)) / float64(reached) * 100)
+		}
+	}
+	return p
+}
+
+// SeqRuns is sequence numbers as "#3, #7–#9 and 4 more": runs of them, the first most.
+func SeqRuns(seqs []int, most int) string {
+	sorted := slices.Clone(seqs)
+	slices.Sort(sorted)
+	var runs [][2]int
+	for _, s := range sorted {
+		if n := len(runs); n > 0 && runs[n-1][1] == s-1 {
+			runs[n-1][1] = s
+		} else {
+			runs = append(runs, [2]int{s, s})
+		}
+	}
+	var shown []string
+	rest := 0
+	for i, r := range runs {
+		switch {
+		case i >= most:
+			rest += r[1] - r[0] + 1
+		case r[0] == r[1]:
+			shown = append(shown, fmt.Sprintf("#%d", r[0]))
+		default:
+			shown = append(shown, fmt.Sprintf("#%d–#%d", r[0], r[1]))
+		}
+	}
+	out := strings.Join(shown, ", ")
+	if rest > 0 {
+		out += fmt.Sprintf(" and %s more", num.Grouped(float64(rest), 0))
+	}
+	return out
 }
 
 // FromStamps works out each direction from the server's stamps: for each probe, when it

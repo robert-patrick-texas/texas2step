@@ -33,7 +33,8 @@ type packet struct {
 	rtt    float64 // NaN until it comes back
 	server float64 // the server's stamp: its clock on arrival; NaN without
 	back   float64 // this process's clock when the echo came back
-	lostUp bool    // lost on the way to the server, by the server's counts
+	lostUp bool    // lost on the way to the server, by the server's counts or its record
+	placed bool    // by its record, exactly: the counts leave it be
 }
 
 // FrameCount is video frames hit by a lost or late packet, of those sent.
@@ -138,11 +139,19 @@ func (c *CallStream) Echo(seq uint32, rtt, now float64, stamp *engine.Stamp) {
 	missing := int(seq) - last.seq - 1
 	reached := min(max(stamp.Count-last.count-1, 0), missing)
 	for s := last.seq + 1; s < last.seq+1+missing-reached; s++ {
-		if gone, ok := c.packets[uint32(s)]; ok {
+		if gone, ok := c.packets[uint32(s)]; ok && !gone.placed {
 			gone.lostUp = true
 		}
 	}
 	c.last = &struct{ seq, count int }{int(seq), max(last.count, stamp.Count)}
+}
+
+// Place is a lost packet placed by the server's record of those that arrived: exactly, so
+// the counts' guess gives way to it. One scored already stays as it was scored.
+func (c *CallStream) Place(seq uint32, way string) {
+	if p, ok := c.packets[seq]; ok && (way == wayUp || way == wayDown) {
+		p.lostUp, p.placed = way == wayUp, true
+	}
 }
 
 // Slices is every slice scored in Monitor's longest window, oldest first, scoring those

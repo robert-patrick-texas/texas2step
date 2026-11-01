@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robert-patrick-texas/texas2step/t2s/internal/quality"
 	"github.com/robert-patrick-texas/texas2step/t2s/internal/show"
 )
 
@@ -50,7 +51,7 @@ func value(key string, f Figures, now float64) string {
 			if f.Lost > 0 {
 				count = show.Red(count)
 			}
-			s += count
+			s += count + show.Dim(ways(f))
 		}
 		return s
 	case "sent":
@@ -78,6 +79,15 @@ func value(key string, f Figures, now float64) string {
 		return show.Pct(f.Frames)
 	}
 	return "—"
+}
+
+// ways is the lost probes each way, " ↑2 ↓1": up to the server, down from it; "" where the
+// server keeps no record of those that arrived.
+func ways(f Figures) string {
+	if !f.Placing {
+		return ""
+	}
+	return fmt.Sprintf(" ↑%d ↓%d", f.UpLost, f.DownLost)
 }
 
 // WindowName is the window as the page names it: 1 min, 5 min, 15 min, or 45s.
@@ -141,7 +151,7 @@ func diff(key string, a, b Figures) string {
 
 // About is what the profile sends, for the panel's second line.
 func About(c Config, two bool) string {
-	window := WindowName(c.Window)
+	window := WindowName(c.Window) + " · lost ↑ to the server, ↓ from it"
 	switch c.Profile {
 	case "voice":
 		return fmt.Sprintf("Voice call: %d B every %s ms, scored each 10s · window %s", c.VoiceSize, trim(c.Every), window)
@@ -180,6 +190,8 @@ func strips(v View, s Snapshot, cols int) (rtt, loss, calls, top string) {
 	from := s.Now - windowMs
 	worst := make([]float64, cols)
 	lost := make([]bool, cols)
+	lostUp := make([]bool, cols)
+	lostDown := make([]bool, cols)
 	seen := make([]bool, cols)
 	for i := range worst {
 		worst[i] = math.NaN()
@@ -193,6 +205,14 @@ func strips(v View, s Snapshot, cols int) (rtt, loss, calls, top string) {
 		seen[i] = true
 		if math.IsNaN(p.rtt) {
 			lost[i] = true
+			switch v.wayOf[p.seq] {
+			case wayUp:
+				lostUp[i] = true
+			case wayDown:
+				lostDown[i] = true
+			default:
+				lostUp[i], lostDown[i] = true, true // not known: either way
+			}
 			continue
 		}
 		if math.IsNaN(worst[i]) || p.rtt > worst[i] {
@@ -211,7 +231,12 @@ func strips(v View, s Snapshot, cols int) (rtt, loss, calls, top string) {
 		default:
 			r.WriteString(show.Dim("·"))
 		}
+		// ↑ lost on the way to the server, ↓ on the way back, x both or not known.
 		switch {
+		case lost[i] && !lostDown[i]:
+			l.WriteString(show.Red("↑"))
+		case lost[i] && !lostUp[i]:
+			l.WriteString(show.Red("↓"))
 		case lost[i]:
 			l.WriteString(show.Red("x"))
 		case seen[i]:
@@ -356,7 +381,7 @@ func (l *Lines) Tick(s Snapshot) {
 			if two {
 				who = "  server"
 			}
-			fmt.Fprintf(l.W, "%-8s%s  %-9s  %-9s  %-9s  %-9s  %-15s %s\n", "time", who, "latest", "median", "p95", "jitter", "loss ("+WindowName(s.Config.Window)+")", "probes")
+			fmt.Fprintf(l.W, "%-8s%s  %-9s  %-9s  %-9s  %-9s  %-22s %s\n", "time", who, "latest", "median", "p95", "jitter", "loss ("+WindowName(s.Config.Window)+")", "probes")
 		}
 		for _, v := range s.Dests {
 			f := v.Figures
@@ -366,9 +391,9 @@ func (l *Lines) Tick(s Snapshot) {
 			}
 			loss := show.Pct(f.Loss)
 			if f.Window > 0 {
-				loss += fmt.Sprintf(" (%d)", f.Lost)
+				loss += fmt.Sprintf(" (%d)%s", f.Lost, ways(f))
 			}
-			fmt.Fprintf(l.W, "%s%s  %-9s  %-9s  %-9s  %-9s  %-15s %s\n", now, who, show.Ms(f.Latest), show.Ms(f.Median), show.Ms(f.P95), show.Ms(f.Jitter), loss, show.Count(f.Sent))
+			fmt.Fprintf(l.W, "%s%s  %-9s  %-9s  %-9s  %-9s  %s %s\n", now, who, show.Ms(f.Latest), show.Ms(f.Median), show.Ms(f.P95), show.Ms(f.Jitter), show.Pad(loss, 22), show.Count(f.Sent))
 		}
 		return
 	}
@@ -388,8 +413,8 @@ func (l *Lines) Tick(s Snapshot) {
 			if f.Frames != nil {
 				frames = " · frames hit " + show.Pct(f.Frames)
 			}
-			fmt.Fprintf(l.W, "%s%s  %s  (window: %s %s · worst %s · %d of %d below good · round trip %s · loss %s%s)\n",
-				at, who, score, mos(f.Mos), f.Rating, mos(f.Worst), f.BelowCount, f.Slices, show.Ms(f.Median), show.Pct(f.Loss), frames)
+			fmt.Fprintf(l.W, "%s%s  %s  (window: %s %s · worst %s · %d of %d below good · round trip %s · loss %s (%d)%s%s)\n",
+				at, who, score, mos(f.Mos), f.Rating, mos(f.Worst), f.BelowCount, f.Slices, show.Ms(f.Median), show.Pct(f.Loss), f.Lost, ways(f), frames)
 		}
 	}
 }
@@ -424,6 +449,37 @@ func (j JSON) Totals(started, stopped time.Time, why string, totals []Total) {
 		"seconds": stopped.Sub(started).Seconds(), "ended": why, "servers": totals})
 }
 
+// lostLines is which probes were lost each way, by number, where the server keeps a
+// record of those that arrived.
+func lostLines(t Total) []string {
+	if !t.Placing || t.Lost == 0 {
+		return nil
+	}
+	seqs := func(s []uint32) string {
+		ints := make([]int, len(s))
+		for i, v := range s {
+			ints[i] = int(v)
+		}
+		return quality.SeqRuns(ints, 20)
+	}
+	var out []string
+	if len(t.LostUpstream) > 0 {
+		out = append(out, "    ↑ lost on the way to the server: "+seqs(t.LostUpstream))
+	}
+	if len(t.LostDownstream) > 0 {
+		out = append(out, "    ↓ lost on the way back: "+seqs(t.LostDownstream))
+	}
+	var notes []string
+	if t.HeldLost > 0 {
+		notes = append(notes, fmt.Sprintf("%s held back by the server at its traffic limit", show.Count(t.HeldLost)))
+	}
+	if t.UnplacedLost > 0 {
+		notes = append(notes, fmt.Sprintf("%s not placed: sent while the server was quiet or over an earlier session", show.Count(t.UnplacedLost)))
+	}
+	notes = append(notes, fmt.Sprintf("of probes #%d to #%d", t.FirstSeq, t.LastSeq))
+	return append(out, "    "+strings.Join(notes, " · "))
+}
+
 // Summary is the totals since Start, as text.
 func Summary(started, stopped time.Time, why string, totals []Total) []string {
 	lasted := Span(math.Floor(stopped.Sub(started).Seconds()))
@@ -440,8 +496,13 @@ func Summary(started, stopped time.Time, why string, totals []Total) []string {
 		default:
 			outages = fmt.Sprintf(" · %d outages", t.Outages)
 		}
-		lines = append(lines, fmt.Sprintf("  %s: %s probes · %s lost (%s) · median %s · p95 %s · jitter %s%s",
-			t.Name, show.Count(t.Sent), show.Count(t.Lost), show.Pct(t.LossPct), show.Ms(t.Median), show.Ms(t.P95), show.Ms(t.Jitter), outages))
+		split := ""
+		if t.Placing {
+			split = fmt.Sprintf(": ↑ %s to the server, ↓ %s from the server", show.Count(t.UpLost), show.Count(t.DownLost))
+		}
+		lines = append(lines, fmt.Sprintf("  %s: %s probes · %s lost (%s)%s · median %s · p95 %s · jitter %s%s",
+			t.Name, show.Count(t.Sent), show.Count(t.Lost), show.Pct(t.LossPct), split, show.Ms(t.Median), show.Ms(t.P95), show.Ms(t.Jitter), outages))
+		lines = append(lines, lostLines(t)...)
 		if t.Slices > 0 {
 			slices := "1 slice"
 			if t.Slices != 1 {

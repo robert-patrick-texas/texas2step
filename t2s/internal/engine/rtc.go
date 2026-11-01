@@ -17,6 +17,8 @@ import (
 	"github.com/pion/ice/v4"
 	"github.com/pion/logging"
 	"github.com/pion/webrtc/v4"
+
+	"github.com/robert-patrick-texas/texas2step/t2s/internal/quality"
 )
 
 const (
@@ -305,6 +307,21 @@ func (r *RtcProbe) Stamp() bool {
 	r.stamping = on
 	r.mu.Unlock()
 	return on
+}
+
+// Seen asks for the server's record of which probes arrived, from sequence number from
+// up; nil from a server that keeps none, or that didn't answer.
+func (r *RtcProbe) Seen(from int, timeout time.Duration) *quality.Seen {
+	msg := r.Ask("seen", map[string]any{"from": from}, timeout)
+	if msg == nil {
+		return nil
+	}
+	data, _ := json.Marshal(msg)
+	var s quality.Seen
+	if json.Unmarshal(data, &s) != nil || msg["to"] == nil {
+		return nil
+	}
+	return &s
 }
 
 // Counters are the server's counts of probes received and echoed.

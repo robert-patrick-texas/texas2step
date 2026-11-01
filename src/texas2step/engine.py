@@ -446,7 +446,8 @@ async def measure_loss(
     progress: Progress | None = None,
 ) -> dict[str, Any]:
     """Send numbered UDP probes over an unreliable data channel and count the echoes. A
-    server that stamps its echoes also gives each direction's delays and losses."""
+    server that stamps its echoes also gives each direction's delays, and one that says
+    which probes arrived places each lost one exactly: on the way there or back."""
     from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
 
     base = _base(target)
@@ -465,6 +466,7 @@ async def measure_loss(
     all_back = asyncio.Event()
     control_reply: asyncio.Future[dict[str, Any]] = loop.create_future()
     stamp_reply: asyncio.Future[dict[str, Any]] = loop.create_future()
+    seen_reply: asyncio.Future[dict[str, Any]] = loop.create_future()
 
     async with _client() as client:
         info = (await client.get(f"{base}{API}/info")).json()
@@ -510,6 +512,8 @@ async def measure_loss(
                 control_reply.set_result(reply)
             elif reply.get("op") == "stamp" and not stamp_reply.done():
                 stamp_reply.set_result(reply)
+            elif reply.get("op") == "seen" and not seen_reply.done():
+                seen_reply.set_result(reply)
 
     try:
         await pc.setLocalDescription(await pc.createOffer())
@@ -545,19 +549,29 @@ async def measure_loss(
             await asyncio.wait_for(all_back.wait(), wait_ms / 1000)
 
         control.send(json.dumps({"op": "stats"}))
+        if info.get("capabilities", {}).get("seen"):
+            control.send(json.dumps({"op": "seen", "from": 0}))
         try:
             server_counts = await asyncio.wait_for(control_reply, timeout=3)
         except TimeoutError:
             server_counts = None
+        seen = None
+        if info.get("capabilities", {}).get("seen"):
+            with contextlib.suppress(TimeoutError):
+                seen = await asyncio.wait_for(seen_reply, timeout=3)
     finally:
         await pc.close()
 
     result = loss_summary(rtts, order, duplicates, server_counts, "webrtc", interval_ms, size)
+    ways = None
     if stamped:
         sent = [sent_at.get(i, 0.0) for i in range(packets)]
         total = server_counts["rx"] if server_counts else None
         if ways := quality.one_way(sent, server, back, counts, total):
             result |= ways
+    upstream = ways["lost_upstream"] if ways else None
+    if placed := quality.place(result["packets"], seen, upstream):
+        result |= placed
     return result
 
 
@@ -573,11 +587,13 @@ def loss_summary(
     sent = len(rtts)
     received = sum(r is not None for r in rtts)
     out_of_order = sum(1 for a, b in itertools.pairwise(order) if b < a)
-    up = down = None
+    up = down = up_lost = down_lost = None
     if server and sent:
-        up = max(0.0, (sent - server["rx"]) / sent * 100)
+        up_lost = max(0, sent - server["rx"])
+        up = up_lost / sent * 100
         if server.get("tx"):
-            down = max(0.0, (server["tx"] - received) / server["tx"] * 100)
+            down_lost = max(0, server["tx"] - received)
+            down = down_lost / server["tx"] * 100
     rtt_ordered = [r for r in rtts if r is not None]
     return {
         "transport": transport,
@@ -587,6 +603,8 @@ def loss_summary(
         "loss_pct": (sent - received) / sent * 100 if sent else 0.0,
         "up_loss_pct": up,
         "down_loss_pct": down,
+        "up_lost": up_lost,
+        "down_lost": down_lost,
         "out_of_order": out_of_order,
         "duplicates": duplicates,
         "interval_ms": interval_ms,

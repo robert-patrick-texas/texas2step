@@ -26,6 +26,8 @@ type Loss struct {
 	LossPct     float64       `json:"loss_pct"`
 	UpLossPct   *float64      `json:"up_loss_pct"`
 	DownLossPct *float64      `json:"down_loss_pct"`
+	UpLost      *int          `json:"up_lost"`
+	DownLost    *int          `json:"down_lost"`
 	OutOfOrder  int           `json:"out_of_order"`
 	Duplicates  int           `json:"duplicates"`
 	IntervalMs  float64       `json:"interval_ms"`
@@ -33,6 +35,21 @@ type Loss struct {
 	Rtt         stats.Summary `json:"rtt"`
 	Packets     num.Floats    `json:"packets"`
 	*quality.OneWay
+	// Which way each lost probe went (Place); LostUpstream stands in for OneWay's.
+	LostUpstream   *[]int `json:"lost_upstream,omitempty"`
+	LostDownstream *[]int `json:"lost_downstream,omitempty"`
+	Placed         string `json:"placed,omitempty"`
+}
+
+// place takes which way each lost probe went: its counts and shares, and the call's
+// probes lost on the way to the server.
+func (l *Loss) place(p *quality.Placed) {
+	l.UpLost, l.DownLost = &p.UpLost, &p.DownLost
+	l.UpLossPct, l.DownLossPct = p.UpLossPct, p.DownLossPct
+	l.LostUpstream, l.LostDownstream, l.Placed = &p.LostUpstream, &p.LostDownstream, p.Placed
+	if l.OneWay != nil {
+		l.OneWay.LostUpstream = p.LostUpstream
+	}
 }
 
 type lossFields Loss
@@ -83,9 +100,11 @@ func LossSummary(rtts []float64, order []int, duplicates int, server *Counters, 
 		l.LossPct = float64(sent-received) / float64(sent) * 100
 	}
 	if server != nil && sent > 0 {
-		l.UpLossPct = num.Ptr(math.Max(0, float64(sent-server.Rx)/float64(sent)*100))
+		up := max(0, sent-server.Rx)
+		l.UpLost, l.UpLossPct = &up, num.Ptr(float64(up)/float64(sent)*100)
 		if server.Tx != 0 {
-			l.DownLossPct = num.Ptr(math.Max(0, float64(server.Tx-received)/float64(server.Tx)*100))
+			down := max(0, server.Tx-received)
+			l.DownLost, l.DownLossPct = &down, num.Ptr(float64(down)/float64(server.Tx)*100)
 		}
 	}
 	return l
@@ -93,7 +112,8 @@ func LossSummary(rtts []float64, order []int, duplicates int, server *Counters, 
 
 // MeasureLoss sends numbered UDP probes over an unordered data channel without
 // retransmits and counts the echoes. A server that stamps its echoes also gives each
-// direction's delays and losses.
+// direction's delays, and one that says which probes arrived places each lost one
+// exactly: on the way there or back.
 func MeasureLoss(ctx context.Context, t *Target, info *Info, packets int, intervalMs float64, size int, wait time.Duration, progress Progress) (*Loss, error) {
 	size = max(size, probeHeader)
 	probe, err := ConnectRtc(ctx, t, info.ICE(), "", 10*time.Second)
@@ -158,17 +178,35 @@ func MeasureLoss(ctx context.Context, t *Target, info *Info, packets int, interv
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	var seen *quality.Seen
+	asked := make(chan struct{})
+	if info.Capabilities.Seen {
+		go func() {
+			defer close(asked)
+			seen = probe.Seen(0, 3*time.Second)
+		}()
+	} else {
+		close(asked)
+	}
 	counters := probe.Counters(3 * time.Second)
+	<-asked
 	mu.Lock()
 	defer mu.Unlock()
 	probe.OnEcho(nil)
 	out := LossSummary(rtts, order, duplicates, counters, "webrtc", intervalMs, size)
+	var upstream []int
 	if stamps {
 		total := -1
 		if counters != nil {
 			total = counters.Rx
 		}
 		out.OneWay = quality.FromStamps(sentAt, server, back, counts, total)
+		if out.OneWay != nil {
+			upstream = out.OneWay.LostUpstream
+		}
+	}
+	if p := quality.Place(rtts, seen, upstream); p != nil {
+		out.place(p)
 	}
 	return &out, nil
 }

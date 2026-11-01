@@ -42,6 +42,36 @@ func TestOneWayAsThePythonEngine(t *testing.T) {
 	}
 }
 
+func TestPlaceAsThePythonEngine(t *testing.T) {
+	var found []struct {
+		Packets  num.Floats
+		Seen     *Seen
+		Upstream []int
+		Want     json.RawMessage
+	}
+	if err := cases.Load("place", &found); err != nil {
+		t.Fatal(err)
+	}
+	for i, c := range found {
+		var got any
+		if p := Place(c.Packets, c.Seen, c.Upstream); p != nil {
+			got = p
+		}
+		if d := cases.Diff(got, c.Want); d != "" {
+			t.Errorf("case %d: Place:\n%s", i, d)
+		}
+	}
+}
+
+func TestSeqRuns(t *testing.T) {
+	if got := SeqRuns([]int{20, 3, 8, 7, 9}, 10); got != "#3, #7–#9, #20" {
+		t.Errorf("got %q", got)
+	}
+	if got := SeqRuns([]int{0, 2, 4, 6, 8, 10}, 2); got != "#0, #2 and 4 more" {
+		t.Errorf("got %q", got)
+	}
+}
+
 type loss struct {
 	Error        string
 	Packets      num.Floats

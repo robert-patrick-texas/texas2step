@@ -289,7 +289,9 @@ type Info struct {
 		WebSocket bool `json:"websocket"`
 		WebRTC    bool `json:"webrtc"`
 		Stamps    bool `json:"stamps"`
-		Results   bool `json:"results"`
+		// The server says which probes arrived: which way each lost one went.
+		Seen    bool `json:"seen"`
+		Results bool `json:"results"`
 		// GET /api/v1/tests/{id}: whether the server's CPU held a transfer back.
 		TestCPU bool `json:"test_cpu"`
 	} `json:"capabilities"`

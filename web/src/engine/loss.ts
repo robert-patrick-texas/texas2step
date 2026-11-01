@@ -4,7 +4,7 @@ import type { LossResult } from "../types";
 import { revealed } from "./addr";
 import type { WsProber } from "./latency";
 import { type Endpoint, type Family, sleep } from "./net";
-import { oneWay } from "./quality";
+import { oneWay, place, type SeenAnswer } from "./quality";
 import { summarize } from "./stats";
 
 const HEADER = 12; // u32 sequence + f64 send time
@@ -200,6 +200,14 @@ export class RtcProbe {
     return { ok: msg.ok === true, reason: str(msg.reason) ?? undefined, message: str(msg.message), url: str(msg.url) };
   }
 
+  /** The server's record of which probes arrived, from sequence number `from` up; null
+   * from a server that keeps none. */
+  async seen(from: number, timeoutMs = 2000): Promise<SeenAnswer | null> {
+    const msg = await this.ask("seen", timeoutMs, { from });
+    if (!msg || typeof msg.from !== "number" || typeof msg.to !== "number" || !Array.isArray(msg.missing)) return null;
+    return msg as unknown as SeenAnswer;
+  }
+
   async counters(timeoutMs = 2000): Promise<{ rx: number; tx: number } | null> {
     const msg = await this.ask("stats", timeoutMs);
     return msg ? { rx: Number(msg.rx ?? 0), tx: Number(msg.tx ?? 0) } : null;
@@ -263,6 +271,7 @@ export interface LossOptions {
   size: number;
   waitMs: number;
   stamps?: boolean; // ask the server to stamp its echoes, where it can
+  seen?: boolean; // ask it which probes arrived, where it can say
   signal: AbortSignal;
   onSent?: (seq: number) => void;
   onEcho?: (seq: number, rtt: number) => void;
@@ -282,9 +291,15 @@ function finish(
   for (let i = 1; i < order.length; i++) if (order[i]! < order[i - 1]!) outOfOrder++;
   let up: number | null = null;
   let down: number | null = null;
+  let upLost: number | null = null;
+  let downLost: number | null = null;
   if (counters && sent) {
-    up = Math.max(0, ((sent - counters.rx) / sent) * 100);
-    if (counters.tx) down = Math.max(0, ((counters.tx - received) / counters.tx) * 100);
+    upLost = Math.max(0, sent - counters.rx);
+    up = (upLost / sent) * 100;
+    if (counters.tx) {
+      downLost = Math.max(0, counters.tx - received);
+      down = (downLost / counters.tx) * 100;
+    }
   }
   return {
     transport,
@@ -294,6 +309,8 @@ function finish(
     loss_pct: sent ? ((sent - received) / sent) * 100 : 0,
     up_loss_pct: up,
     down_loss_pct: down,
+    up_lost: upLost,
+    down_lost: downLost,
     out_of_order: outOfOrder,
     duplicates,
     interval_ms: opts.intervalMs,
@@ -355,10 +372,11 @@ export async function measureLossRtc(probe: RtcProbe, opts: LossOptions): Promis
   const waitUntil = performance.now() + opts.waitMs;
   while (pending > 0 && performance.now() < waitUntil && !opts.signal.aborted) await sleep(50);
   probe.onEcho = null;
-  const counters = await probe.counters();
+  const [counters, seen] = await Promise.all([probe.counters(), opts.seen ? probe.seen(0) : null]);
   const result = finish(rtts, order, duplicates, counters, "webrtc", opts);
   const ways = stamped ? oneWay(sent, server, back, counts, counters?.rx ?? null) : null;
-  return ways ? { ...result, ...ways } : result;
+  const placed = place(result.packets, seen, ways?.lost_upstream);
+  return { ...result, ...ways, ...placed };
 }
 
 /** TCP fallback: delivery is reliable, so only probes that time out count as lost. */
