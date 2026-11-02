@@ -166,9 +166,13 @@ it with apt, which also pulls in its few dependencies. From the command line:
 ```bash
 cd "$(mktemp -d)"
 curl -sL https://api.github.com/repos/robert-patrick-texas/texas2step/releases/latest \
-    | grep -o 'https://[^"]*-amd64\.deb' | xargs curl -sLO
+    | grep -o 'https://[^" ]*/releases/download/[^" ]*/texas2step-[^" ]*-amd64\.deb' \
+    | xargs curl -sLO
 sudo apt install ./texas2step-*-amd64.deb
 ```
+
+The `grep` takes the package's download address from GitHub's description of the release.
+An address holds no space, so it can't run on into the release notes' own words.
 
 The service starts straight away, listening on `127.0.0.1:8080`, so it's reachable only
 through nginx. Check it:

@@ -80,7 +80,8 @@ all three:
 ```bash
 cd "$(mktemp -d)"
 curl -sL https://api.github.com/repos/robert-patrick-texas/texas2step/releases/latest \
-    | grep -o 'https://[^"]*/t2s_[^"]*_amd64\.deb' | xargs curl -sLO
+    | grep -o 'https://[^" ]*/releases/download/[^" ]*/t2s_[^" ]*_amd64\.deb' \
+    | xargs curl -sLO
 sudo apt install ./t2s_*_amd64.deb
 ```
 

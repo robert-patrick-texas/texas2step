@@ -238,15 +238,6 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
   documentation stays in English. A large job, and each new label needs its translation
   from then on.
 
-### Documentation
-
-- [ ] **A sturdier download command.** The install guide's
-  [one-line download](install.md#1-install-the-package) finds the package with
-  `grep -o 'https://[^"]*-amd64\.deb'` in GitHub's description of the latest release. A
-  URL in the release notes ahead of the package's name would run into it, so release
-  notes keep their links after the Files table. Reading the description as JSON, with the
-  `python3` the package already needs, wouldn't depend on that.
-
 ### Later, maybe
 
 Worth considering, not urgent, and perhaps not needed.
