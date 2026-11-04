@@ -4,7 +4,6 @@ an exhausted range is refused rather than spilling onto other ports."""
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import gc
 import ipaddress
 import json
@@ -374,8 +373,8 @@ async def test_stun_candidates_come_from_the_ranged_sockets(peers):
 async def test_a_connection_closed_during_its_checks_sends_nothing_more():
     # aioice keeps starting the checks still waiting after a close, and leaves those under
     # way to retry: each send then goes to a closed socket, an error asyncio raises into
-    # the check. connect() cancels its checks, and so silences those errors, once it ends;
-    # at shutdown, or at the end of a test, it's cancelled first, and they are logged.
+    # the check, logged once nothing holds the task. Closing ends connect() too: nothing
+    # cancels it, as nothing does on a server.
     errors: list[dict[str, Any]] = []
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(lambda _, context: errors.append(context))
@@ -391,16 +390,61 @@ async def test_a_connection_closed_during_its_checks_sends_nothing_more():
         connecting = asyncio.create_task(conn.connect())
         await asyncio.sleep(0.05)  # a few checks under way, the rest waiting
         await conn.close()
-        await asyncio.sleep(0.1)  # when aioice would start more
-        connecting.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await connecting
+        with pytest.raises(ConnectionError):
+            await asyncio.wait_for(connecting, 1)
         await asyncio.sleep(1.2)  # past the first retransmissions
         del conn, connecting  # a task's error is logged once nothing holds the task
         gc.collect()
         assert errors == []
     finally:
         loop.set_exception_handler(None)
+
+
+async def test_a_connection_closed_before_any_check_arrives_stops_connecting():
+    # Chrome's offer names its addresses by mDNS, which the server leaves out, and never
+    # says its candidates have ended; when its UDP never arrives there is nothing to
+    # check. Before, connect() then woke every 20 ms for as long as the worker ran, the
+    # session long closed: idle workers at 40% of a core after a day of such offers.
+    conn = rtc._PortRangeConnection(ice_controlling=False, use_ipv6=False)
+    await conn.gather_candidates()
+    conn.remote_username, conn.remote_password = "peer", "password-nobody-checks"
+    connecting = asyncio.create_task(conn.connect())
+    await asyncio.sleep(0.1)
+    assert not connecting.done()  # waiting for the browser's checks, as it should
+    await conn.close()
+    with pytest.raises(ConnectionError):
+        await asyncio.wait_for(connecting, 1)
+
+
+async def test_a_session_closed_while_checking_leaves_nothing_running(peers, monkeypatch):
+    # The reaper closes a session that never sent a probe after 30 s; a block, a failed
+    # connection or the server's stop close it too. Without a port range, as by default.
+    monkeypatch.setattr(rtc.rtcicetransport, "Connection", rtc.Connection)
+    echo = RtcEcho([], max_sessions=4, timeout=60)
+    assert issubclass(rtc.rtcicetransport.Connection, rtc._PortRangeConnection)
+    pc, _ = await offer(peers)
+    sdp = pc.localDescription.sdp
+    lost = re.sub(r"^a=(candidate:.*|end-of-candidates)\r?\n", "", sdp, flags=re.M)
+    answer = await echo.answer(lost)
+    session = echo.sessions[answer["id"]]
+    await asyncio.sleep(0.2)
+    assert session.pc.iceConnectionState == "checking"
+
+    def connecting() -> int:
+        def awaits(coro: Any) -> bool:
+            while coro is not None:
+                if getattr(coro, "__qualname__", "") == "Connection.connect":
+                    return True
+                coro = getattr(coro, "cr_await", None)
+            return False
+
+        return sum(awaits(task.get_coro()) for task in asyncio.all_tasks())
+
+    assert connecting() == 1
+    await echo._close(session)
+    await asyncio.sleep(0.2)
+    assert connecting() == 0
+    await echo.stop()
 
 
 def test_settings_reach_the_echo(tmp_path):

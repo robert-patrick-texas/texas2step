@@ -150,7 +150,8 @@ if AVAILABLE:
         aioice binds every host socket to port 0, and aiortc has no option to change that.
         A connection created while ``_PORT_RANGE`` is set binds its host sockets here
         instead and leaves the STUN and TURN candidates to aioice. Without a range it
-        behaves like its base class, but for stopping its checks when it closes.
+        behaves like its base class, but for stopping its checks and its connect() when
+        it closes.
         """
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -165,6 +166,14 @@ if AVAILABLE:
         def check_start_task(self, pair: Any) -> None:
             if not self._closing:
                 super().check_start_task(pair)
+
+        # connect() checks every 20 ms until this says there's nothing left to do, and
+        # before aioice 0.12.1 close() doesn't end it: a pair left waiting, or a browser's
+        # candidates still to come (Chrome never says it has sent them all), keeps it going
+        # after the session is gone, for as long as the worker runs. Closed, it ends, as
+        # failed. aiortc takes aioice from 0.10.2; 0.12.1 ends it itself, and renames this.
+        def check_periodic(self) -> bool:
+            return not self._closing and super().check_periodic()
 
         async def close(self) -> None:
             self._closing = True
@@ -382,9 +391,10 @@ class RtcEcho:
         self.port_range = port_range
         self.sessions: dict[str, Session] = {}
         self._reaper: asyncio.Task[None] | None = None
-        if self.enabled and port_range is not None:
-            # aiortc builds its ICE connections from this module-level name. The subclass
-            # changes nothing for connections created outside answer().
+        if self.enabled:
+            # aiortc builds its ICE connections from this module-level name. Outside
+            # answer(), or without a port range, the subclass only stops a closed
+            # connection's checks and its connect().
             rtcicetransport.Connection = _PortRangeConnection  # ty: ignore[invalid-assignment]
 
     def start(self) -> None:

@@ -39,7 +39,11 @@ were also checked, and cost nothing once over:
   idle at once. The session keeps its place until `rtc_session_timeout` (120 s), so
   for that long it counts toward `max_rtc_sessions`.
 * **A download whose client leaves partway.** Nothing goes on after the client has gone.
-* **An offer whose UDP never connects.** About 6 ms of CPU each.
+* **An offer whose UDP never connects**, as from a network that blocks it. About 6 ms
+  of CPU to answer, then about 1 ms a second while the server waits for the browser's
+  checks, until it closes the session after 30 s. Before 2.17.1, the wait went on after
+  the close, for as long as the worker ran: each such offer added about 0.1 % of a core
+  to an idle worker.
 
 If the workers use CPU with nothing to serve, the journal says so (see below). Then
 `py-spy top --pid <worker>`, run as root, shows which Python function is using it.
