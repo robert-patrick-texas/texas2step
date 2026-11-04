@@ -238,6 +238,18 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
   documentation stays in English. A large job, and each new label needs its translation
   from then on.
 
+### Dependencies
+
+- [ ] **Require aioice 0.12.1.** From 0.12.1, closing an aioice connection ends its checks
+  and `connect()`, even when the browser never said its candidates had ended. Before that,
+  a UDP session closed before it connected kept its worker checking for it every 20 ms,
+  which texas2step fixed on its own side in 2.17.1. aiortc accepts aioice from 0.10.2, so
+  a Python install can still get a version without the fix. The Debian package and the
+  container image already install 0.12.1. Requiring `aioice>=0.12.1` in `pyproject.toml`
+  would let texas2step's override of aioice go, and probably the checks it stops on close
+  (2.4.1); the tests that came with both fixes would show whether 0.12.1 covers them. The
+  subclass would then be needed only with a UDP port range, as before 2.17.1.
+
 ### Later, maybe
 
 Worth considering, not urgent, and perhaps not needed.
