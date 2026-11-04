@@ -7,7 +7,7 @@ require (
 	github.com/pion/ice/v4 v4.4.8
 	github.com/pion/logging v0.2.4
 	github.com/pion/webrtc/v4 v4.2.26
-	github.com/quic-go/quic-go v0.64.1
+	github.com/quic-go/quic-go v0.65.0
 	golang.org/x/sys v0.49.0
 	golang.org/x/term v0.47.0
 )

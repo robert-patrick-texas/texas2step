@@ -252,6 +252,13 @@ Worth considering, not urgent, and perhaps not needed.
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.17.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.17.1) (2026-11-04)
+
+- [x] **Idle workers stay idle:** a UDP session closed before its connection was made, as
+  one from a network that blocks UDP is after 30 s, no longer leaves the server checking
+  for it every 20 ms for as long as the worker runs. Each one had cost about 0.1 % of a
+  core, out of sight of `texas2step clients` and `texas2step cpu`.
+
 ### [2.17.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.17.0) (2026-11-01)
 
 - [x] **Tab completion and a man page for t2s, on Linux:** `t2s install` writes them under
