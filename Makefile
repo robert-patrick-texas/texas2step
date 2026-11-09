@@ -1,4 +1,4 @@
-.PHONY: dev web web-watch test lint fmt check docs docs-watch sheet deb image version upgrade t2s t2s-deb t2s-test
+.PHONY: dev web web-watch test lint fmt check docs docs-watch sheet deb image version facts upgrade t2s t2s-deb t2s-test
 
 # t2s, the Go client: the platforms it is built for (Go's names; darwin is macOS), each a
 # file of its own in dist/.
@@ -52,6 +52,9 @@ image:          ## build the container image texas2step:<version> for this machi
 
 version:        ## print the version; it is set only in src/texas2step/__init__.py
 	@sed -n 's/^__version__ = "\(.*\)"$$/\1/p' src/texas2step/__init__.py
+
+facts:          ## print the release notes' Versions and Lines of code, after make deb and make t2s
+	@uv run python scripts/release_facts.py
 
 t2s:            ## build t2s for Linux, macOS and Windows into dist/: t2s-linux-amd64, t2s-macos-arm64, ...
 	@v=$$($(MAKE) -s version); cd t2s && for target in $(T2S_TARGETS); do \

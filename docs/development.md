@@ -52,6 +52,7 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make deb` | Build `dist/texas2step-<version>-1-amd64.deb` and `dist/texas2step-setup` |
 | `make image` | Build the container image `texas2step:<version>` for this machine's architecture |
 | `make version` | Print the version |
+| `make facts` | Print a release's Versions and Lines of code, for its notes, from `make deb`'s and `make t2s`'s files |
 | `make upgrade` | Move every Python, npm and Go dependency to its newest release, then rebuild the UI |
 | `make t2s` | Build t2s for Linux, macOS and Windows (amd64, arm64) into `dist/` |
 | `make t2s-deb` | Build the t2s package from `make t2s`'s files: `dist/t2s_<version>-1_amd64.deb` and `_arm64.deb` |
@@ -333,7 +334,13 @@ pushes them (see [Release](#release)).
 4. Run `make check`, `make deb`, `make t2s` and `make t2s-deb`. The package installs
    exactly the versions in `uv.lock`, and t2s is built with exactly those in
    `t2s/go.sum`.
-5. Commit (including the updated lockfiles), tag and publish the package:
+5. Run `make -s facts` and put what it prints in the release's notes, before the Files
+   table. Its **Versions** come from what was built where they can: the server package's
+   Python and Python packages from its `.deb`, t2s's Go and modules from the build
+   information in `dist/t2s-linux-amd64`. The rest come from the files that pin them.
+   Its **Lines of code** count the files git tracks, by language and by part: product,
+   tests and tooling.
+6. Commit (including the updated lockfiles), tag and publish the package:
 
 ```bash
 v=$(make -s version)
@@ -345,7 +352,7 @@ gh release create "v$v" "dist/texas2step-$v-1-amd64.deb" dist/texas2step-setup \
     --title "texas2step $v" --generate-notes
 ```
 
-6. Publishing the release publishes the Python package to
+7. Publishing the release publishes the Python package to
    [PyPI](https://pypi.org/project/texas2step/) too, for `uv tool install texas2step` and
    `pipx install texas2step`. `.github/workflows/pypi.yml` checks that the tag is
    `v<version>`, runs the tests, builds the sdist and wheel from the tag, checks their
@@ -365,7 +372,7 @@ pypi → Run workflow, or `gh workflow run pypi.yml`.
 PyPI's copy of the README has its links made absolute, to GitHub, by
 `hatch-fancy-pypi-readme` (`pyproject.toml`).
 
-7. Publishing the release also publishes the [container image](container.md):
+8. Publishing the release also publishes the [container image](container.md):
    `.github/workflows/container.yml` checks the tag the same way, builds and tests the
    image on amd64 and arm64, pushes both to `ghcr.io/robert-patrick-texas/texas2step`
    under `<version>`, `<major>.<minor>`, `<major>` and `latest`, and attests the build.
