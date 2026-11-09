@@ -47,13 +47,14 @@ export class HistoryView implements View {
 
   /** The visitors' access code, where this server asks for one (docs/access.md). */
   private async code(desk: HTMLElement): Promise<void> {
-    // The server tells it only where codes are on, to a visitor who needs none; asking
-    // anywhere else gets a 404, which its journal logs as a warning.
-    if (!this.app.access?.codes || this.app.access.required) return;
+    // The server tells it only where codes are on, to a visitor who needs none or holds a
+    // support pass; asking anywhere else gets a 404, which its journal logs as a warning.
+    if (!this.app.access?.codes || (this.app.access.required && !this.app.support)) return;
     let code: AccessCode;
     try {
       code = await this.app.origin.json<AccessCode>("/access/code");
-    } catch {
+    } catch (err) {
+      this.refused(err);
       return; // not for this client after all
     }
     // A daily code changes within the day: its weekday says when. A weekly or monthly one
@@ -73,6 +74,7 @@ export class HistoryView implements View {
       results = (await this.app.origin.json<{ results: ResultSummary[] }>("/results?limit=200")).results;
     } catch (err) {
       body.replaceChildren(h("p", { class: "status" }, `History is unavailable: ${err instanceof Error ? err.message : String(err)}`));
+      this.refused(err);
       return;
     }
     clear(body);
@@ -115,6 +117,11 @@ export class HistoryView implements View {
         ),
       ),
     );
+  }
+
+  /** A 404 to a support pass: it may have ended, and then the page starts over. */
+  private refused(err: unknown): void {
+    if (this.app.support && err instanceof Error && err.message.startsWith("404")) void this.app.supportRefused();
   }
 
   private trend(results: ResultSummary[]): HTMLElement {

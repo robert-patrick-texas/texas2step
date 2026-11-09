@@ -663,8 +663,8 @@ export class TestView implements View {
       // Another test began while it was saved: the status line and the address are its.
       if (this.result !== result) return;
       this.status.append(" Saved as Result ID ", resultId(saved.id));
-      // A visitor without the desk's functions can't open /r/ links; the desk can.
-      if (this.app.desk) this.app.setAddress(`/r/${saved.id}`);
+      // Only a visitor who opens saved results (the desk, or a support pass) opens /r/ links.
+      if (this.app.results) this.app.setAddress(`/r/${saved.id}`);
     } catch (err) {
       console.warn("could not save result", err);
     }
@@ -959,7 +959,7 @@ export class TestView implements View {
     const copy = h("button", { class: "btn", type: "button" }, "Copy JSON");
     copy.addEventListener("click", () => void navigator.clipboard.writeText(json()).then(() => flash(copy, "Copied")));
     this.actions.append(download, copy);
-    if (r.id && this.app.desk) {
+    if (r.id && this.app.results) {
       const share = h("button", { class: "btn primary", type: "button" }, "Copy share link");
       share.addEventListener("click", () => void navigator.clipboard.writeText(`${window.location.origin}${appPath(`/r/${r.id}`)}`).then(() => flash(share, "Link copied")));
       this.actions.append(share);

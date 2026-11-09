@@ -87,6 +87,8 @@ results_path = "/var/lib/texas2step/results.db"
 # access_key_file = "/etc/texas2step/access.key"  # copy the same key to every server
 # access_phrases_file = "/etc/texas2step/access-phrases.toml"  # standing phrases:
 #                                       # sudo texas2step access phrase add vip
+# access_support_words = 4              # a support phrase's words, at least (2 or more)
+# access_support_letters = 20           # and its letters or digits (12 or more)
 # access_lockout_after = 3              # wrong codes in a row that lock out a /24 or /48
 # access_lockout_minutes = 30           # until this long passes with no code from it
 # access_lockouts_file = "/var/lib/texas2step/access.db"  # sudo texas2step access lockouts
@@ -94,7 +96,8 @@ results_path = "/var/lib/texas2step/results.db"
 # access_peer_networks = []             # the other servers' addresses, which theirs must come from
 # access_lockout_hook = ""              # a program run on each lockout, block and clear here
 # internal_networks = []                # e.g. ["10.0.0.0/8", "198.51.100.0/24"]: no code, and
-#                                       # only they see History, the API tab and saved results
+#                                       # only they see the API tab, History and saved results
+#                                       # (those two also with a support phrase)
 
 # --- Traffic limit, for servers whose traffic is billed (docs/traffic.md) ------------------
 # traffic_day_gb = 0.0                  # gigabytes (10^9 bytes) tests may move a day; 0 = no limit

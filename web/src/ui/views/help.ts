@@ -152,6 +152,7 @@ export class HelpView implements View {
   mount(root: HTMLElement): void {
     const topics = TOPICS.filter((t) => this.app.pages.has(t.page));
     const sections = new Map(topics.map((t) => [t.page, h("section", { class: "card help-card" }, h("h2", {}, t.name), ...t.details())]));
+    // The desk's pages this visitor gets: by address, or History alone by a support pass.
     const desk = [this.app.pages.has("history") && [b("History"), " lists the tests saved here, newest first, and opens any by its Result ID."], this.app.pages.has("api") && [b("API"), " shows how scripts and monitoring systems run the same measurements."]].filter((x): x is Part[] => !!x);
 
     root.append(

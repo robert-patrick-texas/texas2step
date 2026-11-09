@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.requests import HTTPConnection
 
 from .. import cluster
-from ..access import SHUFFLE, Codes, is_internal
+from ..access import SHUFFLE, Codes, Phrase, is_internal
 from ..lockouts import SHARED_BY, Lockout, inside_of, parse_network
 from .meta import client_address, from_trusted_proxy
 
@@ -96,8 +96,34 @@ async def pass_issued(conn: HTTPConnection) -> int | None:
 
 
 def desk(request: Request) -> bool:
-    """Whether this client gets saved results, the API explorer and measurements."""
+    """Whether this client gets saved results, the API explorer and measurements, by its
+    address; a support pass opens some of them too (support_phrase)."""
     return not request.app.state.settings.internal_networks or internal(request)
+
+
+async def support_phrase(conn: HTTPConnection, token: str | None = None) -> Phrase | None:
+    """The support phrase whose pass this request carries (or ``token``), if the pass is
+    good as GET /access judges one: not ended, and for a client that needs a pass, its
+    network not blocked by hand. For app.AccessGate, GET /access and GET /access/code."""
+    codes = conn.app.state.codes
+    token = given_pass(conn) if token is None else token
+    if codes is None or not token:
+        return None
+    blocks = conn.app.state.blocks
+    phrase = codes.pass_support(token, ended=await blocks.ended())
+    ip, _ = client_address(conn)
+    needs_pass = not is_internal(ip, conn.app.state.settings.internal_networks)
+    if phrase is None or (needs_pass and await blocks.cover(ip)):
+        return None
+    return phrase
+
+
+def log_support(phrase: Phrase, conn: HTTPConnection, path: str) -> None:
+    """Each request a support pass opens is logged by its phrase's name, so the journal
+    says who read History. ``path``: without the query, which can hold the pass."""
+    ip, _ = client_address(conn)
+    method = conn.scope.get("method", "GET")
+    log.warning("support phrase %s: %s %s from %s", phrase.name, method, path, ip)
 
 
 @router.get("", summary="Whether this client needs an access code")
@@ -109,15 +135,18 @@ async def status(
     service desk's functions (saved results, the API explorer, measurements). ``codes``:
     this server gives passes, even to a client that needs none, for another address that
     asks for one (such as this server's IPv4-only name, to a client inside on IPv6 only).
-    ``note``: the site's line under the code box (``access_note``), empty for none."""
+    ``note``: the site's line under the code box (``access_note``), empty for none.
+    ``support``: the pass is a good support pass, which opens History, the saved results
+    and the day's code from outside ``internal_networks`` too."""
     codes = request.app.state.codes
+    pass_ = pass_ or given_pass(request)  # the page sends its own server's in a header
     body: dict[str, Any] = {
         "required": codes is not None and not internal(request),
         "desk": desk(request),
         "codes": codes is not None,
         "note": request.app.state.settings.access_note,
+        "support": await support_phrase(request, pass_) is not None,
     }
-    pass_ = pass_ or given_pass(request)  # the page sends its own server's in a header
     if codes is not None and pass_:
         expires = codes.pass_expires(pass_, ended=await request.app.state.blocks.ended())
         # A block set by hand on this client's network ends its pass (app.AccessGate).
@@ -132,9 +161,12 @@ async def status(
 async def unlock(request: Request, given: CodeIn, response: Response) -> dict[str, Any]:
     """A pass for the current code or a standing phrase, valid on every server that holds
     the same key. Send it as ``?pass=`` or in an ``Authorization: Bearer`` header with
-    each request. Wrong codes count against the client's /24 or /48: after
-    ``access_lockout_after`` in a row, its codes are refused unread, with this same 403,
-    until ``access_lockout_minutes`` pass without one."""
+    each request. ``scope``: "support" for a support phrase's pass, which opens History,
+    the saved results and the day's code from outside ``internal_networks`` too, on each
+    server where that phrase is a support phrase; "visitor" for any other. Wrong codes
+    count against the client's /24 or /48: after ``access_lockout_after`` in a row, its
+    codes are refused unread, with this same 403, until ``access_lockout_minutes`` pass
+    without one."""
     codes = request.app.state.codes
     if codes is None:
         raise HTTPException(404, "this server doesn't ask for an access code")
@@ -143,14 +175,19 @@ async def unlock(request: Request, given: CodeIn, response: Response) -> dict[st
     lockouts = request.app.state.lockouts
     # Read afresh: a code shuffled away a moment ago, on any worker, is no code.
     shuffle, shuffled_at, _ = await asyncio.to_thread(lockouts.codes_shuffled)
+    phrase: Phrase | None = None
+
+    def check() -> tuple[bool, str]:
+        nonlocal phrase
+        right, note, phrase = verdict(codes, given.code, now, shuffle, shuffled_at)
+        return right, note
+
     if is_internal(ip, request.app.state.settings.internal_networks):
         # The desk trying a code: not counted.
-        right, note = verdict(codes, given.code, now, shuffle, shuffled_at)
+        right, note = check()
         outcome = None
     else:
-        outcome = await asyncio.to_thread(
-            lockouts.submit, ip, lambda: verdict(codes, given.code, now, shuffle, shuffled_at)
-        )
+        outcome = await asyncio.to_thread(lockouts.submit, ip, check)
         if outcome.locked:
             log.warning(
                 "access code from %s ignored: %s is locked out until %s",
@@ -180,7 +217,7 @@ async def unlock(request: Request, given: CodeIn, response: Response) -> dict[st
     # Read afresh, not as this worker last saw it: a pass stamped before an end just made
     # would be refused at once.
     ended, _ = await asyncio.to_thread(lockouts.passes_ended)
-    token, expires = codes.issue(ended=ended)
+    token, expires = codes.issue(ended=ended, phrase=phrase)
     if PASS_COOKIE in request.cookies:  # an earlier version's: the page keeps the pass itself
         response.delete_cookie(
             PASS_COOKIE,
@@ -189,7 +226,8 @@ async def unlock(request: Request, given: CodeIn, response: Response) -> dict[st
             httponly=True,
             samesite="strict",
         )
-    return {"pass": token, "expires": expires}
+    scope = "support" if phrase is not None and phrase.support else "visitor"
+    return {"pass": token, "expires": expires, "scope": scope}
 
 
 async def _reshare(request: Request, network: str) -> None:
@@ -206,16 +244,18 @@ async def _reshare(request: Request, network: str) -> None:
 
 def verdict(
     codes: Codes, text: str, now: datetime, shuffle: str = "", shuffled_at: float = 0
-) -> tuple[bool, str]:
-    """Whether ``text`` gets a pass, and what it was, for the journal."""
+) -> tuple[bool, str, Phrase | None]:
+    """Whether ``text`` gets a pass, what it was, for the journal, and the standing phrase
+    it is, if one."""
     if codes.check(text, now, shuffle, shuffled_at):
-        return True, "access code"
+        return True, "access code", None
     phrase = codes.phrase(text)
     if phrase is None:
-        return False, "wrong access code"
+        return False, "wrong access code", None
+    what = f"access phrase {phrase.name}" + (" (support)" if phrase.support else "")
     if codes.expired(phrase, now):
-        return False, f"expired access phrase {phrase.name}"
-    return True, f"access phrase {phrase.name}"
+        return False, f"expired {what}", phrase
+    return True, what, phrase
 
 
 def _https(request: Request) -> bool:
@@ -230,10 +270,17 @@ def _at(codes: Codes, moment: float) -> str:
 
 @router.get("/code", summary="The current access code, for the service desk")
 async def current(request: Request) -> dict[str, Any]:
-    """Only for clients in ``internal_networks``, on a server that has them."""
+    """Only for clients in ``internal_networks``, on a server that has them, and for a
+    support pass (docs/access.md)."""
     codes = request.app.state.codes
-    if codes is None or not request.app.state.settings.internal_networks or not internal(request):
+    networks = request.app.state.settings.internal_networks
+    if codes is None:
         raise HTTPException(404, "Not Found")
+    if not (networks and internal(request)):
+        if (phrase := await support_phrase(request)) is None:
+            raise HTTPException(404, "Not Found")
+        if not networks:  # with them, app.AccessGate logged it
+            log_support(phrase, request, f"{router.prefix}/code")
     now = datetime.now(UTC)
     shuffle, shuffled_at, _ = await asyncio.to_thread(request.app.state.lockouts.codes_shuffled)
     code = codes.current(now, shuffle, shuffled_at)

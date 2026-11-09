@@ -58,14 +58,16 @@ file up to date with the new version's template and keeps your values; see
 | `access_note` | `Contact the service desk for assistance.` | The line under the code box, such as how to reach the desk; `""` for none |
 | `access_card_only` | `false` | `true`: the code screen shows the code box alone, under `brand_notice` if one is set, with no header or footer; see [What the header and footer show](#what-the-header-and-footer-show) |
 | `access_key_file` | `/etc/texas2step/access.key` | The key codes come from; the same on every server of an organization |
-| `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | Standing phrases that work as codes, if the file exists; see [Standing phrases](access.md#standing-phrases) |
+| `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | Standing phrases that work as codes, if the file exists, and support phrases, which also open History for the desk outside `internal_networks`; see [Standing phrases](access.md#standing-phrases) and [Support phrases](access.md#support-phrases) |
+| `access_support_words` | 4 | The words a support phrase needs at least: 2 to 20; the same on every server. See [Support phrases](access.md#support-phrases). |
+| `access_support_letters` | 20 | The letters or digits a support phrase needs at least: 12 to 100; the same on every server |
 | `access_lockout_after` | 3 | Wrong codes in a row from one /24 or /48 that lock it out of entering codes; see [Lockouts and blocks](access.md#lockouts-and-blocks) |
 | `access_lockout_minutes` | 30 | How long a lockout lasts after the last code from the network |
 | `access_lockouts_file` | `/var/lib/texas2step/access.db` | The counts, lockouts and blocks, shared by the workers and `texas2step access lockouts` |
 | `access_share_lockouts` | `false` | `true`: a lockout here, `texas2step access block` and `access lockouts --clear` go to every server in `[[locations]]`; see [Servers that defend together](access.md#servers-that-defend-together) |
 | `access_peer_networks` | `[]` | The addresses the other servers' requests come from: their lockouts are taken only from there, and only signed with the shared key |
 | `access_lockout_hook` | `""` | The full path of a program run on each lockout, block and clear here, as the service's user; see [A hook for anything else](access.md#a-hook-for-anything-else) |
-| `internal_networks` | `[]` | Your own networks, as addresses or CIDR blocks: no code is asked there, and only they get History, the API tab, saved results, the API explorer and `/api/v1/measure/*` |
+| `internal_networks` | `[]` | Your own networks, as addresses or CIDR blocks: no code is asked there, and only they get History, the API tab, saved results, the API explorer and `/api/v1/measure/*`, except that a [support phrase](access.md#support-phrases) opens History and saved results from elsewhere |
 | `traffic_day_gb` | 0 | Gigabytes (10^9 bytes) the tests may move in a day before new tests are refused until midnight in `access_timezone`; 0 for no limit. See [Traffic limits](traffic.md). |
 | `traffic_month_gb` | 0 | The same for a calendar month |
 | `traffic_counts` | `both` | What counts: `sent` (the visitors' downloads, which clouds such as AWS, Azure and Google Cloud bill), `received` (their uploads) or `both` |

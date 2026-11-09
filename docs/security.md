@@ -5,8 +5,9 @@ operator. The other guides have the details and settings; this page links to the
 
 texas2step is built to sit on the Internet, so employees can test the path to your network
 from home, while keeping the service desk's tools and callers' details on your own
-networks. A server for internal networks only needs few of these controls; most are off
-until set, and none gets in the way of a test from inside.
+networks, and with the desk members you give a support phrase. A server for internal
+networks only needs few of these controls; most are off until set, and none gets in the
+way of a test from inside.
 
 ## At a glance
 
@@ -14,9 +15,9 @@ until set, and none gets in the way of a test from inside.
 |---|---|
 | Who may test | [Access codes](#who-may-test) that change daily, weekly or monthly; passes that expire; `internal_networks` need none |
 | Guessing | [Lockouts](#guessing) of a /24 or /48 after three wrong codes in a row, shared between servers if wanted |
-| The desk's tools | History, saved results, the current code, measurements and blocks [only for `internal_networks`](#the-desks-tools) |
+| The desk's tools | History, saved results, the current code, measurements and blocks [only for `internal_networks`](#the-desks-tools); History, saved results and the code also for a support phrase, logged by its name |
 | Abuse of the service | [Size and time caps](#abuse-of-the-service) on every request, a daily and monthly traffic limit, nginx connection limits |
-| Data | [Saved results](#data-and-privacy) readable only inside, deleted securely; no passes or phrases in any log |
+| Data | [Saved results](#data-and-privacy) readable only inside or with a support phrase, deleted securely; no passes or phrases in any log |
 | Cryptography | [HMAC-SHA-256 with 256-bit keys](#cryptography); TLS 1.3 with post-quantum key exchange recommended |
 | On the wire | [HTTPS, WSS and DTLS](#on-the-wire) for everything measured; only ICE's signed connectivity checks travel in plain text |
 | The host | A [sandboxed service](#the-host) as its own unprivileged user, behind nginx, with only the needed ports open |
@@ -53,11 +54,24 @@ pass.
   key ends every pass and code.
 * **Standing phrases.** For the desk away from a PC, in their own `0640` file
   (`access-phrases.toml`), with an optional last day. Each use is a journal warning with
-  the phrase's name, never the phrase. The examples published in the docs are refused.
+  the phrase's name, never the phrase. The phrases file's examples, and the support
+  phrases the docs show, are refused.
+* **Support phrases.** A standing phrase with `scope = "support"`, for a desk member
+  outside `internal_networks`, one per person or one the desk shares. It must have at
+  least 4 words and 20 letters or digits, or what the site sets
+  (`access_support_words`, `access_support_letters`), never fewer than 2 words and 12
+  letters or digits. Its pass names the phrase and is signed with
+  it, apart from a visitor's, and also opens History, saved results and the code
+  ([The desk's tools](#the-desks-tools)). Each server checks it against its own phrases
+  as it is used, so removing or changing the phrase, and restarting, ends its passes
+  there.
 * **Comparisons** of codes, phrases and passes are constant-time.
 * **What an outsider sees before the code:** the code page, without the version number;
-  Monitor, Diag, History and the API pages send them back to it. The health check gives
-  `{"status": "ok"}` and no version.
+  Monitor, Diag, History and the API pages send them back to it. With `internal_networks`
+  set, the API pages are `404` instead, and History and `/r/<id>` are the code page too,
+  on every server alike, so nothing shows whether a server has a
+  [support phrase](access.md#support-phrases); their data is `404`. The health check
+  gives `{"status": "ok"}` and no version.
 
 ## Guessing
 
@@ -110,6 +124,17 @@ server itself), and `404` to everyone else, as if they weren't there:
   [server's CPU](cpu.md) (`/api/v1/cpu`, `/api/v1/metrics`), which a server without
   `internal_networks` doesn't answer at all.
 
+A [support phrase](access.md#support-phrases) opens the first two from anywhere: its
+pass reads History, saved results and the result pages, and the current code. The rest
+stay with `internal_networks`. Without a good support pass, those answer the same `404`
+as before, never a refusal that says a support pass would do. A support pass is good
+only where the same phrase, under the same name, is a support phrase in that server's
+own phrases file, unexpired, so removing or changing a phrase, and restarting, ends that
+person's passes there, tests included.
+Each request from outside that one opens is a journal warning with the phrase's name,
+the method, the path without its query string, and the address. Give each desk member a
+phrase of their own where you can, so the journal says who read which results.
+
 They also refuse, with `403`, a browser's request made for a page on another site. They
 trust the address a request comes from, and CORS lets any page read the answer, so a
 website an employee opens inside could otherwise read History, the current code and the
@@ -125,6 +150,7 @@ At most two run at once on each worker.
 **The version** would tell an attacker which flaws to try. With `internal_networks` set,
 only those networks see it: the page, `/api/v1/info` and `/api/v1/health` leave it out for
 everyone else, even after they enter a code. A result they save gets it from the server.
+A support pass reads saved results, and with them the version that ran each test.
 
 ## Abuse of the service
 
@@ -150,13 +176,15 @@ A speed test exists to move a lot of data, so each part has a cap:
 
 * **Saved results** hold the address the caller tested from, and where the client could
   tell, their computer's own address and a MAC address. With `internal_networks` set,
-  only the desk reads them. Only the newest `results_max_rows` are kept, and
-  `texas2step results clear` deletes all of them: the rows are overwritten, the file
-  shrunk and its journal emptied, so no address stays on disk.
+  only the desk reads them: from those networks, or with a support phrase. Only the
+  newest `results_max_rows` are kept, and `texas2step results clear` deletes all of them:
+  the rows are overwritten, the file shrunk and its journal emptied, so no address stays
+  on disk.
 * **Logs.** The journal shows `pass=*` in place of a pass, and names standing phrases,
   never their text. nginx logs texas2step's requests without their query strings, so its
-  access log never holds a pass. Wrong codes, lockouts, blocks and each use of a phrase
-  are warnings in the journal, with the address they came from.
+  access log never holds a pass. Wrong codes, lockouts, blocks, each use of a phrase and
+  each request a support pass opens from outside are warnings in the journal, with the
+  address they came from.
 * **Active clients.** Pages are told apart by a random id each page load makes and keeps
   in its memory, sent with its requests: no cookie, nothing kept in the browser, nothing
   that follows a visitor to the next visit. `/run/texas2step/clients.db`, in memory,
@@ -176,7 +204,8 @@ A speed test exists to move a lot of data, so each part has a cap:
   way can't run, or send what it finds to another site.
 * **Its own hostname.** A browser shares local storage across a whole origin, the scheme,
   host and port. Where texas2step sits beside other applications on one hostname, any page
-  there could read the pass, so serve it from a hostname of its own where you can.
+  there could read the pass, a support pass included, which reads callers' addresses, so
+  serve it from a hostname of its own where you can.
 
 ## Cryptography
 
@@ -289,6 +318,8 @@ texas2step can't do these for you:
 * Use `access_digits = 4`, standing phrases of several unrelated words, and keep the
   access key as you would a password.
 * Set `internal_networks` on every server open to the Internet, the same everywhere.
+* Keep the same phrases file on every server, and when a desk member leaves, remove
+  their support phrase on each one, change a shared one, and restart.
 * Callers who share a /24, such as a mobile carrier's pool, can be locked out together by
   one guesser; `texas2step access lockouts --clear` lets them back in.
 * The page's own scripts are public, so a determined attacker can tell the release.

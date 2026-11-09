@@ -5,7 +5,8 @@ fills in what only it knows:
 
 - the path prefix it is published under (``<base href>``),
 - the version (read by the UI from a meta tag),
-- the site's default theme, and which pages and header controls it shows,
+- the site's default theme, and which pages and header controls it shows, and which of
+  the desk's pages a support pass shows,
 - the branding: name, logo, organization, links, notice, the organization's own footer
   and the footer's bottom line (organization, links, credit, tagline),
 - whether this visitor's access code screen shows the code box alone.
@@ -59,6 +60,9 @@ def logo_file(settings: Settings) -> Path | None:
 
 # The service desk's pages: with internal_networks set, only those networks get them.
 DESK_PAGES = frozenset({"history", "api"})
+# Those a support pass opens outside them too, wherever codes are on: their tabs stay in
+# the page, hidden, for the page to show once it has such a pass.
+SUPPORT_PAGES = frozenset({"history"})
 
 
 class Shell:
@@ -81,11 +85,15 @@ class Shell:
         version: str,
         hide: frozenset[str] = frozenset(),
         gated: bool = False,
+        support: frozenset[str] = frozenset(),
     ) -> str:
         """The page, without the tabs of ``hide`` (the desk's, for visitors from outside).
-        ``gated``: this visitor needs the access code, unless their browser holds a pass."""
+        ``gated``: this visitor needs the access code, unless their browser holds a pass.
+        ``support``: of the pages hidden, those whose tabs stay, hidden, for a support
+        pass to show (data-support-pages)."""
         s = self.settings
         pages = [p for p in s.pages if p not in hide]
+        kept = [p for p in s.pages if p in hide and p in support]
         page = template.replace('<base href="/" />', f'<base href="{escape(root_path)}/" />', 1)
         page = page.replace(
             '<meta name="texas2step-version" content="" />',
@@ -112,8 +120,12 @@ class Shell:
         if pages != list(PAGES):
             # The tabs of hidden pages go, and the UI is told which pages it has.
             root.append(f'data-pages="{" ".join(pages)}"')
-            for hidden in set(PAGES) - set(pages):
+            for hidden in set(PAGES) - set(pages) - set(kept):
                 page = re.sub(rf'\s*<a [^>]*data-page="{hidden}"[^>]*>[^<]*</a>', "", page, count=1)
+        if kept:
+            root.append(f'data-support-pages="{" ".join(kept)}"')
+            for name in kept:
+                page = re.sub(rf'(<a [^>]*data-page="{name}"[^>]*)>', r"\1 hidden>", page, count=1)
         page = page.replace('<html lang="en">', f"<html {' '.join(root)}>", 1)
         if s.brand_name != DEFAULT_NAME:
             name = escape(s.brand_name)

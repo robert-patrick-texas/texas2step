@@ -15,12 +15,20 @@ counts. The previous period's code still works for a day after the change.
 
 A site can also keep standing phrases of its own (``access_phrases_file``), such as one
 the desk gives a VIP from memory. Each works as a code until it is removed, or until the
-end of its ``until`` day, and each use is logged by the phrase's name.
+end of its ``until`` day, and each use is logged by the phrase's name. A support phrase
+(``scope = "support"``), one per desk member or one the desk shares, buys a support pass.
 
-A right code buys a pass: an expiry time signed with the key. The browser sends it as
-``?pass=`` with every request, to this server and to the others in the picker, which
-check the signature with their copy of the key. A query parameter, not a header: a
-header would make browsers preflight every ping and download, and skew the timings.
+A right code buys a pass: the time it was issued, signed with the key. How long it lasts
+is the checking server's access_pass_hours. The page sends it to its own server in an
+Authorization header, and as ``?pass=`` to the others in the picker, which check the
+signature with their copy of the key; the command line sends ``?pass=`` everywhere. A
+query parameter to other servers, not a header: a header would make browsers preflight
+every ping and download, and skew the timings.
+
+A support pass also names its phrase, and also opens History, the saved results and the
+day's code from outside ``internal_networks`` (app.AccessGate). It is good only where
+that phrase, under that name, is a support phrase that hasn't expired: removing or
+changing one ends its passes.
 """
 
 from __future__ import annotations
@@ -38,7 +46,7 @@ import time
 import tomllib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
@@ -189,14 +197,23 @@ def site_words(path: str | Path) -> list[str]:
 # --- Standing phrases ----------------------------------------------------------------
 
 PHRASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,39}")
+SCOPES = ("visitor", "support")  # a phrase's scope: a visitor's pass, or a support pass
+# A support phrase opens more, so it must be harder to guess: at least this many words,
+# and letters or digits. A site may ask for fewer (access_support_words and
+# access_support_letters), down to the floor, or more.
+SUPPORT_RULE = (4, 20)
+SUPPORT_FLOOR = (2, 12)
 PHRASES_HEADER = """\
 # Standing access phrases for texas2step (docs/access.md). Each works as an access code
 # beside the day's code, until it is removed or until the end of its until day (in
-# access_timezone). Readable by root and the service only. texas2step access phrase add
-# and remove write this file again, keeping these lines but no comments of your own.
+# access_timezone). A support phrase also opens History, for the service desk outside
+# internal_networks; it needs at least 4 words and 20 letters or digits, unless
+# access_support_words and access_support_letters say otherwise. Readable by root and
+# the service only. texas2step access phrase add and remove write this file again,
+# keeping these lines but no comments of your own.
 # After a change: sudo systemctl restart texas2step
 #
-# Two examples, commented out. Make up your own: these are published with texas2step.
+# Three examples, commented out. Make up your own: these are published with texas2step.
 #
 # [[phrase]]
 # name = "future"
@@ -206,9 +223,21 @@ PHRASES_HEADER = """\
 # [[phrase]]
 # name = "vip"
 # phrase = "vip ticket to ride 1776"    # no until: works until it is removed
+#
+# [[phrase]]
+# name = "alice"                        # one desk member's, or one the desk shares
+# phrase = "night shift at the help desk 1836"
+# scope = "support"                     # opens History too
 """
-# Anyone can read the examples, so they never work as phrases.
-EXAMPLE_PHRASES = ("2026 the future is bright", "vip ticket to ride 1776")
+# Anyone can read the examples, so they never work as phrases: the header's, then the
+# support phrases docs/access.md writes into a phrases file.
+EXAMPLE_PHRASES = (
+    "2026 the future is bright",
+    "vip ticket to ride 1776",
+    "night shift at the help desk 1836",
+    "copper kettle north meadow 58",
+    "granite owl tundra lantern",
+)
 
 
 @dataclass(frozen=True)
@@ -216,10 +245,46 @@ class Phrase:
     name: str  # what the journal and texas2step access show call it; never the phrase
     text: str  # as written
     until: date | None = None  # it works through this day, in access_timezone
+    scope: str = "visitor"  # "support": its pass opens History too (docs/access.md)
 
     @property
     def code(self) -> str:
         return normalize(self.text)
+
+    @property
+    def support(self) -> bool:
+        return self.scope == "support"
+
+
+def strong(code: str, rule: tuple[int, int] = SUPPORT_RULE) -> bool:
+    """Whether a normalized phrase is strong enough for a support phrase: ``rule``'s
+    words, and letters or digits, at least."""
+    words = code.split(".")
+    return len(words) >= rule[0] and len("".join(words)) >= rule[1]
+
+
+def weak_support(rule: tuple[int, int] = SUPPORT_RULE) -> str:
+    return f"a support phrase needs at least {rule[0]} words and {rule[1]} letters or digits"
+
+
+# A support pass names its phrase, in base64url (Codes.issue).
+SUPPORT_MARK = "s"  # a support pass's second part
+NAME64 = re.compile(r"[A-Za-z0-9_-]{1,56}")  # a phrase name of up to 40 characters
+
+
+def _name64(name: str) -> str:
+    return base64.urlsafe_b64encode(name.encode()).rstrip(b"=").decode()
+
+
+def _name_of(name64: str) -> str | None:
+    """A support pass's phrase name; None unless written as issue writes it."""
+    if not NAME64.fullmatch(name64):
+        return None
+    try:
+        name = base64.urlsafe_b64decode(name64 + "=" * (-len(name64) % 4)).decode()
+    except ValueError:  # not base64, or not UTF-8
+        return None
+    return name if _name64(name) == name64 and PHRASE_NAME.fullmatch(name) else None
 
 
 def as_day(value: object) -> date | None:
@@ -234,8 +299,9 @@ def as_day(value: object) -> date | None:
     raise ValueError("until is a day, such as 2026-12-31")
 
 
-def parse_phrases(text: str, where: str) -> list[Phrase]:
-    """The ``[[phrase]]`` tables of a phrases file, each checked."""
+def parse_phrases(text: str, where: str, rule: tuple[int, int] = SUPPORT_RULE) -> list[Phrase]:
+    """The ``[[phrase]]`` tables of a phrases file, each checked: a support phrase against
+    ``rule``, its words and its letters or digits (support_rule)."""
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
@@ -249,7 +315,7 @@ def parse_phrases(text: str, where: str) -> list[Phrase]:
             raise AccessError(f"{where}: expected only [[phrase]] tables")
         name = entry.get("name")
         at = f"{where}: phrase {name!r}" if isinstance(name, str) else f"{where}: phrase {n}"
-        if unknown := set(entry) - {"name", "phrase", "until"}:
+        if unknown := set(entry) - {"name", "phrase", "until", "scope"}:
             raise AccessError(f"{at}: unknown {', '.join(sorted(unknown))}")
         if not isinstance(name, str) or not PHRASE_NAME.fullmatch(name):
             raise AccessError(f"{at}: name is up to 40 letters, digits, '-', '_' or '.'")
@@ -260,8 +326,13 @@ def parse_phrases(text: str, where: str) -> list[Phrase]:
             raise AccessError(f"{at}: phrase has letters outside ASCII")
         if normalize(text) in {normalize(example) for example in EXAMPLE_PHRASES}:
             raise AccessError(f"{at}: that is a published example; make up your own")
+        scope = entry.get("scope", "visitor")
+        if scope not in SCOPES:
+            raise AccessError(f'{at}: scope is "visitor" or "support"')
+        if scope == "support" and not strong(normalize(text), rule):
+            raise AccessError(f"{at}: {weak_support(rule)}")
         try:
-            phrase = Phrase(name, text, as_day(entry.get("until")))
+            phrase = Phrase(name, text, as_day(entry.get("until")), scope)
         except ValueError as exc:
             raise AccessError(f"{at}: {exc}") from None
         for other in phrases:
@@ -273,7 +344,12 @@ def parse_phrases(text: str, where: str) -> list[Phrase]:
     return phrases
 
 
-def read_phrases(path: str | Path) -> list[Phrase]:
+def support_rule(settings: Settings) -> tuple[int, int]:
+    """The words, and letters or digits, a support phrase needs at least, on this site."""
+    return settings.access_support_words, settings.access_support_letters
+
+
+def read_phrases(path: str | Path, rule: tuple[int, int] = SUPPORT_RULE) -> list[Phrase]:
     """The site's standing phrases; none without the file."""
     try:
         text = Path(path).read_text(encoding="utf-8")
@@ -283,7 +359,7 @@ def read_phrases(path: str | Path) -> list[Phrase]:
         raise AccessError(f"can't read {path}: {exc.strerror}") from exc
     except UnicodeDecodeError:
         raise AccessError(f"{path} isn't UTF-8 text") from None
-    return parse_phrases(text, str(path))
+    return parse_phrases(text, str(path), rule)
 
 
 def render_phrases(phrases: Sequence[Phrase]) -> str:
@@ -292,6 +368,8 @@ def render_phrases(phrases: Sequence[Phrase]) -> str:
         lines = ["[[phrase]]", f"name = {json.dumps(p.name)}", f"phrase = {json.dumps(p.text)}"]
         if p.until:
             lines.append(f"until = {p.until.isoformat()}")
+        if p.support:  # a visitor's phrase is written as before there were scopes
+            lines.append('scope = "support"')
         blocks.append("\n".join(lines) + "\n")
     return "\n".join(blocks)
 
@@ -327,6 +405,7 @@ class Codes:
         site: bool,
         pass_hours: float,
         phrases: Sequence[Phrase] = (),
+        rule: tuple[int, int] = SUPPORT_RULE,
     ) -> None:
         self.key = key
         self.interval = interval
@@ -337,6 +416,7 @@ class Codes:
         self.site = site
         self.pass_seconds = int(pass_hours * 3600)
         self.phrases = tuple(phrases)
+        self.rule = rule  # what a support phrase needs at least: words, letters or digits
 
     @classmethod
     def load(cls, settings: Settings, interval: str | None = None) -> Codes | None:
@@ -348,6 +428,7 @@ class Codes:
         key = read_key(settings.access_key_file)
         site = bool(settings.access_words)
         words = site_words(settings.access_words) if site else drawn_words(key)
+        rule = support_rule(settings)
         return cls(
             key,
             interval,
@@ -356,7 +437,8 @@ class Codes:
             words,
             site,
             settings.access_pass_hours,
-            read_phrases(settings.access_phrases_file),
+            read_phrases(settings.access_phrases_file, rule),
+            rule,
         )
 
     def _mac(self, *parts: str) -> bytes:
@@ -440,8 +522,15 @@ class Codes:
             "site" if self.site else "built-in",
         )
         if self.phrases:  # without any, as before there were phrases
-            standing = sorted(f"{p.code}|{p.until or ''}" for p in self.phrases)
+            # A visitor's phrase as before there were scopes; a support phrase's name too,
+            # which its passes carry.
+            standing = sorted(
+                f"{p.code}|{p.until or ''}" + (f"|support|{p.name}" if p.support else "")
+                for p in self.phrases
+            )
             what += (hashlib.sha256("\n".join(standing).encode()).hexdigest(),)
+        if any(p.support for p in self.phrases):  # what one needs, so a copy works everywhere
+            what += ("support-rule", *map(str, self.rule))
         if shuffle:  # without one, as before codes could be shuffled
             what += (shuffle,)
         mac = self._mac("fingerprint", *what, words).hex()
@@ -451,35 +540,88 @@ class Codes:
     # the key. How long it lasts is decided when it is checked, by access_pass_hours as
     # it is then, so a shorter setting shortens passes already given and a longer one
     # lengthens them. Passes issued before passes were last ended are refused.
+    #
+    # A support pass is "<issued>.s.<name>.<signature>", with its phrase's name in
+    # base64url, signed apart from a visitor's so neither can be read as the other, and
+    # signed with the phrase itself too. It is good only while this server's phrases still
+    # hold that phrase, under that name, as a support phrase that hasn't expired: a new
+    # phrase under the name doesn't take the passes the old one bought.
 
-    def issue(self, now: float | None = None, ended: float = 0) -> tuple[str, int]:
-        """A new pass, and when it runs out here. Stamped after ``ended``, when passes
-        were last ended, even by a clock a little behind the server that ended them."""
+    def issue(
+        self, now: float | None = None, ended: float = 0, phrase: Phrase | None = None
+    ) -> tuple[str, int]:
+        """A new pass, and when it runs out here: a support pass for a support phrase.
+        Stamped after ``ended``, when passes were last ended, even by a clock a little
+        behind the server that ended them."""
         issued = max(int(now if now is not None else time.time()), int(ended) + 1)
-        return f"{issued}.{self._sign(issued)}", issued + self.pass_seconds
+        if phrase is not None and phrase.support:
+            name = _name64(phrase.name)
+            token = f"{issued}.{SUPPORT_MARK}.{name}.{self._sign(issued, phrase)}"
+        else:
+            token = f"{issued}.{self._sign(issued)}"
+        return token, issued + self.pass_seconds
 
-    def _sign(self, issued: int) -> str:
+    def _sign(self, issued: int, phrase: Phrase | None = None) -> str:
         # Not the "pass" of earlier versions, which signed the expiry: such a pass must
         # not be read as one issued at that time.
-        mac = self._mac("pass-issued", str(issued))[:18]
+        if phrase is None:
+            mac = self._mac("pass-issued", str(issued))[:18]
+        else:  # neither a name nor a code holds "|"
+            mac = self._mac("pass-issued-support", str(issued), phrase.name, phrase.code)[:18]
         return base64.urlsafe_b64encode(mac).decode()
 
-    def pass_issued(self, token: str, now: float | None = None, ended: float = 0) -> int | None:
-        """When the pass was issued, if it is ours and still good: issued after ``ended``,
-        within access_pass_hours, and not more than PASS_AHEAD seconds ahead of now."""
-        stamp, _, sig = (token or "").partition(".")
+    def _read(
+        self, token: str, now: float | None, ended: float
+    ) -> tuple[int, Phrase | None] | None:
+        """A good pass's issued time, and a support pass's phrase; None for no pass."""
+        parts = (token or "").split(".")
+        if len(parts) == 2:
+            (stamp, sig), name = parts, None
+        elif len(parts) == 4 and parts[1] == SUPPORT_MARK:
+            stamp, _, name64, sig = parts
+            if (name := _name_of(name64)) is None:
+                return None
+        else:
+            return None
         if not (stamp.isascii() and stamp.isdigit()) or len(stamp) > 12:  # not "²"
             return None
         issued = int(stamp)
         now = now if now is not None else time.time()
         if issued <= ended or issued > now + PASS_AHEAD or now >= issued + self.pass_seconds:
             return None
-        return issued if hmac.compare_digest(sig.encode(), self._sign(issued).encode()) else None
+        if name is None:
+            phrase, signed = None, self._sign(issued)
+        else:
+            # Removed, changed, a visitor's now, or expired: no pass. Signed all the same,
+            # so the time taken doesn't tell which names are support phrases here.
+            today = datetime.fromtimestamp(now, UTC)
+            phrase = None
+            for p in self.phrases:
+                if p.name == name and p.support and not self.expired(p, today):
+                    phrase = p
+            signed = self._sign(issued, phrase or Phrase(name, "", scope="support"))
+        if not hmac.compare_digest(sig.encode(), signed.encode()):
+            return None
+        if name is not None and phrase is None:
+            return None
+        return issued, phrase
+
+    def pass_issued(self, token: str, now: float | None = None, ended: float = 0) -> int | None:
+        """When the pass was issued, if it is ours and still good: issued after ``ended``,
+        within access_pass_hours, and not more than PASS_AHEAD seconds ahead of now; for a
+        support pass, its phrase still a support phrase here, unchanged and not expired."""
+        good = self._read(token, now, ended)
+        return None if good is None else good[0]
 
     def pass_expires(self, token: str, now: float | None = None, ended: float = 0) -> int | None:
         """When the pass runs out here, if it is still good (pass_issued)."""
         issued = self.pass_issued(token, now, ended)
         return None if issued is None else issued + self.pass_seconds
+
+    def pass_support(self, token: str, now: float | None = None, ended: float = 0) -> Phrase | None:
+        """The support phrase a good support pass was bought with; None for any other."""
+        good = self._read(token, now, ended)
+        return None if good is None else good[1]
 
 
 # --- Who is inside -----------------------------------------------------------------

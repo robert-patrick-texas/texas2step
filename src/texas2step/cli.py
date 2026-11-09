@@ -632,7 +632,7 @@ def cmd_access_show(args: argparse.Namespace) -> None:
         "from " + settings.access_words if codes.site else "drawn from the built-in list by the key"
     )
     standing = [
-        p.name + (f" ({_phrase_when(p, settings.access_timezone)})" if p.until else "")
+        p.name + (f" ({tags})" if (tags := _phrase_tags(p, settings.access_timezone)) else "")
         for p in codes.phrases
     ]
     zone = settings.access_timezone
@@ -719,11 +719,17 @@ def _phrase_when(phrase: Any, zone: str) -> str:
     return f"{'until' if today <= phrase.until else 'expired'} {phrase.until}"
 
 
-def _read_phrases(path: Path) -> list[Any]:
+def _phrase_tags(phrase: Any, zone: str) -> str:
+    """What sets a phrase apart: "support", its until day, both, or ""."""
+    tags = ("support" if phrase.support else "", _phrase_when(phrase, zone))
+    return ", ".join(tag for tag in tags if tag)
+
+
+def _read_phrases(path: Path, settings: Any) -> list[Any]:
     from . import access
 
     try:
-        return access.read_phrases(path)
+        return access.read_phrases(path, access.support_rule(settings))
     except access.AccessError as exc:
         hint = " (try sudo)" if "Permission denied" in str(exc) else ""
         sys.exit(f"texas2step: {exc}{hint}")
@@ -748,7 +754,7 @@ def _write_phrases(path: Path, text: str, copy: bool = True) -> None:
 def cmd_access_phrase_list(args: argparse.Namespace) -> None:
     settings = _server_settings(args)
     path = Path(settings.access_phrases_file)
-    phrases = _read_phrases(path)
+    phrases = _read_phrases(path, settings)
     if not phrases:
         print(f"No standing phrases in {path}." if path.exists() else f"There is no {path}.")
         return
@@ -756,8 +762,8 @@ def cmd_access_phrase_list(args: argparse.Namespace) -> None:
     names = max(len(p.name) for p in phrases) + 3
     texts = max(len(p.text) for p in phrases) + 3
     for p in phrases:
-        when = _phrase_when(p, settings.access_timezone)
-        print(f"  {p.name:<{names}}{p.text:<{texts}}{when}".rstrip())
+        tags = _phrase_tags(p, settings.access_timezone)
+        print(f"  {p.name:<{names}}{p.text:<{texts}}{tags}".rstrip())
     if settings.access_code == "off":
         print('\nAccess codes are off (access_code = "off"), so no visitor is asked for one.')
 
@@ -765,16 +771,19 @@ def cmd_access_phrase_list(args: argparse.Namespace) -> None:
 def cmd_access_phrase_add(args: argparse.Namespace) -> None:
     from . import access
 
-    path = Path(_server_settings(args).access_phrases_file)
-    phrases = _read_phrases(path)
+    settings = _server_settings(args)
+    path = Path(settings.access_phrases_file)
+    phrases = _read_phrases(path, settings)
     if any(p.name.lower() == args.name.lower() for p in phrases):
         sys.exit(f"texas2step: there is a phrase named {args.name} already; remove it first")
     text = args.phrase
     if text is None:  # kept out of the shell's history
         text = input(f"Phrase for {args.name}: ") if sys.stdin.isatty() else sys.stdin.readline()
+    scope = "support" if args.support else "visitor"
     try:
-        added = access.Phrase(args.name, text.strip(), access.as_day(args.until))
-        checked = access.parse_phrases(access.render_phrases([*phrases, added]), str(path))
+        added = access.Phrase(args.name, text.strip(), access.as_day(args.until), scope)
+        rule = access.support_rule(settings)
+        checked = access.parse_phrases(access.render_phrases([*phrases, added]), str(path), rule)
     except (access.AccessError, ValueError) as exc:
         sys.exit(f"texas2step: {exc}")
     _write_phrases(path, access.render_phrases(checked))
@@ -783,8 +792,9 @@ def cmd_access_phrase_add(args: argparse.Namespace) -> None:
 def cmd_access_phrase_remove(args: argparse.Namespace) -> None:
     from . import access
 
-    path = Path(_server_settings(args).access_phrases_file)
-    phrases = _read_phrases(path)
+    settings = _server_settings(args)
+    path = Path(settings.access_phrases_file)
+    phrases = _read_phrases(path, settings)
     kept = [p for p in phrases if p.name.lower() != args.name.lower()]
     if len(kept) == len(phrases):
         sys.exit(f"texas2step: there is no phrase named {args.name} in {path}")
@@ -794,10 +804,11 @@ def cmd_access_phrase_remove(args: argparse.Namespace) -> None:
 def cmd_access_phrase_import(args: argparse.Namespace) -> None:
     from . import access
 
-    path = Path(_server_settings(args).access_phrases_file)
+    settings = _server_settings(args)
+    path = Path(settings.access_phrases_file)
     text = sys.stdin.read()
     try:
-        access.parse_phrases(text, "the phrases given")
+        access.parse_phrases(text, "the phrases given", access.support_rule(settings))
     except access.AccessError as exc:
         sys.exit(f"texas2step: {exc}")
     _write_phrases(path, text, copy=False)
@@ -1084,7 +1095,7 @@ def cmd_access_phrase_init(args: argparse.Namespace) -> None:
     except OSError as exc:
         hint = " (try sudo)" if isinstance(exc, PermissionError) else ""
         sys.exit(f"texas2step: can't write {path}: {exc.strerror}{hint}")
-    print(f"Wrote {path}, with two examples commented out.")
+    print(f"Wrote {path}, with three examples commented out.")
 
 
 def _traffic(settings: Any) -> Any:
@@ -1737,23 +1748,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="standing phrases, which work as codes until removed",
         description="Standing phrases, such as one the service desk gives a VIP from memory. "
         "Each works as an access code until it is removed, or until the end of its until "
-        "day, and each use is logged by its name. They live in access_phrases_file, "
-        "readable by root and the service only (docs/access.md).",
+        "day, and each use is logged by its name. A support phrase, one per desk member or "
+        "one the desk shares, also opens History, the saved results and the day's code from "
+        "outside internal_networks. They live in access_phrases_file, readable by root and "
+        "the service only (docs/access.md).",
     )
     phrase_sub = phrase.add_subparsers(dest="phrase_action", required=True)
-    phrase_list = phrase_sub.add_parser("list", help="the phrases, their names and until days")
+    phrase_list = phrase_sub.add_parser(
+        "list", help="the phrases, their names, until days and which are support phrases"
+    )
     settings_file(phrase_list)
     phrase_list.set_defaults(func=cmd_access_phrase_list)
     phrase_add = phrase_sub.add_parser(
         "add",
         help="add a phrase",
         description="Add a standing phrase. Leave out PHRASE to type it when asked, which "
-        "keeps it out of the shell's history.",
+        "keeps it out of the shell's history. With --support, it is a support phrase: give "
+        "each desk member one named for them, so the journal says who read History, or "
+        "give the desk one to share.",
     )
     phrase_add.add_argument("name", help="what the journal and access show call it, e.g. vip")
     phrase_add.add_argument("phrase", nargs="?", help="the phrase; asked for when left out")
     phrase_add.add_argument(
         "--until", metavar="YYYY-MM-DD", help="the last day it works, in access_timezone"
+    )
+    phrase_add.add_argument(
+        "--support",
+        action="store_true",
+        help="a support phrase: its pass also opens History, the saved results and the day's "
+        "code from outside internal_networks; at least 4 words and 20 letters or digits, "
+        "or what access_support_words and access_support_letters say",
     )
     settings_file(phrase_add)
     phrase_add.set_defaults(func=cmd_access_phrase_add)
@@ -1770,7 +1794,7 @@ def build_parser() -> argparse.ArgumentParser:
     settings_file(phrase_import)
     phrase_import.set_defaults(func=cmd_access_phrase_import)
     phrase_init = phrase_sub.add_parser(
-        "init", help="make the file, with two examples commented out, if there is none"
+        "init", help="make the file, with three examples commented out, if there is none"
     )
     settings_file(phrase_init)
     phrase_init.set_defaults(func=cmd_access_phrase_init)

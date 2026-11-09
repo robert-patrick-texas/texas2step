@@ -1,9 +1,9 @@
 // Application shell: routing, theme, server selection and shared settings.
 import { appPath, Endpoint, type Family, routeOf, setPage, whenDenied, whenRefused } from "../engine/net";
-import type { AccessStatus, Location, ServerInfo, WhoAmI } from "../types";
+import type { AccessPass, AccessStatus, Location, ServerInfo, WhoAmI } from "../types";
 import { Awake } from "./awake";
 import { $, clear, h, save, setText, store } from "./dom";
-import { admit, askOver, forgetPass, passHeld, sentence } from "./gate";
+import { admit, askOver, codeScreened, forgetPass, passHeld, sentence } from "./gate";
 import { mountSizePicker } from "./size";
 import { mountThemeMenu } from "./theme";
 
@@ -45,9 +45,17 @@ interface Route {
   page: string;
   pattern: RegExp;
   make: () => View;
+  /** Whether it goes anywhere for this visitor, beyond its page being one they get. */
+  open?: () => boolean;
 }
 
 type ServerListener = () => void;
+
+/** The pages a support pass opens here, which the server lists on <html data-support-pages>
+ * for a visitor from outside, with their tabs hidden; none elsewhere. */
+function supportPages(): string[] {
+  return (document.documentElement.dataset.supportPages ?? "").split(" ").filter(Boolean);
+}
 
 export class App {
   readonly origin = new Endpoint("");
@@ -57,13 +65,17 @@ export class App {
   locations: Location[] = [];
   selected: Location | null = null;
   private selecting = 0; // counts select()s, so a later pick's answer isn't overwritten
-  /** Whether this visitor gets the service desk's functions (saved results, share links). */
+  /** Whether this visitor gets the service desk's functions, by its address. */
   desk = true;
+  /** Whether this visitor's pass is a support phrase's (docs/access.md): History and saved
+   * results from outside too, though not the rest of the desk's functions. */
+  support = false;
   /** What this server said about the access code; null where it has none (or didn't say). */
   access: AccessStatus | null = null;
   settings: Settings;
   readonly awake = new Awake(() => this.settings.keepAwake);
-  /** The pages this site shows: all of them unless the server lists fewer. */
+  /** The pages this visitor gets: the site's, all of them unless the server lists fewer,
+   * and those a support pass opens (openSupportPages). */
   readonly pages = new Set((document.documentElement.dataset.pages ?? "test monitor diag history help api").split(" "));
   /** Where an address with no page of its own lands: the first page shown, other than help. */
   readonly home = this.pages.has("test") ? "/" : `/${[...this.pages].find((p) => p !== "help") ?? "help"}`;
@@ -76,9 +88,18 @@ export class App {
     this.settings = store<Settings>("t2s.settings", { streams: 4, seconds: 10, packets: 500, intervalMs: 10, oneStream: null, family: "auto", http: "auto", keepAwake: true });
   }
 
-  /** A route to `page`; a page with several (Test's / and /r/<id>) is one page, kept once. */
-  route(page: string, pattern: RegExp, make: () => View): this {
-    this.routes.push({ page, pattern, make });
+  /** Whether this visitor opens saved results (/r/<id>, share links): the desk, or a
+   * support pass. */
+  get results(): boolean {
+    return this.desk || this.support;
+  }
+
+  /**
+   * A route to `page`, followed only while the page is one this visitor gets, and `open`,
+   * where given, says so. A page with several (Test's / and /r/<id>) is one page, kept once.
+   */
+  route(page: string, pattern: RegExp, make: () => View, open?: () => boolean): this {
+    this.routes.push({ page, pattern, make, open });
     return this;
   }
 
@@ -99,6 +120,8 @@ export class App {
     whenRefused((ep) => this.refusedBy(ep));
     this.access = await admit(this.origin);
     this.desk = this.access?.desk ?? true;
+    this.support = this.access?.support === true;
+    if (this.support) this.openSupportPages();
     // The page leaves out its version until the code is in (it would help an attacker).
     const version = document.querySelector<HTMLMetaElement>('meta[name="texas2step-version"]');
     if (version && !version.content) {
@@ -150,9 +173,39 @@ export class App {
     return routeOf(window.location.pathname) + window.location.search;
   }
 
+  /**
+   * The pages a support pass opens, which the server kept out of data-pages for a visitor
+   * from outside, with their tabs hidden: listed on <html data-support-pages>.
+   */
+  private openSupportPages(): void {
+    for (const name of supportPages()) {
+      this.pages.add(name);
+      const tab = document.querySelector<HTMLAnchorElement>(`.tabs a[data-page="${CSS.escape(name)}"]`);
+      if (tab) tab.hidden = false;
+    }
+  }
+
+  /**
+   * Whether a support pass would open `path` here, for a visitor who came with another pass
+   * (the code screen wasn't shown): a page listed on <html data-support-pages>, or a saved
+   * result's address. Their support phrase is asked for over the page.
+   */
+  private supportOpens(path: string): boolean {
+    const pages = supportPages();
+    if (this.support || !pages.length || !this.takesCode || codeScreened()) return false;
+    return pages.some((p) => path === `/${p}`) || (this.pages.has("test") && /^\/r\/[\w-]+$/.test(path));
+  }
+
+  /** The code asked for over the first page, for a support phrase that opens `url`. */
+  private async askSupport(url: string): Promise<void> {
+    const got = await askOver(this.origin, "", true);
+    if (got?.scope === "support") window.location.assign(url);
+  }
+
   private match(route: string): (Route & { params: Record<string, string> }) | null {
     const path = route.split("?")[0]!;
     for (const r of this.routes) {
+      if (!this.pages.has(r.page) || (r.open && !r.open())) continue;
       const match = r.pattern.exec(path);
       if (match) return { ...r, params: match.groups ?? {} };
     }
@@ -173,7 +226,14 @@ export class App {
       if (active) a.setAttribute("aria-current", "page");
     }
     const to = this.match(path);
-    if (!to) return this.navigate(this.home, true);
+    if (!to) {
+      // Where a support pass would open the address, the first page, with the code asked
+      // for over it.
+      const wanted = this.supportOpens(path) ? appPath(path) + window.location.search : "";
+      this.navigate(this.home, true);
+      if (wanted) void this.askSupport(wanted);
+      return;
+    }
     setPage(to.page); // a hidden page stops sending, so what's sent is the shown page's
     const address = this.address();
     const from = this.current;
@@ -293,7 +353,7 @@ export class App {
       window.location.reload();
       return false;
     }
-    return askOver(this.origin, this.over(ep));
+    return this.took(await askOver(this.origin, this.over(ep)));
   }
 
   /** Whether the code can be entered here, for an address that asks for it. */
@@ -303,9 +363,39 @@ export class App {
 
   /** The code asked for over the page, when the visitor chooses: true once it's in. */
   async enterCode(ep: Endpoint): Promise<boolean> {
-    const got = await askOver(this.origin, this.over(ep), true);
+    // The pass bought replaces the one held, on every server: a support pass's too.
+    const also = this.support ? "Any code but a support phrase closes History." : "";
+    const got = this.took(await askOver(this.origin, this.over(ep), true, also));
     if (got && !this.info) await this.refreshFamily(); // the header's server, refused until now
     return got;
+  }
+
+  /**
+   * A code entered over the page bought `got`, in place of the pass held: true once it's
+   * in. A support pass where the page held another, or another where it held one, starts
+   * the page over, which then opens or closes what a support pass opens.
+   */
+  private took(got: AccessPass | null): boolean {
+    if (!got) return false;
+    if ((got.scope === "support") === this.support) return true;
+    window.location.reload();
+    return false;
+  }
+
+  /**
+   * History's data answered 404 to a support pass, as to anyone it doesn't open: the pass
+   * may have ended, as when its phrase was removed or expired. Then the page starts over.
+   */
+  async supportRefused(): Promise<void> {
+    let status: AccessStatus;
+    try {
+      status = await this.origin.json<AccessStatus>("/access");
+    } catch {
+      return;
+    }
+    if (status.support) return;
+    if (!status.pass?.valid) forgetPass();
+    window.location.reload();
   }
 
   /**

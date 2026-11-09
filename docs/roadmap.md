@@ -103,6 +103,11 @@ test. Today a script runs t2s or the API from cron and keeps the JSON itself.
   of them. A key would prove who is asking, from wherever. (Servers measuring each other
   need none: each issues itself a pass, see
   [Measuring between servers](access.md#measuring-between-servers).)
+  [Support phrases](access.md#support-phrases) now cover a desk member's browser outside:
+  History, saved results and the code, by a phrase for each person or one the desk
+  shares, named in the journal at each use. Keys would still serve scripts and
+  dashboards, and the desk's other tools: blocks, measurements, the clients, the CPU and
+  the API explorer.
   - **Keys the desk issues:** `texas2step access apikey issue --name Wallboard --scope desk`
     prints one once, such as `t2s_<id>.<scope>.<issued>.<signature>`: when it was issued,
     not when it runs out, signed with a key derived from the shared access key, as requests

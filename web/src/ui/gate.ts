@@ -3,9 +3,10 @@
 // A visitor this server lets in without one can still be asked by another address the
 // page tests, such as this server's IPv4-only name: then over the page, in a dialog.
 import { type Endpoint, setPass } from "../engine/net";
-import type { AccessStatus } from "../types";
+import type { AccessPass, AccessStatus } from "../types";
 import { $, clear, h, save, store } from "./dom";
 
+/** The pass as the page keeps it. */
 interface Pass {
   pass: string;
   expires: number;
@@ -14,8 +15,9 @@ interface Pass {
 const KEY = "t2s.pass";
 let expires = 0; // when the pass held runs out, in seconds since the epoch; 0 for none
 let declined = false; // "Not now" in the dialog: asked again only when the visitor chooses to
-let asking: Promise<boolean> | null = null;
+let asking: Promise<AccessPass | null> | null = null;
 let note = ""; // the site's line under the code box (access_note)
+let screened = false; // the code screen was shown since the page loaded
 
 export function forgetPass(): void {
   save(KEY, { pass: "", expires: 0 });
@@ -25,6 +27,11 @@ export function forgetPass(): void {
 /** Whether a pass is held that hasn't run out. */
 export function passHeld(): boolean {
   return expires * 1000 > Date.now();
+}
+
+/** Whether the code screen was shown since the page loaded (admit). */
+export function codeScreened(): boolean {
+  return screened;
 }
 
 /**
@@ -64,11 +71,13 @@ export async function admit(origin: Endpoint): Promise<AccessStatus | null> {
   }
   setPass("");
   expires = 0;
-  await ask(origin, saved.pass !== "");
-  return status;
+  const got = await ask(origin, saved.pass !== "");
+  // The status was read before the code was in: the pass it bought says what it is now.
+  return { ...status, pass: { valid: true, expires: got.expires }, support: got.scope === "support" };
 }
 
-function ask(origin: Endpoint, again: boolean): Promise<void> {
+function ask(origin: Endpoint, again: boolean): Promise<AccessPass> {
+  screened = true;
   document.documentElement.classList.add("gated");
   const view = $("#view");
   clear(view);
@@ -76,9 +85,9 @@ function ask(origin: Endpoint, again: boolean): Promise<void> {
     const help = again
       ? "Access expired. Contact the service desk."
       : "Use of this system is limited to authorized users with an assigned access code.";
-    const { card, input } = codeCard(origin, "h1", help, () => {
+    const { card, input } = codeCard(origin, "h1", help, (got) => {
       document.documentElement.classList.remove("gated");
-      resolve();
+      resolve(got);
     });
     view.append(h("section", { class: "gate" }, card));
     input.focus();
@@ -86,14 +95,14 @@ function ask(origin: Endpoint, again: boolean): Promise<void> {
 }
 
 /**
- * The code asked for over the page, which stays as it is underneath: true once a right code
- * has bought a pass, false for "Not now". `over` begins its sentence with where the code
- * is asked for, as "Over IPv4, ". Asked on its own only until the visitor says "Not now";
- * `chosen` asks anyway.
+ * The code asked for over the page, which stays as it is underneath: the pass once a right
+ * code has bought one, null for "Not now". `over` begins its sentence with where the code
+ * is asked for, as "Over IPv4, "; `also` follows it, where given. Asked on its own only
+ * until the visitor says "Not now"; `chosen` asks anyway.
  */
-export function askOver(origin: Endpoint, over: string, chosen = false): Promise<boolean> {
+export function askOver(origin: Endpoint, over: string, chosen = false, also = ""): Promise<AccessPass | null> {
   if (asking) return asking;
-  if (declined && !chosen) return Promise.resolve(false);
+  if (declined && !chosen) return Promise.resolve(null);
   const again = expires > 0 && !passHeld();
   const help = sentence(
     over,
@@ -101,15 +110,17 @@ export function askOver(origin: Endpoint, over: string, chosen = false): Promise
       ? "access expired. Contact the service desk."
       : "this function requires organization approval. Access is limited to authorized users.",
   );
-  asking = new Promise<boolean>((resolve) => {
+  asking = new Promise<AccessPass | null>((resolve) => {
     const later = h("button", { class: "btn small", type: "button" }, "Not now");
     const dialog = h("dialog", { class: "code-dialog", "aria-labelledby": "access-title" });
+    let bought: AccessPass | null = null;
     const { card, input } = codeCard(
       origin,
       "h2",
-      help,
-      () => {
+      also ? `${help} ${also}` : help,
+      (got) => {
         declined = false;
+        bought = got;
         dialog.close("pass");
       },
       h("div", { class: "gate-later" }, later),
@@ -118,9 +129,8 @@ export function askOver(origin: Endpoint, over: string, chosen = false): Promise
     dialog.addEventListener("close", () => {
       dialog.remove();
       asking = null;
-      const got = dialog.returnValue === "pass";
-      if (!got) declined = true;
-      resolve(got);
+      if (!bought) declined = true;
+      resolve(bought);
     });
     dialog.append(card);
     document.body.append(dialog);
@@ -131,7 +141,7 @@ export function askOver(origin: Endpoint, over: string, chosen = false): Promise
 }
 
 /** The card with the code form; `done` runs once a right code has bought a pass. */
-function codeCard(origin: Endpoint, heading: "h1" | "h2", help: string, done: () => void, ...more: HTMLElement[]): { card: HTMLElement; input: HTMLInputElement } {
+function codeCard(origin: Endpoint, heading: "h1" | "h2", help: string, done: (got: AccessPass) => void, ...more: HTMLElement[]): { card: HTMLElement; input: HTMLInputElement } {
   const input = h("input", {
     class: "code-input",
     id: "access-code",
@@ -155,11 +165,11 @@ function codeCard(origin: Endpoint, heading: "h1" | "h2", help: string, done: ()
       button.disabled = true;
       error.textContent = "";
       try {
-        const got = await origin.post<Pass>("/access", { code: input.value });
-        save(KEY, got);
+        const got = await origin.post<AccessPass>("/access", { code: input.value });
+        save(KEY, { pass: got.pass, expires: got.expires }); // the pass alone, as ever
         setPass(got.pass);
         expires = got.expires;
-        done();
+        done(got);
       } catch (err) {
         const why = err instanceof Error ? err.message : String(err);
         // After too many wrong codes the server refuses every code the same way, the right

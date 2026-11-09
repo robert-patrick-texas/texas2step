@@ -1,6 +1,7 @@
 """Access codes, passes, and the desk's functions kept to internal networks."""
 
 import base64
+import hashlib
 import io
 import logging
 import re
@@ -8,7 +9,9 @@ import stat
 import sys
 import threading
 import time
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -267,24 +270,38 @@ def test_the_examples_are_a_pattern_but_never_phrases():
     # Anyone can read them, so as they are they're refused, in any case and spacing.
     with pytest.raises(access.AccessError, match="phrase 'future': that is a published example"):
         access.parse_phrases(uncommented, "f")
+    written_in = re.findall(r'^# phrase = "(.*?)"', examples, re.MULTILINE)
+    assert written_in == list(access.EXAMPLE_PHRASES[:3])
     for example in access.EXAMPLE_PHRASES:
-        assert f'phrase = "{example}"' in header
         said = example.upper().replace(" ", "-")
         with pytest.raises(access.AccessError, match="published example; make up your own"):
             access.parse_phrases(f'[[phrase]]\nname = "x"\nphrase = "{said}"\n', "f")
     # With phrases of your own in their place, the pattern works.
     own = uncommented.replace("2026 the future is bright", "fern rocket tundra")
     own = own.replace("vip ticket to ride 1776", "lantern quiver 4410")
-    future, vip = access.parse_phrases(own, "f")
+    own = own.replace("night shift at the help desk 1836", "violet harbor keeps copper 2291")
+    future, vip, alice = access.parse_phrases(own, "f")
     assert (future.name, future.text, future.until) == (
         "future",
         "fern rocket tundra",
         date(2026, 12, 31),
     )
     assert (vip.name, vip.text, vip.until) == ("vip", "lantern quiver 4410", None)
+    assert not future.support and not vip.support
+    # The support phrase's example meets the rule a support phrase must.
+    assert (alice.name, alice.scope, alice.support) == ("alice", "support", True)
+    assert access.strong(normalize(access.EXAMPLE_PHRASES[2]))
     # Writing phrases keeps the examples, still commented out.
     written = access.render_phrases(PHRASES_LIST)
     assert written.startswith(header) and access.parse_phrases(written, "f") == PHRASES_LIST
+
+
+def test_the_phrases_the_docs_write_into_a_file_never_work():
+    docs = (Path(__file__).parents[1] / "docs" / "access.md").read_text()
+    published = re.findall(r'^(?:# )?phrase = "(.*?)"', docs, re.MULTILINE)
+    assert len(published) >= 5
+    refused = {normalize(example) for example in access.EXAMPLE_PHRASES}
+    assert {normalize(p) for p in published} <= refused
 
 
 def test_a_standing_phrase_works_until_its_day_ends():
@@ -368,6 +385,273 @@ def test_an_earlier_versions_pass_is_not_read_as_issued_then():
     assert c.pass_issued(old, now=expires + 3600) is None
 
 
+# --- Support phrases and their passes ----------------------------------------------
+
+ALICE_SAYS = "Violet harbor keeps the copper lantern 2291"
+ALICE = access.Phrase("alice", ALICE_SAYS, scope="support")
+BOB_SAYS = "bob walks the long quiet river 4410"
+BOB = access.Phrase("bob", BOB_SAYS, scope="support")
+SUPPORT = f'\n[[phrase]]\nname = "alice"\nphrase = "{ALICE_SAYS}"\nscope = "support"\n'
+SUPPORT_PHRASES = PHRASES + SUPPORT  # vip and field-team for visitors, alice for the desk
+
+
+def support_codes(phrases=(*PHRASES_LIST, ALICE, BOB), hours=12) -> Codes:
+    return Codes(KEY, "daily", NYC, 2, access.drawn_words(KEY), False, hours, phrases)
+
+
+def test_a_phrase_is_a_visitors_or_a_support_phrase():
+    vip, team, alice = access.parse_phrases(SUPPORT_PHRASES, "f")
+    assert (vip.scope, team.scope, alice.scope) == ("visitor", "visitor", "support")
+    assert not vip.support and not team.support and alice.support and alice == ALICE
+    assert access.parse_phrases(access.render_phrases([vip, team, alice]), "f") == [
+        vip,
+        team,
+        alice,
+    ]
+    assert access.render_phrases([alice]).endswith('\nscope = "support"\n')
+    # "visitor" said outright is as if left out, and written as before there were scopes.
+    said = access.parse_phrases('[[phrase]]\nname = "a"\nphrase = "b"\nscope = "visitor"\n', "f")
+    assert said == [access.Phrase("a", "b")]
+    # A file without support phrases is written as before there were any.
+    assert access.render_phrases(PHRASES_LIST).removeprefix(access.PHRASES_HEADER) == (
+        '\n[[phrase]]\nname = "vip"\nphrase = "Copper Lantern, Harbor Violet"\n'
+        '\n[[phrase]]\nname = "field-team"\nphrase = "maple orbit"\nuntil = 2026-12-31\n'
+    )
+    for scope in ('"desk"', '"Support"', '""', "true", '["support"]'):
+        with pytest.raises(access.AccessError, match='phrase \'a\': scope is "visitor" or "supp'):
+            access.parse_phrases(f'[[phrase]]\nname = "a"\nphrase = "b"\nscope = {scope}\n', "f")
+
+
+def test_a_support_phrase_must_be_hard_to_guess():
+    def support(text: str) -> list[access.Phrase]:
+        entry = f'[[phrase]]\nname = "alice"\nphrase = "{text}"\nscope = "support"\n'
+        return access.parse_phrases(entry, "f")
+
+    for weak in (
+        "maple orbit",
+        "a b c d e f g h i j",  # ten words, ten letters
+        "violetharborkeepsthecopperlantern",  # one word
+        "violet harbor copper",  # three words, 18 letters
+        "abcde fghij klmno pqrs",  # four words, 19 letters
+    ):
+        with pytest.raises(
+            access.AccessError,
+            match="f: phrase 'alice': a support phrase needs at least 4 words and 20 letters "
+            "or digits",
+        ):
+            support(weak)
+    # Just enough, with any separators; digits count.
+    assert support("abcde fghij-klmno_pqrst")[0].code == "abcde.fghij.klmno.pqrst"
+    assert support("2026 1836 1776 2291 1999")[0].support
+    # A visitor's phrase may be as short as before.
+    assert access.parse_phrases('[[phrase]]\nname = "a"\nphrase = "b"\n', "f")[0].code == "b"
+    # The published example is refused as one, even as a support phrase.
+    with pytest.raises(access.AccessError, match="published example"):
+        support("Night shift at the HELP desk, 1836")
+
+
+def test_a_site_can_ask_less_or_more_of_a_support_phrase(tmp_path, key_file):
+    def support(text: str, rule: tuple[int, int]) -> list[access.Phrase]:
+        entry = f'[[phrase]]\nname = "alice"\nphrase = "{text}"\nscope = "support"\n'
+        return access.parse_phrases(entry, "f", rule)
+
+    # Down to the floor: two words, twelve letters or digits.
+    assert access.SUPPORT_FLOOR == (2, 12)
+    assert support("copper lanterns", (2, 12))[0].code == "copper.lanterns"
+    for weak in ("maple orbits", "violetharborkeeps"):  # eleven letters; one word
+        with pytest.raises(
+            access.AccessError, match="needs at least 2 words and 12 letters or digits"
+        ):
+            support(weak, (2, 12))
+    # Or more than by default: alice's is seven words.
+    assert support(ALICE_SAYS, (7, 30))[0].support
+    with pytest.raises(access.AccessError, match="needs at least 8 words and 30 letters"):
+        support(ALICE_SAYS, (8, 30))
+    # The server reads its file by its own settings: a phrase its rule refuses stops it.
+    phrases = tmp_path / "access-phrases.toml"
+    phrases.write_text(
+        '[[phrase]]\nname = "alice"\nphrase = "copper lanterns"\nscope = "support"\n'
+    )
+    base = {
+        "access_code": "daily",
+        "access_key_file": str(key_file),
+        "access_phrases_file": str(phrases),
+        "access_lockouts_file": str(tmp_path / "access.db"),
+    }
+    with pytest.raises(access.AccessError, match="needs at least 4 words and 20 letters"):
+        Codes.load(Settings(**base))
+    lenient = Codes.load(Settings(**base, access_support_words=2, access_support_letters=12))
+    assert lenient is not None and lenient.rule == (2, 12)
+    assert lenient.phrase("Copper Lanterns") == lenient.phrases[0]
+    token, _ = lenient.issue(phrase=lenient.phrases[0])
+    assert lenient.pass_support(token) == lenient.phrases[0]
+    with pytest.raises(access.AccessError, match="needs at least 3 words and 12 letters"):
+        Codes.load(Settings(**base, access_support_words=3, access_support_letters=12))
+
+
+def test_the_support_settings_keep_to_the_floor():
+    assert (Settings().access_support_words, Settings().access_support_letters) == (4, 20)
+    assert access.support_rule(Settings()) == access.SUPPORT_RULE
+    Settings(access_support_words=2, access_support_letters=12)
+    Settings(access_support_words=20, access_support_letters=100)
+    for kw, said in (
+        ({"access_support_words": 1}, "access_support_words: expected 2 to 20 words"),
+        ({"access_support_words": 21}, "access_support_words: expected 2 to 20 words"),
+        ({"access_support_letters": 11}, "access_support_letters: expected 12 to 100 letters"),
+        ({"access_support_letters": 101}, "access_support_letters: expected 12 to 100 letters"),
+    ):
+        with pytest.raises(ValueError, match=said):
+            Settings(**kw)
+
+
+def test_the_fingerprint_covers_the_support_rule_only_with_support_phrases():
+    words = access.drawn_words(KEY)
+
+    def fingerprint(phrases, rule) -> str:
+        return Codes(KEY, "daily", NYC, 2, words, False, 12, phrases, rule).fingerprint()
+
+    # Servers that would take different support phrases differ.
+    with_alice = [*PHRASES_LIST, ALICE]
+    assert fingerprint(with_alice, (4, 20)) == fingerprint(with_alice, access.SUPPORT_RULE)
+    assert fingerprint(with_alice, (4, 20)) != fingerprint(with_alice, (3, 20))
+    assert fingerprint(with_alice, (4, 20)) != fingerprint(with_alice, (4, 16))
+    # Without a support phrase the rule changes nothing, as before there were any.
+    assert fingerprint(PHRASES_LIST, (4, 20)) == fingerprint(PHRASES_LIST, (2, 12))
+    assert fingerprint([], (4, 20)) == fingerprint([], (2, 12))
+
+
+def test_support_phrases_count_in_the_fingerprint_and_nothing_else_changes():
+    words = access.drawn_words(KEY)
+
+    def fingerprint(phrases) -> str:
+        return Codes(KEY, "daily", NYC, 2, words, False, 12, phrases).fingerprint()
+
+    # Phrases for visitors only: as before there were scopes.
+    standing = sorted(f"{p.code}|{p.until or ''}" for p in PHRASES_LIST)
+    what = ("daily", NYC, "2", "built-in", hashlib.sha256("\n".join(standing).encode()).hexdigest())
+    mac = codes()._mac("fingerprint", *what, hashlib.sha256("\n".join(words).encode()).hexdigest())
+    assert fingerprint(PHRASES_LIST) == f"{mac.hex()[0:4]}-{mac.hex()[4:8]}-{mac.hex()[8:12]}"
+    # Made a support phrase, the same phrase changes it; renamed too, as its passes carry
+    # the name. A visitor's phrase renamed doesn't.
+    as_support = fingerprint([*PHRASES_LIST, ALICE])
+    assert as_support != fingerprint([*PHRASES_LIST, replace(ALICE, scope="visitor")])
+    assert as_support != fingerprint([*PHRASES_LIST, replace(ALICE, name="carol")])
+    vip, team = PHRASES_LIST
+    assert fingerprint(PHRASES_LIST) == fingerprint([replace(vip, name="vip2"), team])
+
+
+def test_a_support_pass_names_its_phrase():
+    c = support_codes()
+    visitor, _ = c.issue(now=1_000_000)
+    assert re.fullmatch(r"1000000\.[A-Za-z0-9_-]{24}", visitor)  # as before
+    assert c.issue(now=1_000_000, phrase=PHRASES_LIST[0])[0] == visitor  # a visitor's phrase
+    token, expires = c.issue(now=1_000_000, phrase=ALICE)
+    stamp, mark, name, sig = token.split(".")
+    assert (stamp, mark, name) == ("1000000", "s", "YWxpY2U") and len(sig) == 24
+    assert base64.urlsafe_b64decode(name + "=") == b"alice"
+    assert expires == 1_000_000 + 12 * 3600
+    assert c.pass_support(token, now=1_000_100) == ALICE
+    assert c.pass_issued(token, now=1_000_100) == 1_000_000
+    assert c.pass_expires(token, now=1_000_100) == expires
+    assert c.pass_expires(token, now=expires) is None  # ran out
+    assert c.pass_support(token, now=expires) is None
+    # A visitor's pass opens no more than before.
+    assert c.pass_support(visitor, now=1_000_100) is None
+    assert c.pass_issued(visitor, now=1_000_100) == 1_000_000
+    # Another server with the key and the phrases takes it; one with another key doesn't.
+    assert support_codes().pass_support(token, now=1_000_100) == ALICE
+    other = Codes(access.parse_key(access.new_key()), "daily", NYC, 2, [], False, 12, [ALICE])
+    assert other.pass_support(token, now=1_000_100) is None
+    assert other.pass_issued(token, now=1_000_100) is None
+
+
+def test_a_support_pass_cant_be_altered_or_made_from_another():
+    c = support_codes()
+    token, _ = c.issue(now=1_000_000, phrase=ALICE)
+    stamp, _, name, sig = token.split(".")
+    visitor_sig = c.issue(now=1_000_000)[0].split(".")[1]
+    bob = base64.urlsafe_b64encode(b"bob").rstrip(b"=").decode()
+    assert c.pass_support(f"{stamp}.s.{bob}.{c._sign(1_000_000, BOB)}", now=1_000_100) == BOB
+    assert base64.urlsafe_b64decode(name[:-1] + "V=") == b"alice"  # read leniently, but...
+    for forged in (
+        f"{stamp}.s.{bob}.{sig}",  # another support phrase's name
+        f"{stamp}.s.{name[:-1]}V.{sig}",  # ...not written as issue writes it
+        f"{stamp}.s.{name}=.{sig}",
+        f"{stamp}.s.{base64.urlsafe_b64encode(b'Alice').rstrip(b'=').decode()}.{sig}",
+        # Signed as a support pass, but vip's is a visitor's phrase.
+        f"{stamp}.s.{base64.urlsafe_b64encode(b'vip').rstrip(b'=').decode()}."
+        f"{c._sign(1_000_000, PHRASES_LIST[0])}",
+        f"{stamp}.x.{name}.{sig}",  # the mark
+        f"{stamp}.S.{name}.{sig}",
+        f"{int(stamp) + 60}.s.{name}.{sig}",  # the time
+        f"{stamp}.s.{name}.{sig[:-2]}AA",  # the signature
+        f"{stamp}.s.{name}.{visitor_sig}",  # a visitor's signature
+        f"{stamp}.{sig}",  # a support pass's signature, as a visitor's
+        f"{stamp}.s.{visitor_sig}",
+        f"{stamp}.s.{name}.{sig}.x",  # parts more or fewer
+        f"{stamp}.s.{name}.{sig}.",
+        f".{stamp}.s.{name}.{sig}",
+        f"{stamp}.s.{name}",
+        f"{stamp}..{name}.{sig}",
+        f"{stamp}.s..{sig}",
+        f"{stamp}.s.{name}.",
+        f"².s.{name}.{sig}",
+        f"{stamp}.s.{'QUFB' * 15}.{sig}",  # a name too long
+        token.replace(".", " "),
+        "",
+    ):
+        assert c.pass_issued(forged, now=1_000_100) is None, forged
+        assert c.pass_support(forged, now=1_000_100) is None, forged
+
+
+def test_a_support_pass_ends_with_its_phrase():
+    token, _ = support_codes().issue(now=1_000_000, phrase=ALICE)
+    vip, team = PHRASES_LIST
+    for phrases in (
+        [vip, team, BOB],  # removed
+        [vip, team, replace(ALICE, scope="visitor"), BOB],  # a visitor's phrase now
+        [vip, team, replace(ALICE, name="Alice")],  # renamed
+        # A new phrase under the name, as after a leak: the old one's passes end.
+        [vip, team, replace(ALICE, text="silver comet bayou thistle 42")],
+        [vip, team, replace(BOB, name="alice")],
+        [],
+    ):
+        here = support_codes(phrases)
+        assert here.pass_support(token, now=1_000_100) is None, phrases
+        # No pass at all, for tests too, not only History.
+        assert here.pass_issued(token, now=1_000_100) is None
+        assert here.pass_expires(token, now=1_000_100) is None
+    # The same phrase written another way is the same phrase.
+    same = support_codes([replace(ALICE, text=ALICE_SAYS.upper().replace(" ", "-"))])
+    assert same.pass_support(token, now=1_000_100) is not None
+    # Expired: through the end of its until day in New York, 05:00 UTC the day after.
+    last = replace(ALICE, until=date(2026, 12, 31))
+    end = datetime(2027, 1, 1, 5, 0, tzinfo=UTC).timestamp()
+    c = support_codes([vip, last])
+    token, _ = c.issue(now=end - 3600, phrase=last)
+    assert c.pass_support(token, now=end - 1) == last
+    assert c.pass_support(token, now=end) is None and c.pass_issued(token, now=end) is None
+
+
+def test_a_support_pass_lasts_and_ends_as_any_pass():
+    c = support_codes()
+    token, _ = c.issue(now=1_000_000, phrase=ALICE)
+    assert c.pass_support(token, now=1_000_100, ended=1_000_000.4) is None
+    assert c.pass_issued(token, now=1_000_100, ended=1_000_000.4) is None
+    assert c.pass_support(token, now=1_000_100, ended=999_999.6) == ALICE
+    later, expires = c.issue(now=1_000_050, ended=1_000_100.4, phrase=ALICE)
+    assert later.startswith("1000101.s.") and expires == 1_000_101 + 12 * 3600
+    assert c.pass_support(later, now=1_000_050, ended=1_000_100.4) == ALICE
+    ahead, _ = c.issue(now=1_000_000 + access.PASS_AHEAD, phrase=ALICE)
+    assert c.pass_support(ahead, now=1_000_000) == ALICE
+    too_far, _ = c.issue(now=1_000_001 + access.PASS_AHEAD, phrase=ALICE)
+    assert c.pass_support(too_far, now=1_000_000) is None
+    # How long it lasts is the checking server's access_pass_hours.
+    two = support_codes(hours=2)
+    assert two.pass_expires(token, now=1_000_100) == 1_000_000 + 2 * 3600
+    assert two.pass_support(token, now=1_000_000 + 2 * 3600) is None
+
+
 def test_who_is_internal():
     nets = ["10.0.0.0/8", "2001:db8::/32", "198.51.100.7"]
     assert is_internal("127.0.0.1", []) and is_internal("::1", [])
@@ -409,7 +693,13 @@ def unlock(c: TestClient, headers=OUTSIDE) -> str:
 def test_visitors_need_a_pass_for_tests(tmp_path, key_file, caplog):
     with gated(tmp_path, key_file) as c:
         status = c.get("/api/v1/access", headers=OUTSIDE).json()
-        assert status == {"required": True, "desk": True, "codes": True, "note": NOTE}
+        assert status == {
+            "required": True,
+            "desk": True,
+            "codes": True,
+            "note": NOTE,
+            "support": False,
+        }
         for open_path in ("/", "/api/v1/health", "/favicon.svg"):
             assert c.get(open_path, headers=OUTSIDE).status_code == 200, open_path
         for path in ("/api/v1/info", "/api/v1/locations", "/api/v1/ping", "/api/v1/whoami"):
@@ -462,7 +752,13 @@ def test_a_card_only_code_screen_is_marked_for_visitors_who_need_the_code(tmp_pa
 def test_loopback_and_internal_networks_need_no_code(tmp_path, key_file):
     with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
         status = c.get("/api/v1/access", headers=INSIDE).json()
-        assert status == {"required": False, "desk": True, "codes": True, "note": NOTE}
+        assert status == {
+            "required": False,
+            "desk": True,
+            "codes": True,
+            "note": NOTE,
+            "support": False,
+        }
         assert c.get("/api/v1/info", headers=INSIDE).status_code == 200
         assert c.get("/api/v1/info", headers={"X-Forwarded-For": "127.0.0.1"}).status_code == 200
         assert c.get("/api/v1/info", headers=OUTSIDE).status_code == 401
@@ -496,6 +792,300 @@ def test_a_broken_phrases_file_stops_the_server(tmp_path, key_file):
         gated(tmp_path, key_file)
     # While access codes are off, the file isn't read.
     gated(tmp_path, key_file, access_code="off").close()
+
+
+# --- Support passes at the server ---------------------------------------------------
+
+
+def support_server(tmp_path, key_file, phrases=SUPPORT_PHRASES, **kw) -> TestClient:
+    """A server with internal_networks, vip and field-team for visitors, alice for the desk."""
+    (tmp_path / "access-phrases.toml").write_text(phrases)
+    return gated(tmp_path, key_file, **({"internal_networks": ["10.0.0.0/8"]} | kw))
+
+
+def enter(c: TestClient, code: str, headers=OUTSIDE) -> dict:
+    r = c.post("/api/v1/access", json={"code": code}, headers=headers)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def expired(phrases: str) -> str:
+    """The phrases, alice's ended yesterday."""
+    yesterday = datetime.now(ZoneInfo(NYC)).date() - timedelta(1)
+    return phrases.replace('scope = "support"', f'scope = "support"\nuntil = {yesterday}')
+
+
+def test_a_support_phrase_buys_a_support_pass(tmp_path, key_file, caplog):
+    with support_server(tmp_path, key_file) as c, caplog.at_level(logging.WARNING):
+        got = enter(c, "VIOLET harbor-keeps the copper lantern, 2291")
+        assert got["scope"] == "support" and got["pass"].split(".")[1] == "s"
+        assert got["expires"] > time.time()
+        assert "access phrase alice (support) used from 203.0.113.9" in caplog.text
+        # The day's code and the visitors' phrases buy visitors' passes, as before.
+        vip = enter(c, "copper lantern harbor violet")
+        assert vip["scope"] == "visitor" and len(vip["pass"].split(".")) == 2
+        assert "access phrase vip used from 203.0.113.9" in caplog.text
+        code = c.app.state.codes.current(datetime.now(UTC)).code
+        assert enter(c, code)["scope"] == "visitor"
+        # From inside, a support pass all the same.
+        assert enter(c, ALICE_SAYS, INSIDE)["scope"] == "support"
+        assert "access phrase alice (support) used from 10.1.2.3" in caplog.text
+        # Wrong entries count as before; part of the phrase is a wrong one.
+        r = c.post("/api/v1/access", json={"code": "violet harbor keeps"}, headers=OUTSIDE)
+        assert r.status_code == 403 and r.json()["detail"] == access_api.WRONG
+        assert c.app.state.lockouts.current() == ([], 1)
+    assert "violet" not in caplog.text.lower() and got["pass"] not in caplog.text
+    caplog.clear()
+    with support_server(tmp_path, key_file, expired(SUPPORT_PHRASES)) as c:
+        with caplog.at_level(logging.WARNING):
+            r = c.post("/api/v1/access", json={"code": ALICE_SAYS}, headers=OUTSIDE)
+        assert r.status_code == 403 and r.json()["detail"] == access_api.WRONG
+        assert "expired access phrase alice (support) from 203.0.113.9" in caplog.text
+
+
+def test_the_access_status_says_whether_a_pass_is_a_support_pass(tmp_path, key_file, monkeypatch):
+    monkeypatch.setattr(HandBlocks, "EVERY", 0)  # read the blocks for every request
+    with support_server(tmp_path, key_file) as c:
+        alice = enter(c, ALICE_SAYS)["pass"]
+        vip = enter(c, "copper lantern harbor violet")["pass"]
+
+        def status(token: str | None = None, headers=OUTSIDE) -> dict:
+            params = {"pass": token} if token else {}
+            return c.get("/api/v1/access", params=params, headers=headers).json()
+
+        assert status()["support"] is False and "pass" not in status()
+        assert status(vip)["support"] is False and status(vip)["pass"]["valid"] is True
+        got = status(alice)
+        assert got["support"] is True and got["pass"]["valid"] is True
+        assert got["desk"] is False and got["required"] is True  # by address, as before
+        bearer = {"Authorization": f"Bearer {alice}", **OUTSIDE}  # as the page sends it
+        assert c.get("/api/v1/access", headers=bearer).json()["support"] is True
+        assert status(alice, INSIDE)["support"] is True
+        # A block set by hand on its network ends it, as any pass; elsewhere it still works.
+        c.post("/api/v1/access/blocks", json={"network": "203.0.113.0/24"}, headers=INSIDE)
+        assert status(alice)["support"] is False and status(alice)["pass"]["valid"] is False
+        assert status(alice, {"X-Forwarded-For": "198.51.100.8"})["support"] is True
+        c.delete("/api/v1/access/blocks", params={"network": "all"}, headers=INSIDE)
+        assert status(alice)["support"] is True
+        c.app.state.lockouts.end_passes(time.time() + 1, "from the command line")
+        assert status(alice)["support"] is False and status(alice)["pass"]["valid"] is False
+        assert status(alice, INSIDE)["support"] is False
+    with gated(tmp_path, key_file, access_code="off") as c:
+        assert c.get("/api/v1/access", params={"pass": alice}).json()["support"] is False
+
+
+def test_a_support_pass_opens_history_and_nothing_more(tmp_path, key_file, monkeypatch, caplog):
+    monkeypatch.setattr(HandBlocks, "EVERY", 0)
+    # bob's is a support phrase on another server with the key, and not on this one.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    bob_phrase = f'\n[[phrase]]\nname = "bob"\nphrase = "{BOB_SAYS}"\nscope = "support"\n'
+    with support_server(elsewhere, key_file, SUPPORT_PHRASES + bob_phrase) as there:
+        bob = enter(there, BOB_SAYS)["pass"]
+    with support_server(tmp_path, key_file) as c:
+        rid = c.post("/api/v1/results", json={"version": 1}, headers=INSIDE).json()["id"]
+        passes = {
+            "none": "",
+            "code": unlock(c),
+            "phrase": enter(c, "copper lantern harbor violet")["pass"],
+            "support": enter(c, ALICE_SAYS)["pass"],
+            "removed": bob,
+        }
+        opened = ["/api/v1/results", f"/api/v1/results/{rid}", "/api/v1/access/code"]
+        internal = [  # the desk's still, whoever asks from outside
+            ("GET", "/api"),
+            ("GET", "/api/docs"),
+            ("GET", "/api/openapi.json"),
+            ("GET", "/api/v1/access/blocks"),
+            ("POST", "/api/v1/access/blocks"),
+            ("DELETE", "/api/v1/access/blocks?network=all"),
+            ("GET", "/api/v1/clients"),
+            ("GET", "/api/v1/cpu"),
+            ("GET", "/api/v1/metrics"),
+            ("POST", "/api/v1/measure/latency"),
+            ("POST", "/api/v1/measure/full"),
+            ("DELETE", "/api/v1/results"),  # only reading, not some other method
+            ("DELETE", f"/api/v1/results/{rid}"),
+            ("POST", "/history"),
+            ("GET", f"/api/v1/results/{rid}/x"),
+            ("GET", "/api/v1/results/"),
+        ]
+
+        def ask(method: str, path: str, token: str, headers=OUTSIDE) -> int:
+            auth = {"Authorization": f"Bearer {token}"} if token else {}
+            body = (
+                {"json": {"network": "198.51.100.0/24", "target": "x"}} if method == "POST" else {}
+            )
+            r = c.request(method, path, headers={**headers, **auth}, **body)
+            if r.status_code == 404 and headers is OUTSIDE:
+                assert r.json() == {"detail": "Not Found"}, (method, path)  # as without
+            return r.status_code
+
+        with caplog.at_level(logging.WARNING):
+            for who, token in passes.items():
+                for path in opened:
+                    want = 200 if who == "support" else 404
+                    assert ask("GET", path, token) == want, (who, path)
+                    assert ask("GET", path, token, INSIDE) == 200, (who, path)
+                for method, path in internal:
+                    assert ask(method, path, token) == 404, (who, method, path)
+                # History's page and a result's: served to anyone, as /, which asks for the
+                # code itself.
+                for page in ("/history", f"/r/{rid}"):
+                    assert ask("GET", page, token) == 200, (who, page)
+        # Inside, each answers as it would without a pass.
+        for method, path in internal:
+            inside = {ask(method, path, token, INSIDE) for token in passes.values()}
+            assert len(inside) == 1, (method, path, inside)
+        assert ask("GET", "/api/v1/access/blocks", "", INSIDE) == 200
+        # Each request it opens is logged by the phrase's name, without the query.
+        for path in opened:
+            assert f"support phrase alice: GET {path} from 203.0.113.9" in caplog.text
+        assert caplog.text.count("support phrase alice:") == len(opened)
+        assert passes["support"] not in caplog.text
+        r = c.get(
+            "/api/v1/results",
+            params={"limit": 2, "pass": passes["support"]},
+            headers=OUTSIDE,
+        )
+        assert r.status_code == 200 and "support phrase alice: GET /api/v1/results from" in (
+            caplog.text
+        )
+        assert passes["support"] not in caplog.text and "?limit" not in caplog.text
+        # It reads what the desk reads, by an ID written any way the desk's is.
+        assert ask("GET", f"/api/v1/results/{rid}", passes["support"]) == 200
+        for written in (rid.upper(), rid.replace("-", ""), *(rid.replace("-", s) for s in " :+")):
+            assert ask("GET", f"/api/v1/results/{written}", passes["support"]) == 200, written
+            assert f"support phrase alice: GET /api/v1/results/{written} from" in caplog.text
+        # Not one that would break the journal's line, nor one too long.
+        for odd in (rid.replace("-", "%0A"), rid.replace("-", "%09"), "%C3%A9" + rid, "x" * 65):
+            assert ask("GET", f"/api/v1/results/{odd}", passes["support"]) == 404, odd
+        assert all("\n" not in r.getMessage() for r in caplog.records)
+        code = c.get("/api/v1/access/code", params={"pass": passes["support"]}, headers=OUTSIDE)
+        assert code.json() == c.get("/api/v1/access/code", headers=INSIDE).json()
+        # From another site, as for the desk's own browsers: refused.
+        other = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", **OUTSIDE}
+        r = c.get("/api/v1/results", params={"pass": passes["support"]}, headers=other)
+        assert r.status_code == 403 and "cross-site" in r.json()["detail"]
+        link = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", **OUTSIDE}
+        assert c.get("/history", headers=link).status_code == 200
+        # Behind nginx at a path, the same.
+        prefix = {"X-Forwarded-Prefix": "/speedtest", **OUTSIDE}
+        r = c.get("/speedtest/api/v1/results", params={"pass": passes["support"]}, headers=prefix)
+        assert r.status_code == 200
+        r = c.get("/speedtest/api/v1/results", params={"pass": passes["code"]}, headers=prefix)
+        assert r.status_code == 404
+        # A block set by hand on its network ends it, as any pass, and so does ending them.
+        c.post("/api/v1/access/blocks", json={"network": "203.0.113.0/24"}, headers=INSIDE)
+        for path in opened:
+            assert ask("GET", path, passes["support"]) == 404, path
+        assert ask("GET", "/history", "") == 200  # the page needs no pass
+        c.delete("/api/v1/access/blocks", params={"network": "all"}, headers=INSIDE)
+        assert ask("GET", "/api/v1/results", passes["support"]) == 200
+        c.app.state.lockouts.end_passes(time.time() + 1, "from the command line")
+        for path in opened:
+            assert ask("GET", path, passes["support"]) == 404, path
+        assert ask("GET", "/api/v1/info", passes["support"]) == 401  # no pass at all
+
+
+def test_a_support_pass_ends_with_its_phrase_on_each_server(tmp_path, key_file):
+    with support_server(tmp_path, key_file) as c:
+        alice = enter(c, ALICE_SAYS)["pass"]
+        rid = c.post("/api/v1/results", json={"version": 1}, headers=INSIDE).json()["id"]
+    auth = {"Authorization": f"Bearer {alice}", **OUTSIDE}
+    # Restarted with alice's phrase removed, made a visitor's, or expired: no pass, for
+    # tests too.
+    for phrases in (
+        PHRASES,
+        SUPPORT_PHRASES.replace('scope = "support"', 'scope = "visitor"'),
+        expired(SUPPORT_PHRASES),
+    ):
+        with support_server(tmp_path, key_file, phrases) as c:
+            assert c.get("/api/v1/results", headers=auth).status_code == 404
+            assert c.get(f"/api/v1/results/{rid}", headers=auth).status_code == 404
+            assert c.get("/api/v1/access/code", headers=auth).status_code == 404
+            assert c.get("/api/v1/info", headers=auth).status_code == 401
+            r = c.get("/api/v1/access", headers=auth).json()
+            assert r["support"] is False and r["pass"]["valid"] is False
+            # History's page is still served, as with a support phrase, so the answer
+            # doesn't tell whether there is one; its data isn't.
+            assert c.get("/history", headers=OUTSIDE).status_code == 200
+            assert c.get(f"/r/{rid}", headers=OUTSIDE).status_code == 200
+            assert c.get("/history", headers=INSIDE).status_code == 200
+    # A new phrase under alice's name, as after a leak: the old one's passes end too.
+    rotated = SUPPORT_PHRASES.replace(ALICE_SAYS, "silver comet bayou thistle 42")
+    with support_server(tmp_path, key_file, rotated) as c:
+        assert c.get("/api/v1/results", headers=auth).status_code == 404
+        assert c.get("/api/v1/access/code", headers=auth).status_code == 404
+        assert c.get("/api/v1/info", headers=auth).status_code == 401
+        assert c.get("/api/v1/access", headers=auth).json()["support"] is False
+        new = {"Authorization": f"Bearer {enter(c, 'silver comet bayou thistle 42')['pass']}"}
+        assert c.get("/api/v1/results", headers={**new, **OUTSIDE}).status_code == 200
+
+
+def test_without_internal_networks_a_support_pass_adds_the_days_code(tmp_path, key_file, caplog):
+    with support_server(tmp_path, key_file, internal_networks=[]) as c:
+        code = unlock(c)
+        alice = enter(c, ALICE_SAYS)["pass"]
+
+        def get(path: str, token: str, headers=OUTSIDE) -> int:
+            return c.get(path, params={"pass": token} if token else {}, headers=headers).status_code
+
+        # Every pass holder reads History, as before.
+        for token in (code, alice):
+            assert get("/api/v1/results", token) == 200
+        assert get("/api/v1/results", "") == 401
+        assert get("/history", "") == 200
+        # The day's code: a support pass's too now, and no one else's from outside.
+        assert get("/api/v1/access/code", code) == 404
+        with caplog.at_level(logging.WARNING):
+            r = c.get("/api/v1/access/code", params={"pass": alice}, headers=OUTSIDE)
+        assert (
+            r.status_code == 200
+            and r.json()["code"] == c.app.state.codes.current(datetime.now(UTC)).code
+        )
+        assert "support phrase alice: GET /api/v1/access/code from 203.0.113.9" in caplog.text
+        loopback = {"X-Forwarded-For": "127.0.0.1"}
+        assert get("/api/v1/access/code", "", loopback) == 404  # as before
+        assert get("/api/v1/access/code", alice, loopback) == 200
+        assert c.get("/api/v1/access", params={"pass": alice}, headers=OUTSIDE).json()["support"]
+
+
+def test_the_page_keeps_historys_tab_hidden_for_a_support_pass(tmp_path, key_file):
+    tab = '<a href="history" data-link data-page="history">History</a>'
+    hidden = '<a href="history" data-link data-page="history" hidden>History</a>'
+    with support_server(tmp_path, key_file) as c:
+        for path in ("/", "/history", "/r/k7q2-m9xd", "/monitor"):
+            page = c.get(path, headers=OUTSIDE).text
+            assert (
+                '<html lang="en" data-pages="test monitor diag help" data-support-pages="history">'
+                in page
+            ), path
+            assert hidden in page and tab not in page and 'data-page="api"' not in page
+        page = c.get("/", headers=INSIDE).text
+        assert "data-support-pages" not in page and "data-pages" not in page
+        assert tab in page and hidden not in page and 'data-page="api"' in page
+        with_support = {path: c.get(path, headers=OUTSIDE).text for path in ("/", "/history")}
+    # Without a support phrase, or with none that works, the same page, so it doesn't tell
+    # whether a server has one.
+    for phrases in (PHRASES, expired(SUPPORT_PHRASES), ""):
+        with support_server(tmp_path, key_file, phrases) as c:
+            for path, page in with_support.items():
+                r = c.get(path, headers=OUTSIDE)
+                assert (r.status_code, r.text) == (200, page), (phrases, path)
+    # Otherwise, as before.
+    for kw in (
+        {"page_history": False},  # no History on this site
+        {"internal_networks": []},  # History is every pass holder's
+        {"access_code": "off"},  # no passes, so no support phrases
+    ):
+        with support_server(tmp_path, key_file, SUPPORT_PHRASES, **kw) as c:
+            page = c.get("/", headers=OUTSIDE).text
+            assert "data-support-pages" not in page and hidden not in page, kw
+            assert (tab in page) == (kw == {"internal_networks": []}), kw
+            if kw == {"access_code": "off"}:  # the desk's alone, as before support phrases
+                assert c.get("/history", headers=OUTSIDE).status_code == 404
+                assert c.get("/r/k7q2-m9xd", headers=OUTSIDE).status_code == 404
 
 
 def test_three_wrong_codes_lock_a_network_out_silently(tmp_path, key_file, caplog):
@@ -593,7 +1183,9 @@ def test_pages_need_no_pass_and_no_cookie(tmp_path, key_file):
     with gated(tmp_path, key_file, internal_networks=["10.0.0.0/8"]) as c:
         for page in ("/", "/monitor", "/diag", "/help"):
             assert c.get(page, headers=OUTSIDE, follow_redirects=False).status_code == 200
-        assert c.get("/history", headers=OUTSIDE).status_code == 404  # the desk's, as before
+        # History's page too, for a support pass to open; its data stays the desk's.
+        assert c.get("/history", headers=OUTSIDE).status_code == 200
+        assert c.get("/api/v1/results", headers=OUTSIDE).status_code == 404
         code = c.app.state.codes.current(datetime.now(UTC)).code
         r = c.post("/api/v1/access", json={"code": code}, headers=OUTSIDE)
         assert "set-cookie" not in r.headers
@@ -990,7 +1582,13 @@ def test_desk_functions_stay_on_internal_networks(tmp_path, key_file):
         r = c.post("/api/v1/measure/latency", json={"target": "x"}, headers=OUTSIDE)
         assert r.status_code == 404
         status = c.get("/api/v1/access", headers=OUTSIDE).json()
-        assert status == {"required": False, "desk": False, "codes": False, "note": NOTE}
+        assert status == {
+            "required": False,
+            "desk": False,
+            "codes": False,
+            "note": NOTE,
+            "support": False,
+        }
 
         page = c.get("/", headers=OUTSIDE).text
         assert 'data-pages="test monitor diag help"' in page
@@ -1183,7 +1781,7 @@ def test_access_phrase_commands(tmp_path, key_file, monkeypatch, capsys):
     phrase("list")
     assert capsys.readouterr().out == f"There is no {path}.\n"
     phrase("init")  # as the package does on install
-    assert capsys.readouterr().out == f"Wrote {path}, with two examples commented out.\n"
+    assert capsys.readouterr().out == f"Wrote {path}, with three examples commented out.\n"
     assert stat.S_IMODE(path.stat().st_mode) == 0o640
     phrase("init")  # an existing file stays
     assert capsys.readouterr().out == ""
@@ -1200,6 +1798,23 @@ def test_access_phrase_commands(tmp_path, key_file, monkeypatch, capsys):
         phrase("add", "other", "Copper-Lantern Harbor-Violet")
     with pytest.raises(SystemExit, match="until is a day"):
         phrase("add", "other", "x", "--until", "soon")
+    # A support phrase: strong, or refused, with the file as it was.
+    before = path.read_text()
+    with pytest.raises(
+        SystemExit,
+        match=r"^texas2step: \S+: phrase 'alice': a support phrase needs at least 4 words "
+        "and 20 letters or digits$",
+    ):
+        phrase("add", "alice", "violet harbor", "--support")
+    assert path.read_text() == before
+    phrase("add", "alice", ALICE_SAYS, "--support")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(BOB_SAYS + "\n"))
+    phrase("add", "bob", "--support", "--until", "2099-12-31")
+    assert [(p.name, p.scope) for p in access.read_phrases(path)][2:] == [
+        ("alice", "support"),
+        ("bob", "support"),
+    ]
+    assert path.read_text().count('scope = "support"') == 2 + 1  # and the commented example
     capsys.readouterr()
 
     phrase("list")
@@ -1207,8 +1822,16 @@ def test_access_phrase_commands(tmp_path, key_file, monkeypatch, capsys):
     assert lines[0] == f"{path}:"
     assert lines[1].split() == ["vip", "copper", "lantern", "harbor", "violet"]
     assert lines[2].split() == ["field-team", "maple", "orbit", "until", "2099-12-31"]
+    assert lines[3].split() == ["alice", *ALICE_SAYS.split(), "support"]
+    assert lines[4].split() == ["bob", *BOB_SAYS.split(), "support,", "until", "2099-12-31"]
     cli.main(["access", "show", "--config", conf])
-    assert re.search(r"\nPhrases: +vip, field-team \(until 2099-12-31\)\n", capsys.readouterr().out)
+    assert re.search(
+        r"\nPhrases: +vip, field-team \(until 2099-12-31\), alice \(support\), "
+        r"bob \(support, until 2099-12-31\)\n",
+        capsys.readouterr().out,
+    )
+    phrase("remove", "bob")
+    phrase("remove", "alice")
 
     text = path.read_text()
     phrase("remove", "vip")
@@ -1221,6 +1844,39 @@ def test_access_phrase_commands(tmp_path, key_file, monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO('[[phrase]]\nname = "x"\n'))
     with pytest.raises(SystemExit, match="phrase 'x': phrase needs letters or digits"):
         phrase("import")
+    assert path.read_text() == text
+
+
+def test_the_phrase_commands_keep_to_the_sites_support_rule(tmp_path, key_file, monkeypatch):
+    lenient = config_file(
+        tmp_path, key_file, access_code="daily", access_support_words=2, access_support_letters=12
+    )
+    path = tmp_path / "access-phrases.toml"
+
+    def phrase(*args: str, conf: str = lenient) -> None:
+        cli.main(["access", "phrase", *args, "--config", conf])
+
+    phrase("add", "carol", "copper lanterns", "--support")
+    assert [(p.name, p.scope) for p in access.read_phrases(path, (2, 12))] == [("carol", "support")]
+    with pytest.raises(
+        SystemExit,
+        match=r"^texas2step: \S+: phrase 'dave': a support phrase needs at least 2 words "
+        "and 12 letters or digits$",
+    ):
+        phrase("add", "dave", "maple orbits", "--support")
+    phrase("list")  # read by the same rule
+    text = path.read_text()
+    # A server that asks for the default refuses the file, by the phrase's name, when
+    # listing, adding, removing or importing.
+    strict = tmp_path / "strict.toml"
+    strict.write_text(Path(lenient).read_text().replace("access_support_words = 2\n", ""))
+    strict.write_text(strict.read_text().replace("access_support_letters = 12\n", ""))
+    for args in (("list",), ("add", "erin", "a b c d e f g h i j k"), ("remove", "carol")):
+        with pytest.raises(SystemExit, match="phrase 'carol': a support phrase needs at least 4"):
+            phrase(*args, conf=str(strict))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(text))
+    with pytest.raises(SystemExit, match="phrase 'carol': a support phrase needs at least 4"):
+        phrase("import", conf=str(strict))
     assert path.read_text() == text
 
 

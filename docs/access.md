@@ -4,7 +4,9 @@ For texas2step servers open to the Internet, so employees can test from a remote
 or from home when they call the service desk about a slow connection. The desk reads them
 a short code, such as `maple.river.42`, which changes every day, week or month. There are
 no user names or passwords. The desk's own tools stay on your networks: saved results
-(with callers' home addresses), the API explorer and the server-side measurements.
+(with callers' home addresses), the API explorer and the server-side measurements. A desk
+member working from elsewhere enters a [support phrase](#support-phrases), which opens
+History, its saved results and the code, but none of the desk's other tools.
 
 ## How it fits together
 
@@ -21,8 +23,9 @@ no user names or passwords. The desk's own tools stay on your networks: saved re
   request, to every server in the picker. A server with the same key accepts it. To end
   every pass at once, see [Ending every pass](#ending-every-pass).
 * **The desk's tools stay inside.** Visitors from addresses in `internal_networks` need no
-  code, and only they get History, the API tab, saved results and the code itself.
-  Everyone else gets the Test, Monitor and Diag tabs.
+  code, and they get History, the API tab, saved results and the code itself. Everyone
+  else gets the Test, Monitor and Diag tabs, and History too once they enter a
+  [support phrase](#support-phrases).
 
 Put each server on its own public address, or behind a layer-4 load balancer (such as
 Azure Load Balancer or AWS Network Load Balancer). A CDN or an application gateway (such
@@ -76,8 +79,8 @@ Fingerprint:  3364-dbda-c7a0   (the same on servers that give the same codes)
 
 The same fingerprint on every server means the same codes. It is worked out from the
 key, the words, the settings that shape a code and any
-[standing phrases](#standing-phrases), and reveals none of them. It reads
-the key, so it needs `sudo`.
+[standing phrases](#standing-phrases), with what a support phrase needs where there is
+one, and reveals none of them. It reads the key, so it needs `sudo`.
 
 To turn codes off again: `sudo texas2step config set access_code=off --write`, then restart.
 
@@ -93,7 +96,9 @@ To turn codes off again: `sudo texas2step config set access_code=off --write`, t
 | `access_note` | `Contact the service desk for assistance.` | The line under the code box, such as how to reach the desk; `""` for none |
 | `access_card_only` | `false` | `true`: the code screen shows the code box alone, under `brand_notice` if one is set, with no header or footer. They return once the code is in. |
 | `access_key_file` | `/etc/texas2step/access.key` | The key |
-| `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | [Standing phrases](#standing-phrases), if the file exists |
+| `access_phrases_file` | `/etc/texas2step/access-phrases.toml` | [Standing phrases](#standing-phrases) and [support phrases](#support-phrases), if the file exists |
+| `access_support_words` | `4` | The words a [support phrase](#support-phrases) needs at least: 2 to 20; the same on every server |
+| `access_support_letters` | `20` | The letters or digits a support phrase needs at least: 12 to 100; the same on every server |
 | `internal_networks` | `[]` | Your own networks: no code, and the desk's tools. A list of IPv4 and IPv6 addresses and networks in CIDR form, mixed freely: `["192.168.0.0/16", "2001:db8::/32", "203.0.113.7"]`. An address alone is a single host. Bits past the prefix are ignored, so `10.2.1.30/24` means all of `10.2.1.0/24`. Give the addresses as the server sees them: staff who come in through your firewall's NAT arrive from its public address. |
 
 **Built-in words.** A code is two words and the digits: `maple.river.42`. The words come
@@ -169,7 +174,8 @@ copying a key to every server.
 ## Standing phrases
 
 The day's code suits most calls. A standing phrase is for the others: a VIP who calls
-while the desk is away from a PC, or a team that needs access for a while. Each phrase
+while the desk is away from a PC, a team that needs access for a while, or, as a
+[support phrase](#support-phrases), a desk member away from your networks. Each phrase
 has a name, and it works as an access code beside the day's code, until you remove it or
 until the end of its `until` day. Case and separators don't matter here either.
 
@@ -192,7 +198,7 @@ after the name, in quotes. `list` shows each one:
 **The file.** Phrases live in `/etc/texas2step/access-phrases.toml` (`access_phrases_file`),
 readable only by root and the service, like the key, and kept out of `config.toml`,
 which every user on the server can read. The package makes it when it is installed or
-upgraded, if there is none, holding no phrases: only two examples, commented out.
+upgraded, if there is none, holding no phrases: only three examples, commented out.
 
 ```toml
 # [[phrase]]
@@ -203,6 +209,11 @@ upgraded, if there is none, holding no phrases: only two examples, commented out
 # [[phrase]]
 # name = "vip"
 # phrase = "vip ticket to ride 1776"    # no until: works until it is removed
+#
+# [[phrase]]
+# name = "alice"                        # one desk member's, or one the desk shares
+# phrase = "night shift at the help desk 1836"
+# scope = "support"                     # opens History too
 ```
 
 You can edit the file by hand, taking the examples as a pattern. The example phrases
@@ -210,7 +221,9 @@ themselves never work: they are published here, so anyone could enter them, and
 texas2step refuses them, in any case or spacing, as it would any other broken entry.
 
 A name is up to 40 letters, digits, `-`, `_` or `.`, and a phrase is plain letters and
-digits (ASCII) with any spaces or punctuation; no two may share a name or a phrase.
+digits (ASCII) with any spaces or punctuation; no two may share a name or a phrase. A
+`scope`, if given, is `"visitor"` (the same as leaving it out) or `"support"`
+([Support phrases](#support-phrases)).
 While access codes are on, texas2step won't start with a file that breaks these rules,
 and says which phrase. `add` and `remove` write the file again, keeping the phrases and
 the examples but not comments of your own. Without the file there are no phrases;
@@ -243,18 +256,155 @@ journalctl -u texas2step --grep 'access phrase'
 **Choose phrases outsiders can't guess.** A phrase doesn't change, so a guessable one
 stays guessable: several words that don't belong together, such as
 `copper lantern harbor violet`, rather than `vip access`. texas2step takes any phrase
-you choose. To withdraw one, `sudo texas2step access phrase remove vip` on every server,
-and restart. Passes it already bought last until they run out (`access_pass_hours`),
-unless you [end every pass](#ending-every-pass).
-A new key doesn't change the phrases.
+you choose, but a support phrase must be [longer](#support-phrases). To withdraw one,
+`sudo texas2step access phrase remove vip` on every server, and restart. Passes it
+already bought last until they run out (`access_pass_hours`), unless you
+[end every pass](#ending-every-pass); a support phrase's passes end with it
+([below](#support-phrases)). A new key doesn't change the phrases.
 
-A phrase buys the same pass as the day's code, so the visitor gets what any visitor
-does, and never sees the day's code: only `internal_networks` get that, at the top of
+A phrase without `scope = "support"` buys the same pass as the day's code, so the
+visitor gets what any visitor does, and never sees the day's code: only
+`internal_networks` and [support phrases](#support-phrases) get that, at the top of
 History. History shows the day's code, never the phrases.
+
+### Support phrases
+
+A support phrase is for the service desk itself: a desk member working from home, or
+from an office whose address isn't in `internal_networks`. It is a standing phrase with
+`scope = "support"`, and it buys a support pass. Besides everything a pass allows, a
+support pass opens:
+
+* History, and the saved results it lists, with callers' addresses;
+* a result's own page, `/r/<id>`, and its share link;
+* the day's code, at the top of History.
+
+Everything else stays with `internal_networks`: the API tab, `/api/docs`,
+`/api/openapi.json`, [lockouts and blocks](#lockouts-and-blocks), the
+[active clients](clients.md) (`/api/v1/clients`), the [server's CPU](cpu.md)
+(`/api/v1/cpu`, `/api/v1/metrics`) and the server-side measurements
+(`/api/v1/measure/*`). Without a good support pass, History's data answers `404`, as it
+always has outside, never an answer that says a support pass would do.
+
+```bash
+sudo texas2step access phrase add alice --support                  # asks for the phrase
+sudo texas2step access phrase add desk --support --until 2026-12-31
+sudo systemctl restart texas2step
+```
+
+**One per desk member, or one shared.** Name a phrase for the person who holds it,
+`alice` or `bob`, and the journal says who read which results, and when someone leaves,
+removing their phrase leaves the others' working. One phrase shared by the desk, `desk`,
+is one to hand over, but the journal names only `desk`, and removing or changing it ends
+the whole desk's passes, so each enters the new one. A file can hold both:
+
+```toml
+[[phrase]]
+name = "alice"
+phrase = "copper kettle north meadow 58"
+scope = "support"
+
+[[phrase]]
+name = "desk"
+phrase = "granite owl tundra lantern"
+until = 2026-12-31
+scope = "support"
+```
+
+These two are published here, so they never work: make up your own.
+
+**Strong enough.** A support pass reads callers' addresses, and a phrase doesn't change,
+so a support phrase must be long: at least 4 words and 20 letters or digits, counted as
+texas2step reads a phrase, with case ignored and any run of spaces or punctuation
+separating two words. `copper kettle north meadow 58` is five words and 25 letters and
+digits. A shorter one is refused, by `add`, by `import` and when texas2step starts,
+naming the phrase: `a support phrase needs at least 4 words and 20 letters or digits`.
+Choose words that don't belong together, as for any phrase. Wrong entries count toward
+a [lockout](#lockouts-and-blocks) as wrong codes do.
+
+A site can ask for less, or more, with `access_support_words` and
+`access_support_letters`, down to 2 words and 12 letters or digits:
+
+```toml
+access_support_words = 3
+access_support_letters = 14
+```
+
+A shorter phrase is easier to guess, and a guessed one reads every caller's details, so
+ask for less only with strict [lockouts](#lockouts-and-blocks) (`access_lockout_after`,
+`access_lockout_minutes`), and choose words nobody would put together. Set the same on
+every server, before adding the phrases, and restart: a server that asks for more than a
+phrase in its file has won't start, and names the phrase. The fingerprint that
+`texas2step access show` prints covers both settings once the file holds a support
+phrase, so servers that differ show it.
+
+**Using one.** The desk member opens History, such as
+`https://speedtest.example.net/texas2step/history`, and enters their phrase in the code
+box, as a caller enters the code. In a browser that already holds another pass, such as
+one the day's code bought, the first page opens with the code box over it. The History
+tab appears beside Test, Monitor and Diag; the API tab doesn't.
+
+With access codes on, every server serves the History and `/r/<id>` pages to anyone, as
+it does `/`, whether it has a support phrase or not, so no answer tells which servers
+have one. The page is the same as `/`, with no results in it: it asks for the code
+first, and after any code but a support phrase it opens the first page instead. What
+History shows comes from the saved results and the day's code, which stay `404` outside
+without a good support pass. With access codes off, those pages are `404` outside, as
+before. Inside `internal_networks` a support phrase buys a support pass too, which the
+desk there doesn't need.
+
+**Every use is logged** by the phrase's name: entering it, and each request from
+outside that a support pass opens (History's list, each result read and the code),
+without its query string:
+
+```text
+WARNING:  texas2step.api.access: access phrase alice (support) used from 203.0.113.9
+WARNING:  texas2step.api.access: support phrase alice: GET /api/v1/results from 203.0.113.9
+WARNING:  texas2step.api.access: support phrase alice: GET /api/v1/results/k7q2-m9xd from 203.0.113.9
+```
+
+```bash
+journalctl -u texas2step --grep 'phrase alice[ :]'   # alice's entries, and what alice read
+journalctl -u texas2step --grep 'support phrase'     # everything support passes read
+```
+
+**Ending one.** Each server checks a support pass against its own phrases each time it
+is used, unlike a visitor's pass: the pass names its phrase and is signed with it.
+Remove the phrase, or change it, and restart, and alice's passes stop working on that
+server, for tests too, not only History. A new phrase under the same name, as after one
+leaks, doesn't take the old one's passes:
+
+```bash
+sudo texas2step access phrase remove alice
+sudo texas2step access phrase add alice --support   # a new one, if she stays
+sudo systemctl restart texas2step
+```
+
+Making it a visitor's phrase does the same, and the end of its `until` day ends its
+passes with it. Removing or changing a shared phrase ends the whole desk's passes. Do it
+on every server. [Ending every pass](#ending-every-pass) and
+[a block set by hand](#lockouts-and-blocks) end support passes as they end any other.
+
+**Every server needs the same phrases file** ([Every server](#standing-phrases), above).
+A support pass works only on servers that hold the same phrase, under the same name, as
+a support phrase: any other server in the picker refuses it altogether, tests included.
+The page then offers to enter a code for that server, and warns that any code but a
+support phrase closes History: the pass it buys takes the support pass's place, on
+every server.
+
+A server on 2.17.x or earlier refuses a support pass, and can't read a phrases file that
+holds a support phrase at all: its `phrase import` refuses the file, and with the file
+in place the service won't start. So update every server before giving out a support
+phrase, then copy the file to each, and restart. Before taking a server back to 2.17.x,
+remove its support phrases.
+
+`sudo texas2step access show` lists support phrases as `alice (support)`, and
+`phrase list` marks them too. Without `internal_networks`, every visitor with a pass
+already gets History, so a support phrase adds only the day's code at its top.
 
 ## For the service desk
 
-From your networks, the History tab shows the code and a box for a result ID:
+From your networks, or with a [support phrase](#support-phrases), the History tab shows
+the code and a box for a result ID:
 
 * Give the caller the server's address and the current code. They enter the code once,
   then run the test.
@@ -288,7 +438,8 @@ TEXAS2STEP_CODE=$code t2s diag https://speedtest.example.net/texas2step --second
 |---|---|
 | The page, at `/`, `/monitor` or `/diag`, which asks for the code; its scripts, styles and logo; `/api/v1/health` (for load balancers, without the version); `/api/v1/access` | Nothing |
 | The tests, Monitor and Diag's measurements, and saving a result | A pass, or an address in `internal_networks` |
-| History, the API tab, `/r/<id>`, reading saved results, `/api/docs`, `/api/openapi.json`, `/api/v1/measure/*`, the current code, [lockouts and blocks](#lockouts-and-blocks) | An address in `internal_networks`; others get 404 |
+| History, `/r/<id>`, reading saved results, the current code | An address in `internal_networks`, or a [support pass](#support-phrases); others get 404. With access codes on, the History and `/r/<id>` pages load for anyone and ask for the code, as `/` does; what they show still needs one of these |
+| The API tab, `/api/docs`, `/api/openapi.json`, `/api/v1/measure/*`, [lockouts and blocks](#lockouts-and-blocks), `/api/v1/clients`, `/api/v1/cpu`, `/api/v1/metrics` | An address in `internal_networks`; others get 404 |
 
 The page keeps the pass in the browser's local storage and sends it with every request
 it makes. Each time it loads, it asks its own server whether the pass still holds, and
@@ -303,10 +454,12 @@ the code itself. A cookie an earlier version set is removed at the next right co
 
 With `internal_networks` set, only those networks see the version. The page,
 `/api/v1/info` and `/api/v1/health` leave it out for everyone else, even after they enter
-a code, and a result they save gets it from the server. Without `internal_networks`, a
-visitor sees it once they have entered a code; until then the page leaves it out and
-`/api/v1/health` answers only `{"status":"ok"}`. This slows an attacker down rather than
-stopping one: the page's scripts are those of a published release.
+a code, and a result they save gets it from the server. A support pass doesn't show it
+either, though the saved results it reads hold the version that ran each test. Without
+`internal_networks`, a visitor sees it once they have entered a code; until then the
+page leaves it out and `/api/v1/health` answers only `{"status":"ok"}`. This slows an
+attacker down rather than stopping one: the page's scripts are those of a published
+release.
 
 The desk's functions also refuse, with `403`, a browser's request made for a page on
 another site, so that a website an employee opens can't use them through the employee's
@@ -475,6 +628,8 @@ several unrelated words.
 ## Ending every pass
 
 A pass holds the time it was issued, signed with the key: `1793030400.q7GxN0x2rY8vLmKp3TfWcA9b`.
+A support pass also holds its phrase's name, `alice` in base64url, signed apart, so
+neither kind can be read as the other: `1793030400.s.YWxpY2U.Xk2pQ8vRt5LmNa7cBy3dWfGh`.
 No server keeps a list of them. Each server checks a pass as it is used:
 
 * The signature matches, so a server with the same key issued it.
@@ -483,6 +638,8 @@ No server keeps a list of them. Each server checks a pass as it is used:
   longer.
 * It wasn't issued more than 5 minutes ahead of this server's clock.
 * It was issued after passes were last ended.
+* For a support pass, its phrase is a support phrase in this server's phrases file, and
+  its `until` day hasn't passed ([Support phrases](#support-phrases)).
 
 To end every pass given so far, such as when a code or a phrase went further than it
 should have:
@@ -636,8 +793,9 @@ move in a day or a month.
 
 A saved result holds the public address the caller tested from, often their home's,
 and, where the browser or the command line can tell, their computer's own address and a
-MAC address. Keep `internal_networks` set, so only the desk reads them, and keep only as
-many as you need (`results_max_rows`). `sudo texas2step results clear` deletes them all
+MAC address. Keep `internal_networks` set, so only the desk reads them, from those
+networks or with a [support phrase](#support-phrases), and keep only as many as you need
+(`results_max_rows`). `sudo texas2step results clear` deletes them all
 ([Clear saved results](install.md#clear-saved-results)).
 
 ## On disk
@@ -645,7 +803,7 @@ many as you need (`results_max_rows`). `sudo texas2step results clear` deletes t
 | | |
 |---|---|
 | `/etc/texas2step/access.key` | Made when the package is installed, kept on upgrades, removed with `apt purge` |
-| `/etc/texas2step/access-phrases.toml` | Made when the package is installed or upgraded, if missing, with two examples commented out; kept on upgrades; removed with `apt purge` |
+| `/etc/texas2step/access-phrases.toml` | Made when the package is installed or upgraded, if missing, with three examples commented out; kept on upgrades; removed with `apt purge` |
 | Your `access_words` file | Yours: kept by `apt purge` |
 | `/var/lib/texas2step/access.db` | Wrong codes, lockouts and blocks, and with servers that defend together, the one-time values of their requests; made by the service when access codes are on; removed with `apt purge` |
 

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .access import INTERVALS
+from .access import INTERVALS, SUPPORT_FLOOR
 
 ENV_PREFIX = "TEXAS2STEP_"
 PAGES = ("test", "monitor", "diag", "history", "help", "api")  # the web UI's tabs, in order
@@ -196,6 +196,10 @@ class Settings:
     access_key_file: str = "/etc/texas2step/access.key"  # the same key on every server
     # Standing phrases that always work as codes (texas2step access phrase); none without it.
     access_phrases_file: str = "/etc/texas2step/access-phrases.toml"
+    # What a support phrase needs at least: words, and letters or digits. Fewer make it
+    # easier to guess, down to 2 and 12; the same on every server.
+    access_support_words: int = 4
+    access_support_letters: int = 20
     # Wrong codes count against the visitor's /24 or /48; this many in a row lock it out
     # until no code has come from it for access_lockout_minutes (texas2step access lockouts).
     access_lockout_after: int = 3
@@ -211,7 +215,8 @@ class Settings:
     # service's user. Such as to tell a SIEM or a firewall's API.
     access_lockout_hook: str = ""
     # The organization's own networks (addresses or CIDR blocks): no code is asked there,
-    # and only they get saved results, the API explorer and the server-side measurements.
+    # and only they get saved results, the API explorer and the server-side measurements;
+    # a support phrase opens History and saved results too (docs/access.md).
     internal_networks: list[str] = field(default_factory=list)
 
     # A cap on the traffic tests move, for servers whose traffic is billed (docs/traffic.md):
@@ -343,6 +348,13 @@ class Settings:
             raise ValueError("device_bound_percent: expected 0 (never) to 100 percent")
         if not 1 <= self.access_pass_hours <= 168:
             raise ValueError("access_pass_hours: expected 1 to 168 hours")
+        least_words, least_letters = SUPPORT_FLOOR
+        if not least_words <= self.access_support_words <= 20:
+            raise ValueError(f"access_support_words: expected {least_words} to 20 words")
+        if not least_letters <= self.access_support_letters <= 100:
+            raise ValueError(
+                f"access_support_letters: expected {least_letters} to 100 letters or digits"
+            )
         if not 1 <= self.access_lockout_after <= 100:
             raise ValueError("access_lockout_after: expected 1 to 100 wrong codes")
         if not 1 <= self.access_lockout_minutes <= 10080:

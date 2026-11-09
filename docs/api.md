@@ -248,15 +248,17 @@ and `/access`); without a valid one it gets `401`. It goes as `?pass=<pass>`, or
 offering `texas2step` and `texas2step.pass.<pass>`, and is answered with `texas2step`. With `internal_networks` set, clients from outside them get `404` for
 reading results, `/api/v1/measure/*`, `/api/docs`, `/api/openapi.json`, the current code and
 the lockouts, and the browser's requests to these made for a page on another site get
-`403`. With `internal_networks` set, `/api/v1/info` and `/api/v1/health` leave out the
+`403`. With a [support pass](access.md#support-phrases), a client from outside them reads
+results and the current code too; without a good one, those answer the same `404`. With
+`internal_networks` set, `/api/v1/info` and `/api/v1/health` leave out the
 version for clients outside them; without them, `/api/v1/health` leaves it out for
 clients that would need a pass.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v1/access?pass=<pass>` | `{"required", "desk", "codes", "note"}`: whether this client needs a pass, gets the desk's functions, and whether this server gives passes at all (`access_code` is on), and the site's line under the code box (`access_note`, empty for none); with `pass`, also whether that pass is valid and when it expires |
-| POST | `/api/v1/access` | `{"code": "maple.river.42"}` (any case and separators, or a standing phrase) returns `{"pass", "expires"}`. A wrong code is `403`. After `access_lockout_after` wrong codes in a row from one /24 or /48, every code from it gets that same `403`, unread, until `access_lockout_minutes` pass without one ([Lockouts and blocks](access.md#lockouts-and-blocks)). A body over 1 KB is `413` |
-| GET | `/api/v1/access/code` | The current code, when it changes, and the previous one while it still works; only from `internal_networks` |
+| GET | `/api/v1/access?pass=<pass>` | `{"required", "desk", "codes", "note", "support"}`: whether this client needs a pass, gets the desk's functions by its address, and whether this server gives passes at all (`access_code` is on), the site's line under the code box (`access_note`, empty for none), and whether the pass, as `pass` or in the header, is a good [support pass](access.md#support-phrases), which opens History, saved results and the current code too (servers on 2.17.x and earlier leave `support` out); with `pass`, also whether that pass is valid and when it expires |
+| POST | `/api/v1/access` | `{"code": "maple.river.42"}` (any case and separators, or a standing phrase) returns `{"pass", "expires", "scope"}`: `scope` is `"support"` for a [support phrase](access.md#support-phrases)'s pass, `"visitor"` for any other. A wrong code is `403`. After `access_lockout_after` wrong codes in a row from one /24 or /48, every code from it gets that same `403`, unread, until `access_lockout_minutes` pass without one ([Lockouts and blocks](access.md#lockouts-and-blocks)). A body over 1 KB is `413` |
+| GET | `/api/v1/access/code` | The current code, when it changes, and the previous one while it still works; only from `internal_networks`, on a server that has them, or with a good [support pass](access.md#support-phrases); `404` to anyone else (without `internal_networks`, a client that needs a pass gets `401` first) |
 | GET | `/api/v1/access/blocks` | `{"lockouts": [{"network", "source", "wrong_codes", "since", "until", "by_hand"}], "counting"}` (`by_hand`: a block, which ends the passes used from the network too); only from `internal_networks` and the server itself |
 | POST | `/api/v1/access/blocks` | `{"network": "198.51.100.0/24", "minutes": 120}` locks a network out by hand, or keeps its lockout going, and ends the passes used from it; `minutes` defaults to `access_lockout_minutes`. One that overlaps `internal_networks`, or is wider than a /16 or a /32, is `400` |
 | DELETE | `/api/v1/access/blocks?network=<network>` | Ends the lockouts that overlap it (`all`: every one); returns `{"cleared": [...]}` |

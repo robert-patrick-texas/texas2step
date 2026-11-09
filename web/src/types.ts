@@ -334,6 +334,17 @@ export interface AccessStatus {
   codes: boolean; // this server gives passes, even to a visitor who needs none
   note: string; // the site's line under the code box (access_note); empty for none
   pass?: { valid: boolean; expires: number | null };
+  /** The pass sent is a good support pass, a support phrase's: History and saved results
+   * from outside internal_networks too (docs/access.md). Older servers leave it out. */
+  support?: boolean;
+}
+
+/** POST /api/v1/access: the pass a right code bought. `scope` "support" for a support
+ * phrase's; older servers leave it out. */
+export interface AccessPass {
+  pass: string;
+  expires: number;
+  scope?: "visitor" | "support";
 }
 
 /** GET /api/v1/access/code, for the service desk. */

@@ -27,7 +27,7 @@ from starlette.websockets import WebSocketClose
 from . import __version__, clients, cpu, page, traffic
 from .access import Codes, is_internal, read_key
 from .api import routers
-from .api.access import given_pass
+from .api.access import given_pass, log_support, support_phrase
 from .api.meta import client_address, http_version, shows_version
 from .api.results import MAX_RESULT_BYTES
 from .clients import Clients
@@ -183,8 +183,9 @@ class ForwardedPrefix:
 class AccessGate:
     """Asks visitors from outside ``internal_networks`` for an access pass before tests,
     when ``access_code`` is on, and keeps the service desk's functions to those networks
-    when they are set (docs/access.md). It sits inside CORSMiddleware, so a page on
-    another server can read the refusal. Raw ASGI, like TimingAllowOrigin.
+    when they are set, but for the few a support pass opens (docs/access.md). It sits
+    inside CORSMiddleware, so a page on another server can read the refusal. Raw ASGI,
+    like TimingAllowOrigin.
     """
 
     # /access/peer checks its caller itself: an address in access_peer_networks and a
@@ -201,6 +202,13 @@ class AccessGate:
         "/api/v1/cpu",
         "/api/v1/metrics",
     )
+    # Of the desk's, what a support pass opens from outside too, read with GET: History's
+    # page and a result's, wherever codes are on, whether or not a support phrase is here,
+    # so the answer doesn't tell (the page, as /, asks for the code itself); and with the
+    # pass, the saved results and the day's code. A result's ID in printable ASCII, with
+    # any separators (store.get), so the journal's line for it stays one line.
+    SUPPORT_PAGES = re.compile(r"/history|/r/[^/]+")
+    SUPPORT_API = re.compile(r"/api/v1/results(?:/[ -.0-~]{1,64})?|/api/v1/access/code")
 
     def __init__(self, app: ASGIApp, settings: Settings) -> None:
         self.app = app
@@ -227,12 +235,26 @@ class AccessGate:
         ip, _ = client_address(conn)
         inside = is_internal(ip, networks)
         method = scope.get("method", "GET")
+        support = None  # the support phrase whose pass opens this desk-only request
         if networks and not inside and self.desk_only(method, path):
-            await self._refuse(scope, receive, send, 404, "Not Found")
-            return
+            # Not found, as without support phrases, to anyone a support pass doesn't let
+            # in: never an answer that tells a support pass from another, or from none.
+            read = scope["type"] == "http" and method == "GET"
+            if read and self.SUPPORT_PAGES.fullmatch(path):
+                opened = codes is not None
+            elif read and self.SUPPORT_API.fullmatch(path):
+                support = await support_phrase(conn)
+                opened = support is not None
+            else:
+                opened = False
+            if not opened:
+                await self._refuse(scope, receive, send, 404, "Not Found")
+                return
         if networks and self.desk_only(method, path) and self.cross_site(conn, method):
             await self._refuse(scope, receive, send, 403, "cross-site request refused")
             return
+        if support is not None:
+            log_support(support, conn, path)
         # Pages need no pass: each is the same app as /, which asks for the code itself,
         # and everything it fetches or opens needs one.
         needs_pass = (
@@ -564,17 +586,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     async def spa(request: Request) -> HTMLResponse:
         # Relative URLs in the page resolve against <base href>, which carries the prefix.
-        # Visitors from outside internal_networks don't get the desk's tabs.
+        # Visitors from outside internal_networks don't get the desk's tabs, but for those
+        # a support pass opens, kept hidden wherever codes are on: on every server alike,
+        # so the page doesn't tell whether a support phrase is here.
         ip, _ = client_address(request)
         inside = is_internal(ip, settings.internal_networks)
         hide = page.DESK_PAGES if settings.internal_networks and not inside else frozenset()
-        gated = app.state.codes is not None and not inside
+        codes = app.state.codes
+        support = page.SUPPORT_PAGES if hide and codes is not None else frozenset()
+        gated = codes is not None and not inside
         root = request.scope.get("root_path", "")
         # Not the version for a visitor outside internal_networks, nor, without them, for
         # one who needs the code: it would tell an attacker which flaws to try. Without
         # internal_networks, a visitor who entered the code gets it from /api/v1/info.
         known = shows_version(request)
-        body = shell.render(index.read_text(), root, __version__ if known else "", hide, gated)
+        version = __version__ if known else ""
+        body = shell.render(index.read_text(), root, version, hide, gated, support)
         policy = content_policy(body, origins)
         return HTMLResponse(
             body, headers={"Cache-Control": "no-cache", "Content-Security-Policy": policy}

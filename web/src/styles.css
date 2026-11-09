@@ -519,6 +519,11 @@ button {
   box-shadow: 0 0 0 1px var(--border), 0 4px 12px -6px rgba(0, 0, 0, 0.2);
 }
 
+/* A tab the server sent hidden: a page a support pass opens (App.openSupportPages). */
+.tabs a[hidden] {
+  display: none;
+}
+
 .topbar-actions {
   margin-left: auto;
   display: flex;
