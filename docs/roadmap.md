@@ -269,6 +269,19 @@ Worth considering, not urgent, and perhaps not needed.
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
+### [2.18.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.18.0) (2026-11-09)
+
+- [x] **Support phrases:** a standing phrase with `scope = "support"` opens History, the
+  saved results, `/r/<id>` and the day's code to a desk member outside
+  `internal_networks`, one per person or one the desk shares
+  (`texas2step access phrase add alice --support`). The rest of the desk's tools stay
+  inside. Each use, and each request it opens, is in the journal by the phrase's name,
+  and removing or changing the phrase ends its passes.
+- [x] `access_support_words` and `access_support_letters`: how long a support phrase must
+  be, 4 words and 20 letters or digits unless set, down to 2 and 12.
+- [x] With access codes on, every server serves the History and `/r/<id>` pages to
+  everyone, as it does `/`, so none shows whether it has a support phrase.
+
 ### [2.17.1](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.17.1) (2026-11-04)
 
 - [x] **Idle workers stay idle:** a UDP session closed before its connection was made, as
