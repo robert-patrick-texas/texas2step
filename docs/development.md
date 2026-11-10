@@ -334,13 +334,68 @@ pushes them (see [Release](#release)).
 4. Run `make check`, `make deb`, `make t2s` and `make t2s-deb`. The package installs
    exactly the versions in `uv.lock`, and t2s is built with exactly those in
    `t2s/go.sum`.
-5. Run `make -s facts` and put what it prints in the release's notes, before the Files
+5. Test the upgrade, before tagging, as servers will take it: the previous release
+   installed with its own setup tool, then `texas2step update --from` the new files. Use
+   the throwaway container from [Build the Debian package](#build-the-debian-package),
+   without a network, so nothing comes from GitHub:
+
+```bash
+prev=2.17.1   # the release before this one
+gh release download "v$prev" --pattern 'texas2step-*' --dir "build/v$prev"
+gh release download "v$prev" --pattern "t2s_${prev}-1_amd64.deb" --dir "build/v$prev"
+chmod +x "build/v$prev/texas2step-setup"   # downloads aren't executable
+docker run -d --name t2s-upgrade --network none --privileged --cgroupns=host \
+    -v /sys/fs/cgroup:/sys/fs/cgroup:rw t2s-test
+docker exec t2s-upgrade rm -f /usr/sbin/policy-rc.d
+docker exec t2s-upgrade mkdir -p /root/old /root/new
+for f in "build/v$prev"/*; do docker cp "$f" t2s-upgrade:/root/old/; done
+v=$(make -s version)
+for f in "dist/texas2step-$v-1-amd64.deb" dist/texas2step-setup "dist/t2s_$v-1_amd64.deb"; do
+    docker cp "$f" t2s-upgrade:/root/new/
+done
+docker exec -w /root/old t2s-upgrade ./texas2step-setup --id austin \
+    --site /etc/nginx/sites-enabled/default
+docker exec -w /root/old t2s-upgrade ./texas2step-install.sh
+```
+
+   Before upgrading, give the old release settings that matter, such as
+   `access_code = "daily"` and `internal_networks = ["10.0.0.0/8"]` (`texas2step config
+   set ... --write`, then restart), a standing phrase, and a pass bought from outside:
+   POST the code from `texas2step access show --code-only` to
+   `http://127.0.0.1:8080/api/v1/access` with `X-Forwarded-For: 203.0.113.9`. Send
+   such requests to port 8080, not through nginx, which replaces `X-Forwarded-For` and
+   so makes every request look like one from inside. Note `access show`'s fingerprint.
+   Then upgrade:
+
+```bash
+docker exec t2s-upgrade texas2step update --from /root/new          # the plan, no install
+docker exec t2s-upgrade texas2step update --from /root/new --yes
+```
+
+   Check that:
+
+   * The plan is what the notes will say: the package, a settings merge where the
+     template changed, and nginx and the firewall only where the release changes them.
+   * Every setting is kept, with a dated backup of `config.toml`.
+   * The pass from the previous release still works, and the fingerprint is the same,
+     unless the release says otherwise.
+   * The release's new features work on the upgraded server, and the journal has no
+     errors (`journalctl -u texas2step`).
+   * The t2s package upgrades: `apt-get install --no-install-recommends` the previous
+     one from `/root/old`, then the new one from `/root/new`, and `t2s --version` names
+     the new version. Without a network, apt can't fetch bash-completion, which the t2s
+     package recommends, and without that option it then installs nothing. Ubuntu's
+     container images leave out `/usr/share/man` and `/usr/share/doc`, so there
+     `dpkg -V t2s` lists the man page and `modules.txt` as missing.
+
+   Then `docker rm -f t2s-upgrade` and `rm -rf build/v$prev`.
+6. Run `make -s facts` and put what it prints in the release's notes, before the Files
    table. Its **Versions** come from what was built where they can: the server package's
    Python and Python packages from its `.deb`, t2s's Go and modules from the build
    information in `dist/t2s-linux-amd64`. The rest come from the files that pin them.
    Its **Lines of code** count the files git tracks, by language and by part: product,
    tests and tooling.
-6. Commit (including the updated lockfiles), tag and publish the package:
+7. Commit (including the updated lockfiles), tag and publish the package:
 
 ```bash
 v=$(make -s version)
@@ -352,7 +407,7 @@ gh release create "v$v" "dist/texas2step-$v-1-amd64.deb" dist/texas2step-setup \
     --title "texas2step $v" --generate-notes
 ```
 
-7. Publishing the release publishes the Python package to
+8. Publishing the release publishes the Python package to
    [PyPI](https://pypi.org/project/texas2step/) too, for `uv tool install texas2step` and
    `pipx install texas2step`. `.github/workflows/pypi.yml` checks that the tag is
    `v<version>`, runs the tests, builds the sdist and wheel from the tag, checks their
@@ -372,7 +427,7 @@ pypi → Run workflow, or `gh workflow run pypi.yml`.
 PyPI's copy of the README has its links made absolute, to GitHub, by
 `hatch-fancy-pypi-readme` (`pyproject.toml`).
 
-8. Publishing the release also publishes the [container image](container.md):
+9. Publishing the release also publishes the [container image](container.md):
    `.github/workflows/container.yml` checks the tag the same way, builds and tests the
    image on amd64 and arm64, pushes both to `ghcr.io/robert-patrick-texas/texas2step`
    under `<version>`, `<major>.<minor>`, `<major>` and `latest`, and attests the build.
