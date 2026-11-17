@@ -116,8 +116,8 @@ chmod +x t2s
 ```
 
 The server's package also has a command line in Python, `texas2step`, with the same tests:
-installed as `/usr/bin/texas2step`, or elsewhere from PyPI with `uv tool install texas2step`
-(or `pipx install texas2step`).
+installed as `/usr/bin/texas2step`, or elsewhere from PyPI with `uv tool install texas2step`.
+uv brings its own Python when the system's is older than 3.11, or with `--python 3.15`.
 
 ```bash
 texas2step run https://www.example.net/texas2step              # full test, human-readable

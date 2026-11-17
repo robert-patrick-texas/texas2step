@@ -19,7 +19,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
-nfpm=(go run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.48.0)
+nfpm=(go run github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.49.0)
 arches=(amd64 arm64)
 revision=${REVISION:-1}
 dist=${DIST:-dist}

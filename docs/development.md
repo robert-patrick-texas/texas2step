@@ -6,8 +6,10 @@ install texas2step on a server, see [Install](install.md).
 
 ## Prerequisites
 
-* Python 3.11 or newer, and [uv](https://docs.astral.sh/uv/).
-* Node.js 20 or newer (24 LTS recommended), only to change the web UI.
+* [uv](https://docs.astral.sh/uv/). It installs the Python in `.python-version` (the one
+  the package and the container ship) for the tests and the builds. texas2step itself
+  still runs on Python 3.11 or newer when installed from PyPI.
+* Node.js, the newest LTS (26), only to change the web UI.
 * [Go](https://go.dev/dl/) at the version `t2s/go.mod` names or newer, for [t2s](#t2s):
   `make check` tests it, and a release builds it.
 * For the `.deb`: an Ubuntu 26.04 amd64 host with `dpkg-deb`, `binutils` and,
@@ -53,7 +55,8 @@ curl -s -H 'X-Forwarded-Prefix: /texas2step' http://127.0.0.1:8080/ | grep '<bas
 | `make image` | Build the container image `texas2step:<version>` for this machine's architecture |
 | `make version` | Print the version |
 | `make facts` | Print a release's Versions and Lines of code, for its notes, from `make deb`'s and `make t2s`'s files |
-| `make upgrade` | Move every Python, npm and Go dependency to its newest release, then rebuild the UI |
+| `make outdated` | List every component with a newer stable release: Python itself; the Python, npm and Go packages; uv's image; the workflows' actions; nfpm; and this machine's uv, Node and Go |
+| `make upgrade` | Move every one of them in the repository to its newest stable release, then rebuild the UI |
 | `make t2s` | Build t2s for Linux, macOS and Windows (amd64, arm64) into `dist/` |
 | `make t2s-deb` | Build the t2s package from `make t2s`'s files: `dist/t2s_<version>-1_amd64.deb` and `_arm64.deb` |
 | `make t2s-test` | gofmt, go vet (for Linux, macOS and Windows) and go test for t2s |
@@ -116,8 +119,9 @@ legacy/                the original single-file prototype, kept for reference
   CDN. That package depends on `@scarf/scarf`, an install-time analytics reporter; its
   install script is denied in `web/package.json` (`allowScripts`), so it never runs.
 * Dependencies are pinned exactly (`uv.lock`, `web/package.json` and
-  `web/package-lock.json`), so builds are repeatable. `make upgrade` moves them all to
-  their newest releases.
+  `web/package-lock.json`, `t2s/go.sum`), and so is Python (`.python-version`), so
+  builds are repeatable. `make upgrade` moves them all to their newest stable releases
+  (see [Release](#release), step 3). Use uv for anything Python, never pip.
 
 ## Tests
 
@@ -230,19 +234,26 @@ make deb          # or: packaging/build-deb.sh
 
 `packaging/build-deb.sh`:
 
-* Builds the wheel.
-* Creates a relocatable virtualenv on the system `/usr/bin/python3`, and installs the
-  exact dependency versions from `uv.lock` into it.
+* Runs `packaging/build-runtime.sh`, which puts texas2step's own Python under
+  `/opt/texas2step/python`: the version in `.python-version`, the standalone build uv
+  installs (python-build-standalone), downloaded and checked by uv into `build/pythons`.
+  It makes a relocatable virtualenv on it at `/opt/texas2step/venv` with exactly the
+  versions in `uv.lock` (`uv sync --locked`), then the wheel built from the source, and
+  leaves out what a server never uses (Tk, IDLE, pip, the C headers, the library for
+  embedding Python).
 * Adds the files from `deploy/`.
 * Writes `dist/texas2step-<version>-<revision>-amd64.deb`, then runs lintian.
 * Writes `dist/texas2step-setup`, the operators' setup tool, from
   `packaging/texas2step-setup.py`. It stamps in the package's file name and SHA-256, so
   the tool refuses any other package. Ship the two files together.
 
-The virtualenv holds compiled wheels and links to the system Python, so build on the
-Ubuntu release you're packaging for. The package then depends on that release's Python
-minor version (3.14 for 26.04). For a packaging-only fix of the same version, use
-`REVISION=2 make deb`.
+The package doesn't use the system's Python: it depends on glibc, and on `tzdata`,
+`netbase` and `media-types`, the files its Python reads from the system. The virtualenv
+holds compiled wheels, so build on Ubuntu 26.04 on the architecture you're packaging for.
+Python's security fixes reach servers only in a texas2step package: when Python has
+one, build the same version again with the new `.python-version`, as
+`REVISION=2 make deb`, and release that. The setup tool still runs on the system's
+`python3`, as Ubuntu always has one.
 
 To test an install without touching the build host, use a throwaway systemd container:
 
@@ -290,9 +301,10 @@ make image        # or: docker build -t texas2step:<version> --build-arg VERSION
 
 The [Dockerfile](../Dockerfile) builds in two stages, both on Ubuntu 26.04:
 
-* The first builds the wheel and a virtualenv at `/opt/texas2step/venv` with the exact
-  versions in `uv.lock`, as `packaging/build-deb.sh` does.
-* The second adds Ubuntu's `python3`, `nginx`, `tini` and `openssl`, the virtualenv, the
+* The first runs `packaging/build-runtime.sh /opt/texas2step`, as
+  `packaging/build-deb.sh` does: the same Python and the same packages.
+* The second adds Ubuntu's `nginx`, `tini` and `openssl` (and `tzdata`, `netbase` and
+  `media-types`, which the package depends on too), `/opt/texas2step`, the
   nginx snippets from `deploy/nginx/`, and `deploy/container/`: `nginx.conf` and
   `entrypoint.sh`, which writes the site from the container's settings at each start
   and runs the server and nginx. `/usr/share/texas2step/container` tells the command line
@@ -315,7 +327,7 @@ pushes them (see [Release](#release)).
 
 1. Set the version in `src/texas2step/__init__.py`, the only place it is written. Everything
    else reads it from there:
-   * `pyproject.toml`, through hatch's dynamic version, so the wheel and `pip show` too.
+   * `pyproject.toml`, through hatch's dynamic version, so the wheel and `uv pip show` too.
    * The server (`/api/v1/info`, `/api/v1/health`), and the web UI, which the server
      tells the version in each page it serves. No UI rebuild is needed for a new version.
    * The CLI (`texas2step --version`).
@@ -329,11 +341,25 @@ pushes them (see [Release](#release)).
    line, which is the layout `texas2step config merge` relies on. If it renames a
    setting, add the old and new names to `RENAMED` in `config_merge.py`, so upgrades
    carry the value across.
-3. Run `make upgrade`, so the release ships every dependency's newest version, with its
-   security and bug fixes.
+3. Move every component to its newest stable release, so the release ships each one's
+   security and bug fixes. `make outdated` lists what is behind; `scripts/upgrade.py`
+   says what it covers.
+   * Update this machine's tools first, by hand, if it lists them: uv (`uv self
+     update`, first of all, since the Pythons uv offers come with it), Node (the newest
+     LTS) and Go.
+   * Then `make upgrade`. It moves Python in `.python-version`, `uv.lock`, the npm and
+     Go packages, uv's image in the `Dockerfile` (with its digest), the workflows'
+     actions (by commit, with the tag as a comment) and nfpm, then rebuilds the UI.
+     Newest means the newest stable release, as soon as it is out: no pre-releases and
+     no waiting period.
+   * If a newest release fails the tests, find which one and hold only it back, at the
+     newest version that passes: put it back, then add it to
+     `[tool.texas2step.upgrade-hold]` in `pyproject.toml` with why and since when.
+     `make upgrade` leaves it there and `make outdated` shows it as held. Say so in the
+     release's notes, and try it again at the next release.
 4. Run `make check`, `make deb`, `make t2s` and `make t2s-deb`. The package installs
-   exactly the versions in `uv.lock`, and t2s is built with exactly those in
-   `t2s/go.sum`.
+   Python at the version in `.python-version` and exactly the versions in `uv.lock`,
+   and t2s is built with exactly those in `t2s/go.sum`.
 5. Test the upgrade, before tagging, as servers will take it: the previous release
    installed with its own setup tool, then `texas2step update --from` the new files. Use
    the throwaway container from [Build the Debian package](#build-the-debian-package),
@@ -408,8 +434,8 @@ gh release create "v$v" "dist/texas2step-$v-1-amd64.deb" dist/texas2step-setup \
 ```
 
 8. Publishing the release publishes the Python package to
-   [PyPI](https://pypi.org/project/texas2step/) too, for `uv tool install texas2step` and
-   `pipx install texas2step`. `.github/workflows/pypi.yml` checks that the tag is
+   [PyPI](https://pypi.org/project/texas2step/) too, for `uv tool install texas2step`.
+   `.github/workflows/pypi.yml` checks that the tag is
    `v<version>`, runs the tests, builds the sdist and wheel from the tag, checks their
    metadata, installs the wheel on its own and tests the server it starts. Then it uploads
    both files with PyPI's trusted publishing, with no API token. Watch it, then check the

@@ -112,8 +112,9 @@ def test_versions_are_read_from_what_was_built():
         "aiortc-1.16.0.dist-info/METADATA\n"
     )
     assert facts.deb_packages(listing) == {"aiortc": "1.16.0", "typing-extensions": "4.16.0"}
-    depends = "python3 (>= 3.14), python3 (<< 3.15), libc6 (>= 2.42), adduser"
-    assert facts.deb_python(depends) == "3.14"
+    pyvenv = "home = /opt/texas2step/python/bin\nimplementation = CPython\nversion_info = 3.15.2\n"
+    assert facts.deb_python(pyvenv) == "3.15.2"
+    assert facts.deb_python("") == "?"
     info = (
         "dist/t2s-linux-amd64: go1.27.3\n"
         "\tpath\tgithub.com/robert-patrick-texas/texas2step/t2s\n"

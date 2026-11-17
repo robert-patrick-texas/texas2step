@@ -5,6 +5,10 @@ texas2step: unstripped-binary-or-object
 texas2step: embedded-library
 # uv's relocatable launchers are sh/Python polyglots: sh runs only the first two lines.
 texas2step: shell-script-fails-syntax-check
+# The package's own Python is the standalone build uv installs, shipped as it is built.
+texas2step: hardening-no-pie [opt/texas2step/python/bin/python3.*]
+texas2step: script-not-executable [opt/texas2step/python/lib/python3.*/encodings/rot_13.py]
+texas2step: unusual-interpreter python [opt/texas2step/python/lib/python3.*/encodings/rot_13.py]
 # Distributed from GitHub, not the Debian archive.
 texas2step: initial-upload-closes-no-bugs
 # `texas2step --help` and the online docs cover the command.

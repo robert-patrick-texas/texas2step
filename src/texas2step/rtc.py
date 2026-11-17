@@ -150,37 +150,17 @@ if AVAILABLE:
         aioice binds every host socket to port 0, and aiortc has no option to change that.
         A connection created while ``_PORT_RANGE`` is set binds its host sockets here
         instead and leaves the STUN and TURN candidates to aioice. Without a range it
-        behaves like its base class, but for stopping its checks and its connect() when
-        it closes.
+        behaves like its base class.
+
+        Closing is aioice's own: from 0.12.1, which pyproject.toml requires, close() stops
+        the checks under way before it closes their sockets, starts no more, and ends
+        connect() even while it still waits for the browser's candidates. Before, a
+        session closed during its checks left its worker checking every 20 ms for good.
         """
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             self.port_range = _PORT_RANGE.get()
-            self._closing = False
-
-        # aioice closes the sockets but leaves its checks retrying, and keeps starting the
-        # waiting ones; each send then hits a closed socket, which asyncio raises (on an
-        # unconnected UDP transport) into the check. A session closed while its ICE is
-        # under way, such as one a block ends, stops them here instead.
-        def check_start_task(self, pair: Any) -> None:
-            if not self._closing:
-                super().check_start_task(pair)
-
-        # connect() checks every 20 ms until this says there's nothing left to do, and
-        # before aioice 0.12.1 close() doesn't end it: a pair left waiting, or a browser's
-        # candidates still to come (Chrome never says it has sent them all), keeps it going
-        # after the session is gone, for as long as the worker runs. Closed, it ends, as
-        # failed. aiortc takes aioice from 0.10.2; 0.12.1 ends it itself, and renames this.
-        def check_periodic(self) -> bool:
-            return not self._closing and super().check_periodic()
-
-        async def close(self) -> None:
-            self._closing = True
-            for pair in self._check_list:
-                if pair.task is not None:
-                    pair.task.cancel()
-            await super().close()
 
         async def get_component_candidates(
             self,
@@ -391,10 +371,9 @@ class RtcEcho:
         self.port_range = port_range
         self.sessions: dict[str, Session] = {}
         self._reaper: asyncio.Task[None] | None = None
-        if self.enabled:
+        if self.enabled and port_range is not None:
             # aiortc builds its ICE connections from this module-level name. Outside
-            # answer(), or without a port range, the subclass only stops a closed
-            # connection's checks and its connect().
+            # answer(), the subclass behaves like aioice's own.
             rtcicetransport.Connection = _PortRangeConnection  # ty: ignore[invalid-assignment]
 
     def start(self) -> None:

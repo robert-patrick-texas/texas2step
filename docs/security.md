@@ -313,6 +313,9 @@ texas2step can't do these for you:
 
 * Serve it over HTTPS only ([On the wire](#on-the-wire)).
 * Keep Ubuntu, nginx and OpenSSL patched (`unattended-upgrades` does this by default).
+* Keep texas2step updated (`texas2step update`, or a newer container image). It brings its
+  own Python, with the OpenSSL and SQLite built into it, so their fixes arrive in
+  texas2step's releases, not in Ubuntu's updates.
 * Floods that fill the link before they reach the server: that is for your provider or a
   scrubbing service.
 * Use `access_digits = 4`, standing phrases of several unrelated words, and keep the

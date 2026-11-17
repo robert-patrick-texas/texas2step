@@ -3,49 +3,35 @@
 # operators' setup tool for it. The version comes from src/texas2step/__init__.py, the
 # only place it is set.
 #
-# The package carries a self-contained virtualenv at /opt/texas2step/venv that runs on
-# the system Python and holds compiled wheels (aiortc, cryptography, ...). So build on
-# the release the package is for: Ubuntu 26.04 (Python 3.14) on the same architecture.
-# Needs uv, dpkg-deb and objdump (binutils); runs lintian too if it is installed.
+# The package carries its own Python at /opt/texas2step/python, the version in
+# .python-version, and a self-contained virtualenv on it at /opt/texas2step/venv with
+# compiled wheels (aiortc, cryptography, ...), both made by build-runtime.sh. Build on
+# Ubuntu 26.04, on the architecture the package is for. Needs uv, dpkg-deb and objdump
+# (binutils); runs lintian too if it is installed.
 #
 #   packaging/build-deb.sh              # or: make deb
-#   REVISION=2 packaging/build-deb.sh   # a packaging-only update of the same version
+#   REVISION=2 packaging/build-deb.sh   # a packaging-only update of the same version,
+#                                       # such as a Python security release
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
-python=${PYTHON:-/usr/bin/python3}
 revision=${REVISION:-1}
 version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/texas2step/__init__.py)
+python_version=$(tr -d '[:space:]' < .python-version)
+pyver=${python_version%.*}
 arch=$(dpkg --print-architecture)
-read -r pyver pynext < <("$python" -c 'import sys; v = sys.version_info; print(f"{v[0]}.{v[1]} {v[0]}.{v[1] + 1}")')
 name="texas2step-${version}-${revision}-${arch}"
 work=build/deb
 stage="$work/$name"
-venv="$stage/opt/texas2step/venv"
 
-echo "building $name.deb (Python $pyver from $python)"
+echo "building $name.deb (Python $python_version)"
 rm -rf "$work"
 mkdir -p "$stage/DEBIAN" "$stage/usr/bin" dist
 
-# 1. The application and its locked dependencies in a relocatable virtualenv. The
-#    web UI is prebuilt under src/texas2step/static, so Node is not needed here.
-uv build --quiet --wheel --out-dir "$work/wheel"
-uv export --quiet --frozen --no-default-groups --no-emit-project --format requirements-txt \
-    --output-file "$work/requirements.txt"
-uv venv --quiet --relocatable --python "$python" "$venv"
-uv pip install --quiet --python "$venv/bin/python" -r "$work/requirements.txt"
-# --no-cache: uv would otherwise reuse a wheel it cached for this same version number
-# from an earlier build, and ship stale code.
-uv pip install --quiet --python "$venv/bin/python" --no-deps --no-index --no-cache \
-    --find-links "$work/wheel" "texas2step==$version"
-rm -f "$venv/.lock" "$venv/.gitignore"
-# The installed package must be exactly what is in src/ now.
-if ! diff -rq --exclude=__pycache__ src/texas2step "$venv/lib/python$pyver/site-packages/texas2step"; then
-    echo "error: the packaged texas2step differs from src/texas2step" >&2
-    exit 1
-fi
+# 1. Python and the application, with its locked dependencies, under /opt/texas2step.
+packaging/build-runtime.sh "$stage/opt/texas2step"
 
 # 2. System integration. Files under /etc become conffiles, so local edits survive
 #    upgrades.
@@ -85,11 +71,12 @@ find "$stage/opt" -type f \( -name '*.so' -o -name '*.so.*' -o -name '*.py' \) -
 
 # 4. Package metadata.
 size=$(du -sk --exclude=DEBIAN "$stage" | cut -f1)
-# The newest glibc symbol version any bundled binary needs.
-glibc=$(find "$stage/opt" -type f -name '*.so*' -exec objdump -T {} + 2>/dev/null \
+# The newest glibc symbol version any bundled binary needs, Python's own included.
+glibc=$(find "$stage/opt" -type f \( -name '*.so*' -o -path "*/python/bin/python$pyver" \) \
+    -exec objdump -T {} + 2>/dev/null \
     | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
 sed -e "s/@VERSION@/${version}-${revision}/" -e "s/@ARCH@/$arch/" -e "s/@SIZE@/$size/" \
-    -e "s/@PYVER@/$pyver/" -e "s/@PYNEXT@/$pynext/" -e "s/@GLIBC@/${glibc:-2.34}/" \
+    -e "s/@GLIBC@/${glibc:-2.34}/" \
     packaging/debian/control > "$stage/DEBIAN/control"
 install -m755 packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm "$stage/DEBIAN/"
 (cd "$stage" && find etc -type f | sed 's|^|/|' | sort) > "$stage/DEBIAN/conffiles"

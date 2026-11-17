@@ -23,6 +23,8 @@ dependencies = [
     "httpx>=0.27",
     "websockets>=13",
     "aiortc>=1.9",
+    # rtc.py uses aioice directly. 0.12.1 ends a closed connection's checks and connect().
+    "aioice>=0.12.1",
 ]
 
 [project.urls]
@@ -51,6 +53,12 @@ docs = [
 default-groups = ["dev", "docs"]
 # The version is read from __init__.py, so reinstall the project when that file changes.
 cache-keys = [{ file = "pyproject.toml" }, { file = "src/texas2step/__init__.py" }]
+
+# Components scripts/upgrade.py (make upgrade) leaves where they are, because their newest
+# release failed the tests. Each says why, and since when; try again at the next release.
+#   "<kind>:<name>" = "<reason>"   kinds: python, pypi, npm, go, image, action, tool
+#   e.g. "npm:esbuild" = "0.29.0 breaks the bundle's source maps (2026-12-01)"
+[tool.texas2step.upgrade-hold]
 
 [build-system]
 requires = ["hatchling>=1.27", "hatch-fancy-pypi-readme>=24"]

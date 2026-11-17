@@ -46,8 +46,14 @@ were also checked, and cost nothing once over:
   to an idle worker.
 
 If the workers use CPU with nothing to serve, the journal says so (see below). Then
-`py-spy top --pid <worker>`, run as root, shows which Python function is using it.
-py-spy is a separate tool: `pip install py-spy`.
+Python's own profiler, run as root, shows which Python function is using it, live:
+
+```console
+$ sudo /opt/texas2step/venv/bin/python -m profiling.sampling attach --live <worker>
+```
+
+`dump <worker>` in place of `attach --live` prints each thread's stack once. py-spy
+works too: `uv tool install py-spy`, then `sudo ~/.local/bin/py-spy top --pid <worker>`.
 
 ## Use it
 

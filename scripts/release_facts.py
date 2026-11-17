@@ -4,7 +4,7 @@ of code by language. Run it after make deb and make t2s, from the tree being rel
     make -s facts
 
 The versions come from what was built, where they can. The Python packages, and the
-Python the server package needs, come from dist/texas2step-<version>-1-amd64.deb. The Go
+Python the server package ships, come from dist/texas2step-<version>-1-amd64.deb. The Go
 version and modules come from dist/t2s-linux-amd64's build information. The rest come
 from the files that pin them.
 
@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tokenize
 import tomllib
 from collections import defaultdict
@@ -53,10 +54,26 @@ def deb_packages(listing: str) -> dict[str, str]:
     return dict(sorted((canonical(name), ver) for name, ver in found))
 
 
-def deb_python(depends: str) -> str:
-    """The Python a server package needs, from its Depends: python3 (>= 3.14), ..."""
-    found = re.search(r"python3 \(>= ([0-9.]+)\)", depends)
+def deb_python(pyvenv: str) -> str:
+    """The Python a server package ships, from its virtualenv's pyvenv.cfg."""
+    found = re.search(r"^version_info = ([0-9.]+)", pyvenv, re.M)
     return found[1] if found else "?"
+
+
+def deb_file(deb: Path, path: str) -> str:
+    """The text of one file in a .deb, or "" if it has none there."""
+    try:
+        data = subprocess.run(
+            ["dpkg-deb", "--fsys-tarfile", str(deb)], capture_output=True, check=True
+        ).stdout
+    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(f"release_facts: dpkg-deb --fsys-tarfile {deb}: {exc}") from None
+    with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+        try:
+            member = tar.extractfile(f"./{path}")
+        except KeyError:
+            return ""
+        return member.read().decode() if member else ""
 
 
 def go_build(info: str) -> tuple[str, dict[str, str]]:
@@ -146,7 +163,7 @@ def versions(dist: Path, root: Path = ROOT) -> Versions:
     packages.pop("texas2step", None)
     go, modules = go_build(run(shutil.which("go") or "go", "version", "-m", str(t2s)))
     return Versions(
-        python=deb_python(run("dpkg-deb", "-f", str(deb), "Depends")),
+        python=deb_python(deb_file(deb, "opt/texas2step/venv/pyvenv.cfg")),
         python_packages=packages,
         python_direct=direct_python(root),
         go=go,
@@ -428,7 +445,7 @@ def render(v: Versions, lines: Lines) -> str:
         "",
         "| Part | Version |",
         "|---|---|",
-        f"| Python, for the server package | {v.python} |",
+        f"| Python, in the server package and the container | {v.python} |",
         f"| Its Python packages | {_names(v.python_direct, v.python_packages)}, "
         f"and the {others_py} they need |",
         f"| Go, for t2s | {v.go} |",
@@ -441,7 +458,7 @@ def render(v: Versions, lines: Lines) -> str:
         f"| nfpm, which builds the t2s package | {p['nfpm']} |",
         "",
         "The server package installs exactly these Python packages. The Python package on PyPI "
-        "takes `pyproject.toml`'s lowest versions, so pip and uv may install newer ones.",
+        "takes `pyproject.toml`'s lowest versions, so `uv tool install` may install newer ones.",
         "",
         f"<details><summary>Every package: {len(v.python_packages)} Python, "
         f"{len(v.go_modules)} Go</summary>",

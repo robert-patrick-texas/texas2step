@@ -4,46 +4,43 @@
 #
 #   docker build -t texas2step .        # or: make image
 #
-# Built on Ubuntu 26.04 like the Debian package, so the image runs the same Python and
-# nginx. The web UI is prebuilt under src/texas2step/static, so Node is not needed.
+# Built on Ubuntu 26.04 like the Debian package, with the same nginx, and the same Python
+# and packages under /opt/texas2step: packaging/build-runtime.sh makes both. The web UI
+# is prebuilt under src/texas2step/static, so Node is not needed.
 
 ARG UBUNTU=ubuntu:26.04
 
-# --- 1. The application and its locked dependencies in a virtualenv ----------------------
+# --- 1. texas2step's own Python, and the application with its locked dependencies -------
 # uv, pinned by digest as the workflows pin their actions.
-FROM ghcr.io/astral-sh/uv:0.13.6@sha256:af22a52f5eafef3d78e551599d405c02df61919d18028f0cea8eda93bc9986d0 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 FROM ${UBUNTU} AS build
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=uv /uv /usr/local/bin/uv
 
 WORKDIR /src
-COPY pyproject.toml uv.lock README.md LICENSE.md ./
+COPY .python-version pyproject.toml uv.lock README.md LICENSE.md ./
 COPY src ./src
-# The same steps as packaging/build-deb.sh: exactly the versions in uv.lock, then the
-# wheel built from this source.
-ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_NO_CACHE=1
-RUN uv build --quiet --wheel --out-dir /tmp/wheel \
-    && uv export --quiet --frozen --no-default-groups --no-emit-project \
-        --format requirements-txt --output-file /tmp/requirements.txt \
-    && uv venv --quiet --relocatable --python /usr/bin/python3 /opt/texas2step/venv \
-    && uv pip install --quiet --python /opt/texas2step/venv/bin/python -r /tmp/requirements.txt \
-    && uv pip install --quiet --python /opt/texas2step/venv/bin/python --no-deps --no-index \
-        --find-links /tmp/wheel texas2step \
-    && rm -f /opt/texas2step/venv/.lock /opt/texas2step/venv/.gitignore \
-    && /opt/texas2step/venv/bin/python -m compileall -q -j 0 /opt/texas2step/venv/lib
+COPY packaging/build-runtime.sh ./packaging/
+# Python only as build-runtime.sh asks for it, from .python-version.
+ENV UV_PYTHON_DOWNLOADS=manual UV_LINK_MODE=copy UV_NO_CACHE=1
+RUN packaging/build-runtime.sh /opt/texas2step \
+    && /opt/texas2step/venv/bin/python -m compileall -q -j 0 /opt/texas2step/python/lib \
+        /opt/texas2step/venv/lib
 
 # --- 2. The image ------------------------------------------------------------------------
 FROM ${UBUNTU}
 
-# python3: the virtualenv runs on it. nginx: TLS, HTTP/2 and HTTP/3 in front of the
-# server, as with the package. tini: PID 1, which hands signals on and reaps processes.
-# openssl: a self-signed certificate when none is mounted.
+# nginx: TLS, HTTP/2 and HTTP/3 in front of the server, as with the package. tini: PID 1,
+# which hands signals on and reaps processes. openssl: a self-signed certificate when
+# none is mounted. Python comes with texas2step, under /opt/texas2step; tzdata, netbase
+# and media-types are what it reads from the system, as the package depends on them.
 RUN apt-get update \
     && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends python3 nginx tini openssl ca-certificates \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        nginx tini openssl ca-certificates tzdata netbase media-types \
     && rm -rf /var/lib/apt/lists/* /etc/nginx/sites-enabled/* \
     # The service's own account, with fixed numbers so the volumes keep their owner
     # from one image to the next.
@@ -54,7 +51,7 @@ RUN apt-get update \
     && ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log
 
-COPY --from=build /opt/texas2step/venv /opt/texas2step/venv
+COPY --from=build /opt/texas2step /opt/texas2step
 RUN ln -s /opt/texas2step/venv/bin/texas2step /usr/bin/texas2step
 
 # nginx: the package's own snippets, unchanged, and this image's main file.

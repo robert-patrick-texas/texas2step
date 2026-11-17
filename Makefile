@@ -1,4 +1,4 @@
-.PHONY: dev web web-watch test lint fmt check docs docs-watch sheet deb image version facts upgrade t2s t2s-deb t2s-test
+.PHONY: dev web web-watch test lint fmt check docs docs-watch sheet deb image version facts outdated upgrade t2s t2s-deb t2s-test
 
 # t2s, the Go client: the platforms it is built for (Go's names; darwin is macOS), each a
 # file of its own in dist/.
@@ -39,13 +39,13 @@ sheet:          ## print the one-page sheet on US Letter and A4 (docs/at-a-glanc
 deb:            ## build dist/texas2step-<version>-1-amd64.deb and dist/texas2step-setup (Ubuntu 26.04)
 	packaging/build-deb.sh
 
-upgrade:        ## move every dependency to its newest release, then rebuild the UI
-	uv lock --upgrade
+outdated:       ## list what has a newer stable release: Python, packages, modules, pins, tools
+	uv run python scripts/upgrade.py --check
+
+upgrade:        ## move every component to its newest stable release, then rebuild the UI
+	uv run python scripts/upgrade.py
 	uv sync
-	cd web && npm install --save-dev --save-exact $$(node -p \
-	    "Object.keys(require('./package.json').devDependencies).map((d) => d + '@latest').join(' ')")
 	$(MAKE) web
-	cd t2s && go get -u ./... && go mod tidy
 
 image:          ## build the container image texas2step:<version> for this machine (docs/container.md)
 	@v=$$($(MAKE) -s version); docker build -t texas2step:$$v --build-arg VERSION=$$v .

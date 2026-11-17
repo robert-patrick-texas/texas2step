@@ -50,7 +50,9 @@ from .config import Settings
 CACHE = Path("/var/cache/texas2step/update")
 # In a folder only root writes: in /run/lock anyone could take it first and hold it.
 LOCK = CACHE.parent / "update.lock"
-PYTHON = "/usr/bin/python3"  # the setup tool runs on the system's Python, as by hand
+# The setup tool runs on the system's Python, as by hand; on a host without one, on the
+# package's own.
+PYTHON = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
 SETUP = "texas2step-setup"
 PLAN = "texas2step-plan.json"
 SCRIPT = "texas2step-install.sh"

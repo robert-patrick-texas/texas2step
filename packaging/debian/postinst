@@ -6,9 +6,10 @@ if [ "$1" = "configure" ]; then
         adduser --system --group --home /var/lib/texas2step --no-create-home \
             --quiet texas2step
     fi
-    # Byte-compile once here: the service cannot write into /opt at run time.
-    /opt/texas2step/venv/bin/python -m compileall -q -j 0 /opt/texas2step/venv/lib \
-        >/dev/null 2>&1 || true
+    # Byte-compile once here, Python's own library too: the service cannot write into
+    # /opt at run time.
+    /opt/texas2step/venv/bin/python -m compileall -q -j 0 /opt/texas2step/python/lib \
+        /opt/texas2step/venv/lib >/dev/null 2>&1 || true
     # A random access key of this server's own (docs/access.md), unless it has one: the
     # codes and words an organization uses come from it, so no two installs share them.
     # Readable by root and the service's group only. It stays put on upgrades.

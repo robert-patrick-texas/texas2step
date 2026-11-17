@@ -1,5 +1,7 @@
 # The container image (Dockerfile) is built from these files only.
 *
+!.python-version
+!packaging/build-runtime.sh
 !pyproject.toml
 !uv.lock
 !README.md

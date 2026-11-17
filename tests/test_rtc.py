@@ -371,15 +371,16 @@ async def test_stun_candidates_come_from_the_ranged_sockets(peers):
 
 
 async def test_a_connection_closed_during_its_checks_sends_nothing_more():
-    # aioice keeps starting the checks still waiting after a close, and leaves those under
-    # way to retry: each send then goes to a closed socket, an error asyncio raises into
-    # the check, logged once nothing holds the task. Closing ends connect() too: nothing
-    # cancels it, as nothing does on a server.
+    # Before 0.12.1, aioice kept starting the checks still waiting after a close, and left
+    # those under way to retry: each send then went to a closed socket, an error asyncio
+    # raises into the check, logged once nothing holds the task. Closing ends connect()
+    # too: nothing cancels it, as nothing does on a server. aioice's own Connection, as a
+    # session without a port range uses.
     errors: list[dict[str, Any]] = []
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(lambda _, context: errors.append(context))
     try:
-        conn = rtc._PortRangeConnection(ice_controlling=True, use_ipv6=False)
+        conn = rtc.Connection(ice_controlling=True, use_ipv6=False)
         await conn.gather_candidates()
         conn.remote_username, conn.remote_password = "peer", "password-nobody-checks"
         for port in range(29200, 29210):  # nothing listens there
@@ -403,9 +404,10 @@ async def test_a_connection_closed_during_its_checks_sends_nothing_more():
 async def test_a_connection_closed_before_any_check_arrives_stops_connecting():
     # Chrome's offer names its addresses by mDNS, which the server leaves out, and never
     # says its candidates have ended; when its UDP never arrives there is nothing to
-    # check. Before, connect() then woke every 20 ms for as long as the worker ran, the
-    # session long closed: idle workers at 40% of a core after a day of such offers.
-    conn = rtc._PortRangeConnection(ice_controlling=False, use_ipv6=False)
+    # check. Before aioice 0.12.1, connect() then woke every 20 ms for as long as the
+    # worker ran, the session long closed: idle workers at 40% of a core after a day of
+    # such offers.
+    conn = rtc.Connection(ice_controlling=False, use_ipv6=False)
     await conn.gather_candidates()
     conn.remote_username, conn.remote_password = "peer", "password-nobody-checks"
     connecting = asyncio.create_task(conn.connect())
@@ -418,10 +420,11 @@ async def test_a_connection_closed_before_any_check_arrives_stops_connecting():
 
 async def test_a_session_closed_while_checking_leaves_nothing_running(peers, monkeypatch):
     # The reaper closes a session that never sent a probe after 30 s; a block, a failed
-    # connection or the server's stop close it too. Without a port range, as by default.
+    # connection or the server's stop close it too. Without a port range, as by default,
+    # aiortc keeps aioice's own Connection.
     monkeypatch.setattr(rtc.rtcicetransport, "Connection", rtc.Connection)
     echo = RtcEcho([], max_sessions=4, timeout=60)
-    assert issubclass(rtc.rtcicetransport.Connection, rtc._PortRangeConnection)
+    assert rtc.rtcicetransport.Connection is rtc.Connection
     pc, _ = await offer(peers)
     sdp = pc.localDescription.sdp
     lost = re.sub(r"^a=(candidate:.*|end-of-candidates)\r?\n", "", sdp, flags=re.M)

@@ -186,7 +186,8 @@ What the package installs:
 
 | Path | Purpose |
 |---|---|
-| `/opt/texas2step/venv` | The application and every Python library it needs, self-contained. It runs on the system's Python 3.14. |
+| `/opt/texas2step/python` | texas2step's own Python (3.15), so it runs on a current Python, not the system's. Its updates come with texas2step's. |
+| `/opt/texas2step/venv` | The application and every Python library it needs, self-contained, on that Python. |
 | `/usr/bin/texas2step` | The command-line tool (`texas2step --help`) |
 | `texas2step.service` | systemd service, enabled at boot, running as the `texas2step` system user |
 | `/etc/texas2step/config.toml` | Settings; see [Configuration](configuration.md) |
