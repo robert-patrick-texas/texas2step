@@ -233,6 +233,54 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
   library could do the same for the Python one: `psutil.net_if_addrs()` lists each
   interface's link-layer address.
 
+### Themes
+
+- [ ] **The themes in one file other projects can use.** Each theme is a block of CSS
+  variables in `web/src/styles.css`. Light is the base, and the others restate only what
+  they change: Dark sets 34 of the 48 variables, the five named themes 39, and none
+  restates the status colours, the fonts or the urgent button. Each theme's own touches
+  are rules on the page's parts: Federal's and Military's dark masthead, the lines under
+  the header in Texas and Energy, America's frame, the backdrop patterns, Military's
+  capitals. The packet grid's two green scales are in `charts/packets.ts`, and the theme
+  names are listed in four places (`ui/theme.ts`, `config.py`, the inline script in
+  `index.html` and `config_template.toml`).
+  - **One source, in layers:** a JSON file with a version, the list of elements (each
+    one's key, group, type and what it's for) and the values in three layers: a base
+    every theme shares, the validated light or dark set (series colours, the packet
+    scale, the default metal), then each theme's own changes. A value may name another
+    element, `{accent-2}`, or that colour at an opacity, `{page@0.72}`.
+  - **Flat output, no gaps:** the build works out every value and writes each theme
+    complete, the same 90 elements in the same order, with `none`, `0px` or `transparent`
+    where a theme draws nothing:
+    - `themes.json`, with a JSON Schema that requires every element and allows no other;
+    - `themes.css`, a `data-theme` block for each theme, and Light or Dark by the OS for
+      Match system;
+    - one CSS file for each theme;
+    - a plain colour beside each gradient, for uses that can't draw one.
+  - **Touches as elements:** each of these becomes an element:
+    - the header's own colours, rule and line;
+    - the current tab's background and underline;
+    - the case of tabs and headings;
+    - the backdrop's glows, pattern, mask and grain;
+    - the frame's colours and widths.
+
+    One set of rules then draws every theme, and no rule names a theme.
+  - **texas2step built from it:** `web/build.mjs` writes the CSS variable blocks and the
+    TypeScript list from the file. `config.py` and the inline script read the theme names
+    from it, and a test checks that they agree. `styles.css` keeps the layout and
+    components, and `charts/packets.ts` and `ui/link.ts` read the scale and the blend from
+    variables. A browser check compares every computed value before and after, theme by
+    theme.
+  - **Published:** `themes.json`, its schema, `themes.css` and the files for each theme,
+    on each release. Renaming or removing an element is a new major version of the file;
+    adding one is a minor version.
+  - **To decide:**
+    - whether texas2step takes the file's element names (`--ink-secondary` for
+      `--ink-2`, `--accent-1` for `--sun-1`) or the build maps them to the current ones;
+    - how America's frame, which grows with texas2step's 1240px column, is written for
+      other projects;
+    - where the file is published: on the release only, or as a package too.
+
 ### Languages
 
 - [ ] **Spanish.** The pages, the code screen and their messages in Spanish as well as
@@ -242,6 +290,46 @@ Ways to run a server beyond the Debian package on an Ubuntu host.
   operator's own text (`brand_notice`, `access_note`, the footer) stays as written, and the
   documentation stays in English. A large job, and each new label needs its translation
   from then on.
+  - **How much:** about 650 English strings in `web/src`, most of them in `views/test.ts`,
+    `help.ts`, `diag.ts`, `monitor.ts`, `api.ts` and `history.ts`. Many are sentences put
+    together in code with English plurals (`session${n === 1 ? "" : "s"}`). Those become
+    messages with placeholders and Spanish plural rules (`Intl.PluralRules`). The Help tab
+    is the largest piece.
+  - **What already helps:**
+    - Results store keys, not words: a call rating is saved as `excellent` and shown as
+      "Excellent". So results, the API and History stay as they are.
+    - Bufferbloat grades and the units (Mbps, ms, 10s) read the same in Spanish.
+    - Numbers and dates already use the browser's locale through `Intl`. They would
+      follow the chosen language instead, since a Spanish browser gets "1.234,5" on the
+      English page today.
+  - **Step 1, the English table:** every string moves into a table, read through a
+    `t("key", {n})` helper typed from that table. A key missing from the Spanish table
+    then fails `tsc`, and a test checks that both tables have the same keys and
+    placeholders. The pages look exactly as before, which screenshots confirm.
+  - **Step 2, choosing a language:**
+    - the browser's language first;
+    - a picker in the header, which `header_language` hides as `header_theme` does;
+    - a `default_language` setting;
+    - the choice saved as `t2s.lang` and applied before first paint by the inline script,
+      as the theme is;
+    - `<html lang>` set to match.
+  - **Step 3, the server's messages:** errors from the API that the page shows
+    (`gate.ts`, `history.ts`) arrive as codes, and the page words them in the chosen
+    language. The English defaults of `brand_tagline` and `access_note` are translated.
+  - **Step 4, the Spanish table:** written, then checked by a fluent speaker who knows the
+    technical terms (latencia, pérdida de paquetes, jitter, bufferbloat).
+  - **Step 5, the layout:** Spanish runs about 15-30% longer. Every page is checked in both
+    languages at 1366x768 and on a phone, with units still never wrapping.
+  - **Theme labels** stay in English in the theme file (see [Themes](#themes)).
+    texas2step's Spanish table names them by theme id.
+  - **To decide:**
+    - which Spanish: Latin American, perhaps Mexican, suits callers in Texas;
+    - whether operators get Spanish versions of their own text (`[brand.es]`);
+    - whether access-code words and support phrases get a Spanish list beside
+      `words.txt`, since callers read them aloud to a desk;
+    - whether the `texas2step` command, `t2s`, the man page and the API explorer stay in
+      English, as the documentation does. The API explorer is Swagger UI, which comes in
+      English only.
 
 ### Dependencies
 
