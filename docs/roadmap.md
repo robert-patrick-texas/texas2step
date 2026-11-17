@@ -345,7 +345,7 @@ Worth considering, not urgent, and perhaps not needed.
 
 Newest first. Each release's notes have the details and its upgrade steps.
 
-### Unreleased
+### [2.19.0](https://github.com/robert-patrick-texas/texas2step/releases/tag/v2.19.0) (2026-11-17)
 
 - [x] **Its own Python:** the Debian package and the container image run Python 3.15 from
   `/opt/texas2step/python`, not Ubuntu's 3.14, and the package no longer depends on
