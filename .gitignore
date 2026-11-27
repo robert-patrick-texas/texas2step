@@ -14,3 +14,9 @@ web/node_modules/
 html/
 /t2s/t2s
 /t2s/t2s.exe
+
+# Local notes and status files a developer keeps beside the tree; never committed
+/STATUS.md
+/CLAUDE.local.md
+/local-notes/
+.claude/settings.local.json
